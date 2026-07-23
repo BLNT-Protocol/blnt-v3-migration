@@ -52,5 +52,15 @@ For a multi-asset activation formula, test:
 4. An isolated public-testnet deployment of an incumbent v2 stack and a v3
    candidate stack.
 
+The Protocol-27 migration harness MUST load v2 WASM compiled by the frozen
+SDK-22 workspace. It MUST NOT recompile the v2 contracts against SDK 27 merely
+to make them share the v3 crate graph. This verifies the actual compatibility
+boundary: historical contract bytecode executing on a current host and
+interacting with SDK-27 v3 bytecode.
+
+The initial compatibility probe MUST invoke at least one v2 backstop entry point
+through SDK-27 WASM. The migration harness MUST expand this coverage to the
+complete emitter swap flow when the first candidate backstop is implemented.
+
 Public testnet should use independently issued test assets rather than relying
 on the supply of official test BLND or USDC.

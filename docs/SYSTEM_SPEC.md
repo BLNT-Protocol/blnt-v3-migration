@@ -24,6 +24,20 @@ requirements.
 
 ## 2. System boundaries
 
+### 2.0 Runtime baselines
+
+The candidate is developed in two independent toolchain lanes:
+
+- The incumbent v2 test baseline MUST remain on Rust 1.81 and Soroban SDK
+  22.0.7.
+- New v3 contracts MUST target Stellar Protocol 27 with Rust 1.91.0, Soroban
+  SDK 27.0.2, and the `wasm32v1-none` target.
+- The project MUST NOT introduce an SDK 26 compatibility lane.
+
+Cross-version acceptance is based on migration behavior, contract interfaces,
+authorization, state transitions, and accounting invariants. It does not
+require v3 source code to compile against intermediate SDK versions.
+
 ### 2.1 In scope
 
 - V3 backstop accounting and custody.

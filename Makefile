@@ -3,6 +3,14 @@ default: build
 test: build
 	cargo test --all --tests
 
+test-all: test check-v3
+
+check-v3: build
+	cargo +1.91.0 fmt --manifest-path v3/Cargo.toml --all -- --check
+	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked
+	cargo +1.91.0 check --manifest-path v3/Cargo.toml --all-targets --locked
+	cargo +1.91.0 test --manifest-path v3/Cargo.toml --workspace --locked
+
 build:
 	cargo rustc --manifest-path=pool-factory/Cargo.toml --crate-type=cdylib --target=wasm32-unknown-unknown --release
 	cargo rustc --manifest-path=backstop/Cargo.toml --crate-type=cdylib --target=wasm32-unknown-unknown --release

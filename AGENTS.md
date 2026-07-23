@@ -41,6 +41,12 @@ side effect of work in this repository.
 
 ## Baseline architecture
 
+- The repository root is the frozen incumbent v2 workspace. It MUST remain on
+  Rust 1.81 and Soroban SDK 22.0.7.
+- New v3 code belongs in the independent `v3/` workspace. It MUST target
+  Protocol 27 with Rust 1.91.0, Soroban SDK 27.0.2, and `wasm32v1-none`.
+- Do not add an SDK 26 compatibility lane. Migration compatibility is tested
+  against the SDK-22 v2 contracts and deployed emitter behavior.
 - Keep the incumbent v2 implementation available for side-by-side migration
   tests.
 - Prefer new v3 crates or clearly isolated v3 modules over rewriting the only
@@ -92,8 +98,11 @@ Useful commands:
 ```bash
 cargo fmt --all -- --check
 cargo test -p test-suites --test test_v2_to_v3_candidate
+cargo +1.91.0 check --manifest-path v3/Cargo.toml --all-targets --locked
 make
 make test
+make check-v3
+make test-all
 ```
 
 Run the targeted test during iteration. Run `make test` before handing off a

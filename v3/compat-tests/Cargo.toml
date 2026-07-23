@@ -1,0 +1,13 @@
+[package]
+name = "blend-v3-compat-tests"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

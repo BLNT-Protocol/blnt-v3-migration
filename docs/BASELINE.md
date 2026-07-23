@@ -36,9 +36,17 @@ Before changing protocol behavior:
    design document.
 4. Add a regression test before changing an existing invariant.
 
-Do not silently upgrade the inherited v2 toolchain while establishing the
-baseline. The v3 toolchain and WASM target can be upgraded separately, with
-explicit compatibility tests against the deployed legacy emitter.
+Do not upgrade the inherited v2 toolchain. The repository root remains frozen
+on Rust 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
+
+New v3 implementation work belongs in the independent `v3/` workspace, which
+targets Protocol 27 using Rust 1.91.0, Soroban SDK 27.0.2, and
+`wasm32v1-none`. There is intentionally no SDK 26 compatibility lane.
+Compatibility is defined by migration behavior between the historical v2
+contracts, the deployed legacy emitter boundary, and the current v3 candidate.
+
+Updating the v3 SDK or protocol target is an explicit maintenance change and
+must not modify the root v2 dependency graph or `Cargo.lock`.
 
 ## Initial contract roles
 

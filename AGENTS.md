@@ -97,10 +97,9 @@ Useful commands:
 
 ```bash
 cargo fmt --all -- --check
-cargo test -p test-suites --test test_v2_to_v3_candidate
-cargo +1.91.0 check --manifest-path v3/Cargo.toml --all-targets --locked
 make
 make test
+make test-v2-migration
 make check-v3
 make test-all
 ```

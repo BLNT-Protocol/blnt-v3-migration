@@ -14,6 +14,10 @@ The test suite must verify:
   queue period.
 - A balance deficit permits cancellation and prevents finalization.
 - Finalization cannot occur before the 31-day unlock time.
+- Finalization distributes emissions accrued through the finalization timestamp
+  to the incumbent before changing the registered backstop.
+- The candidate's ongoing-emission clock starts at the finalization timestamp;
+  it receives no ongoing emissions for the pre-finalization interval.
 - Finalization moves BLND emissions from the incumbent to the candidate.
 - The newly queued designated token is used for the next migration.
 - The initial BLND drop and backfilled emissions cannot be claimed twice.

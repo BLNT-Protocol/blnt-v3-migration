@@ -96,8 +96,13 @@ The candidate MUST account for the following behavior:
 7. Finalization is unavailable until the 31-day queue expires.
 8. Finalization registers both the new backstop and the token that will be used
    to compare the next migration.
-9. The emitter sends ongoing BLND emissions to one registered backstop address.
-10. The emitter permits one initial drop per registered backstop, with an
+9. Finalization distributes all BLND accrued through the finalization timestamp
+   to the incumbent backstop before changing the registered backstop.
+10. Finalization initializes the candidate's ongoing-distribution clock at the
+    finalization timestamp, so the candidate does not receive ongoing emissions
+    for the pre-finalization interval.
+11. The emitter sends ongoing BLND emissions to one registered backstop address.
+12. The emitter permits one initial drop per registered backstop, with an
     aggregate maximum of 50 million BLND.
 
 The emitter performs a raw token-balance comparison. It does not calculate
@@ -166,7 +171,10 @@ During the 31-day queue:
 Finalization MUST:
 
 - Verify that the emitter now recognizes the candidate.
-- Establish an unambiguous cutoff for pre-migration backfill.
+- Use the emitter finalization timestamp as the unambiguous cutoff between
+  pre-migration backfill and ongoing candidate emissions.
+- Account for the emitter's final pre-swap distribution to the incumbent
+  without crediting it to candidate depositors.
 - Stop new accrual under the pre-migration backfill regime.
 - Activate the post-migration emission policy.
 - Preserve each depositor's enforceable legacy claim.

@@ -59,7 +59,7 @@ make test
 Run the candidate migration baseline:
 
 ```bash
-cargo test -p test-suites --test test_v2_to_v3_candidate
+make test-v2-migration
 ```
 
 Check the v3 workspace with its pinned current toolchain:

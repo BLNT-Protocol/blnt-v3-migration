@@ -3,6 +3,9 @@ default: build
 test: build
 	cargo test --all --tests
 
+test-v2-migration: build
+	cargo test -p test-suites --test test_v2_to_v3_candidate --locked
+
 test-all: test check-v3
 
 check-v3: build
@@ -36,6 +39,7 @@ fmt:
 
 clean:
 	cargo clean
+	cargo +1.91.0 clean --manifest-path v3/Cargo.toml
 
 generate-js:
 	stellar contract bindings typescript --overwrite \

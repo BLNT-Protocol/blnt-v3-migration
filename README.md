@@ -25,7 +25,8 @@ Reusable Git dependencies are kept beside this repository:
 - The pinned `moderc3156` interface is vendored in `vendor/moderc3156` so fresh
   clones and CI builds do not need to fetch the Git repository.
 
-See [docs/BASELINE.md](docs/BASELINE.md) for the baseline policy and
+See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the candidate requirements,
+[docs/BASELINE.md](docs/BASELINE.md) for the baseline policy, and
 [docs/MIGRATION_TEST_PLAN.md](docs/MIGRATION_TEST_PLAN.md) for the migration
 test requirements.
 

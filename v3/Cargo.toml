@@ -1,6 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["backstop", "compat-probe", "compat-tests", "pool", "pool-factory"]
+members = [
+    "backstop",
+    "compat-probe",
+    "compat-tests",
+    "pool",
+    "pool-factory",
+    "test-valuation-adapter",
+]
 
 [workspace.package]
 edition = "2021"

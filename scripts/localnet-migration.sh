@@ -33,6 +33,7 @@ V2_POOL_WASM="${ROOT_DIR}/target/wasm32-unknown-unknown/optimized/pool.wasm"
 V3_FACTORY_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_pool_factory.wasm"
 V3_BACKSTOP_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_backstop.wasm"
 V3_POOL_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_pool.wasm"
+V3_TEST_VALUATION_ADAPTER_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_test_valuation_adapter.wasm"
 
 EXPECTED_EMITTER_SHA256="438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89"
 EMITTER_WASM=""
@@ -141,6 +142,7 @@ validate_artifacts() {
         "${V3_FACTORY_WASM}" \
         "${V3_BACKSTOP_WASM}" \
         "${V3_POOL_WASM}" \
+        "${V3_TEST_VALUATION_ADAPTER_WASM}" \
         "${EMITTER_WASM}"
     do
         [[ -s "${artifact}" ]] || die "missing or empty WASM artifact: ${artifact}"
@@ -522,7 +524,8 @@ command_start() {
 command_deploy() {
     local operator depositor issuer emitter_id blnd_id legacy_token_id next_token_id prefund_token_id
     local v2_pool_hash incumbent_id v2_factory_id deployed_incumbent_id
-    local v3_pool_hash candidate_id v3_factory_id deployed_candidate_id pool_id pool_raw
+    local valuation_adapter_id v3_pool_hash candidate_id v3_factory_id deployed_candidate_id
+    local pool_id pool_raw
     local incumbent_balance candidate_balance begin_raw epoch_start queued_swap unlock_time
     local queued_candidate queued_next_token
 
@@ -565,6 +568,14 @@ command_deploy() {
     state_set "legacy_backstop_token" "${legacy_token_id}"
     state_set "next_backstop_token" "${next_token_id}"
     state_set "prefund_token" "${prefund_token_id}"
+
+    # This deterministic one-to-one fixture exercises the immutable valuation
+    # boundary locally. It is deliberately not a production pricing source.
+    valuation_adapter_id="$(deploy_wasm \
+        "deploy-test-valuation-adapter" "${V3_TEST_VALUATION_ADAPTER_WASM}" "" \
+        --blnd_usdc "${legacy_token_id}" \
+        --blnd_xlm "${next_token_id}")"
+    state_set "valuation_adapter" "${valuation_adapter_id}"
 
     invoke_transaction "set-emitter-as-blnd-admin" "${blnd_id}" set_admin \
         --new_admin "${emitter_id}" >/dev/null
@@ -616,7 +627,8 @@ command_deploy() {
         --pool_factory "${v3_factory_id}" \
         --legacy_backstop_token "${legacy_token_id}" \
         --next_backstop_token "${next_token_id}" \
-        --prefund_token "${prefund_token_id}")"
+        --prefund_token "${prefund_token_id}" \
+        --valuation_adapter "${valuation_adapter_id}")"
     assert_equal "${candidate_id}" "${deployed_candidate_id}" \
         "candidate deterministic address"
 
@@ -741,7 +753,7 @@ EOF
 }
 
 command_keepalive() {
-    local emitter_id incumbent_id candidate_id factory_id pool_id depositor
+    local emitter_id incumbent_id candidate_id factory_id pool_id valuation_adapter_id depositor
     local blnd_id legacy_token_id next_token_id prefund_token_id unlock_time
     local stamp prefix last_distro_key blnd_admin queued_swap
     local incumbent_balance candidate_balance
@@ -754,6 +766,7 @@ command_keepalive() {
     candidate_id="$(state_value candidate_backstop)"
     factory_id="$(state_value v3_pool_factory)"
     pool_id="$(state_value v3_pool)"
+    valuation_adapter_id="$(state_value valuation_adapter)"
     depositor="$(state_value depositor)"
     blnd_id="$(state_value blnd_token)"
     legacy_token_id="$(state_value legacy_backstop_token)"
@@ -780,6 +793,8 @@ command_keepalive() {
         "${factory_id}" is_pool --pool "${pool_id}" >/dev/null
     invoke_forced_transaction "${prefix}-pool" \
         "${pool_id}" backstop >/dev/null
+    extend_contract_instance "${prefix}-valuation-adapter" \
+        "${valuation_adapter_id}" >/dev/null
     invoke_forced_transaction "${prefix}-position" \
         "${candidate_id}" blnd_usdc_shares \
         --user "${depositor}" \
@@ -865,8 +880,9 @@ command_finalize() {
 
 command_verify() {
     local operator emitter_id incumbent_id candidate_id factory_id pool_id
-    local legacy_token_id next_token_id emitter_backstop candidate_legacy_token
-    local candidate_next_token factory_backstop pool_backstop pool_registered
+    local valuation_adapter_id legacy_token_id next_token_id emitter_backstop
+    local candidate_legacy_token candidate_next_token candidate_valuation_adapter
+    local factory_backstop pool_backstop pool_registered
     local incumbent_balance candidate_balance queued_swap migration_status activated_at
 
     validate_tools
@@ -878,6 +894,7 @@ command_verify() {
     candidate_id="$(state_value candidate_backstop)"
     factory_id="$(state_value v3_pool_factory)"
     pool_id="$(state_value v3_pool)"
+    valuation_adapter_id="$(state_value valuation_adapter)"
     legacy_token_id="$(state_value legacy_backstop_token)"
     next_token_id="$(state_value next_backstop_token)"
 
@@ -887,6 +904,8 @@ command_verify() {
         "verify-candidate-legacy-token" "${candidate_id}" backstop_token)")"
     candidate_next_token="$(normalize_scalar "$(invoke_view \
         "verify-candidate-next-token" "${candidate_id}" next_backstop_token)")"
+    candidate_valuation_adapter="$(normalize_scalar "$(invoke_view \
+        "verify-candidate-valuation-adapter" "${candidate_id}" valuation_adapter)")"
     factory_backstop="$(normalize_scalar "$(invoke_view \
         "verify-factory-backstop" "${factory_id}" backstop)")"
     pool_backstop="$(normalize_scalar "$(invoke_view \
@@ -906,6 +925,8 @@ command_verify() {
     assert_equal "${candidate_id}" "${emitter_backstop}" "emitter backstop"
     assert_equal "${legacy_token_id}" "${candidate_legacy_token}" "candidate legacy token"
     assert_equal "${next_token_id}" "${candidate_next_token}" "candidate next token"
+    assert_equal "${valuation_adapter_id}" "${candidate_valuation_adapter}" \
+        "candidate valuation adapter"
     assert_equal "${candidate_id}" "${factory_backstop}" "v3 factory binding"
     assert_equal "${candidate_id}" "${pool_backstop}" "v3 pool binding"
     assert_equal "true" "${pool_registered}" "v3 pool registration"
@@ -936,6 +957,7 @@ Local migration verified
   candidate SDK-27 backstop: ${candidate_id}
   candidate pool factory: ${factory_id}
   candidate pool: ${pool_id}
+  candidate valuation adapter: ${valuation_adapter_id}
   activation timestamp: ${activated_at}
   evidence directory: ${RUN_DIR}
 EOF

@@ -17,6 +17,11 @@ The runner uses independently issued local assets:
 These assets test token custody and migration behavior. They do not attempt to
 reproduce Comet pricing or liquidity behavior.
 
+The runner also deploys a test-only immutable valuation adapter. It values
+each configured LP token one-for-one in both USDC and underlying BLND so the
+canonical valuation call path can be exercised deterministically. This
+fixture is not an oracle and MUST NOT be used as a production pricing source.
+
 The classic-asset issuer/operator and candidate depositor use separate local
 identities. The runner creates the depositor's `BLNDUSDC` trustline explicitly
 before minting and depositing the candidate's qualifying balance.

@@ -545,11 +545,35 @@ Asset risk is handled separately through loss priority, withdrawal rules,
 deposit limits, and emissions rather than through the activation score.
 
 Plain USDC is the unit of account and contributes one USDC of activation value
-per eligible token. A production valuation adapter MUST define
-manipulation-resistant BLND:USDC and BLND:XLM LP valuation, oracle staleness,
-and failure behavior before its values can drive pool status. Instantaneous
-Comet reserve ratios and caller-supplied values MUST NOT directly determine
-pool activation.
+per eligible token.
+
+The candidate binds one valuation-adapter address immutably at construction.
+The adapter interface version is fixed by the candidate. A production adapter
+MUST itself have immutable pricing dependencies and no privileged
+configuration or WASM-upgrade path. For a positive LP-token amount it returns:
+
+- underlying BLND in seven-decimal base units;
+- USDC value in seven-decimal base units; and
+- an inclusive `valid_until` ledger timestamp.
+
+The candidate derives LP amounts from its own pool-attributed share ledgers,
+calls the adapter separately for active and queued BLND:USDC and BLND:XLM
+shares, and values accounted plain USDC exactly one-for-one. Zero LP amounts
+do not require an external quote. A missing or incompatible adapter, failed
+adapter invocation, negative result, or quote whose expiry precedes the
+current ledger timestamp MUST fail the canonical valuation atomically.
+Unattributed direct token transfers MUST NOT enter the calculation.
+
+This derivation currently relies on the pre-loss invariant that one accounted
+share equals one token base unit. Before gain or loss execution can change a
+tier's asset-per-share rate, canonical valuation MUST convert active and queued
+shares through that common checked rate before quoting LP token amounts or
+plain-USDC value.
+
+A production adapter MUST still define manipulation-resistant BLND:USDC and
+BLND:XLM LP valuation and its concrete oracle freshness policy before these
+values can drive stored pool status. Instantaneous Comet reserve ratios and
+caller-supplied values MUST NOT directly determine pool activation.
 
 The implemented activation policy MUST:
 
@@ -1095,17 +1119,19 @@ cross-version legacy-emitter migration harness, the candidate's
 pool-attributed continuous BLND:USDC shares, time-weighted migration
 checkpoints, independent pool-attributed BLND:XLM and plain-USDC share ledgers,
 canonical asset-neutral 12,500-USDC entry and 10,000-USDC maintenance
-activation-policy arithmetic, and 17-day bounded withdrawal queues for all
-three tiers, exact one-time backfill funding and owner-authorized constant-time
-claims, an immutable Protocol-27 pool factory, and a fail-closed pool callback
-derived directly from three bounded canonical record maps. The local runner
-deploys independently issued assets, a coherent
+activation-policy arithmetic, an immutable versioned valuation-adapter
+boundary that derives active and queued values from canonical pool shares,
+and 17-day bounded withdrawal queues for all three tiers, exact one-time
+backfill funding and owner-authorized constant-time claims, an immutable
+Protocol-27 pool factory, and a fail-closed pool callback derived directly
+from three bounded canonical record maps. The local runner deploys
+independently issued assets, a coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
 local run, the public-testnet exercise, the lending, auction, and waterfall
-entry points that invoke those record transitions, the valuation adapter,
-pool-status integration, and ongoing BLND-emission accrual remain intentionally
-unimplemented.
+entry points that invoke those record transitions, a production LP valuation
+source, stored pool-status integration, and ongoing BLND-emission accrual
+remain intentionally unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

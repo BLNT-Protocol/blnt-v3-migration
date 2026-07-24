@@ -202,8 +202,16 @@ For a multi-asset activation formula, test:
 - Equal activation weight for every USDC of verified value, without
   asset-specific haircuts, concentration caps, or minimum BLND allocation.
 - Negative values and checked-arithmetic overflow.
-- Rejection of stale, unavailable, caller-supplied, and same-transaction
-  manipulated valuation inputs by the production valuation adapter.
+- Immutable adapter binding and rejection of an incompatible adapter version.
+- Canonical derivation from pool-attributed active and queued shares, including
+  exclusion of unattributed direct transfers.
+- Separate LP quotes for active and queued BLND:USDC and BLND:XLM amounts;
+  zero LP amounts skip the external quote.
+- Exact one-to-one plain-USDC valuation without an adapter call.
+- Underlying BLND derived from active LP shares for the shared emission basis.
+- Rejection of negative, expired, unavailable, caller-supplied, and
+  same-transaction manipulated valuation inputs by the production valuation
+  adapter.
 - Price, reserve, and LP-supply manipulation.
 - Oracle staleness and unavailable-market behavior.
 - Queued withdrawals and assets already committed to covering losses.

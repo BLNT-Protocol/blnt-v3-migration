@@ -69,9 +69,11 @@ make check-v3
 ```
 
 This builds the historical v2 WASM, the SDK-27 compatibility probe, and the
-first SDK-27 v3 backstop WASM. The compatibility harness verifies both a
-cross-contract call into the SDK-22 backstop and a complete legacy-emitter
-migration into the v3 candidate on a Protocol-27 host.
+SDK-27 candidate contracts and test-only valuation adapter. The compatibility
+harness verifies both a cross-contract call into the SDK-22 backstop and a
+complete legacy-emitter migration into the v3 candidate on a Protocol-27
+host. The deterministic adapter exercises the immutable valuation boundary;
+it is not a production oracle.
 
 Run both lanes:
 

@@ -8,6 +8,7 @@ use soroban_sdk::{
     Address, Env, IntoVal,
 };
 
+#[allow(clippy::too_many_arguments)]
 mod v3_backstop {
     soroban_sdk::contractimport!(file = "../target/wasm32v1-none/optimized/blend_v3_backstop.wasm");
 }
@@ -19,6 +20,12 @@ mod v3_pool {
 mod v3_pool_factory {
     soroban_sdk::contractimport!(
         file = "../target/wasm32v1-none/optimized/blend_v3_pool_factory.wasm"
+    );
+}
+
+mod v3_test_valuation_adapter {
+    soroban_sdk::contractimport!(
+        file = "../target/wasm32v1-none/optimized/blend_v3_test_valuation_adapter.wasm"
     );
 }
 
@@ -142,6 +149,7 @@ struct Fixture {
     legacy_token: StellarAssetClient<'static>,
     next_token: Address,
     prefund_token: Address,
+    valuation_adapter: Address,
 }
 
 impl Fixture {
@@ -183,6 +191,10 @@ impl Fixture {
         emitter.initialize(&blnd_id, &incumbent, &legacy_token_id);
         let candidate_id = Address::generate(&env);
         let pool_factory_id = env.register(MockPoolFactory, (&candidate_id,));
+        let valuation_adapter_id = env.register(
+            v3_test_valuation_adapter::WASM,
+            (&legacy_token_id, &next_token_id),
+        );
         env.register_at(
             &candidate_id,
             v3_backstop::WASM,
@@ -193,6 +205,7 @@ impl Fixture {
                 &legacy_token_id,
                 &next_token_id,
                 &prefund_token_id,
+                &valuation_adapter_id,
             ),
         );
         let candidate = v3_backstop::Client::new(&env, &candidate_id);
@@ -210,6 +223,7 @@ impl Fixture {
             legacy_token,
             next_token: next_token_id,
             prefund_token: prefund_token_id,
+            valuation_adapter: valuation_adapter_id,
         }
     }
 
@@ -268,6 +282,10 @@ fn v3_wasm_exposes_asset_neutral_activation_hysteresis_quote() {
         fixture.candidate.pool_factory(),
         fixture.pool_factory.address
     );
+    assert_eq!(
+        fixture.candidate.valuation_adapter(),
+        fixture.valuation_adapter
+    );
 
     let values = v3_backstop::ActivationValues {
         blnd_usdc: 4_000 * SCALAR_7,
@@ -283,6 +301,73 @@ fn v3_wasm_exposes_asset_neutral_activation_hysteresis_quote() {
     assert_eq!(active_quote.eligible_value, 12_000 * SCALAR_7);
     assert_eq!(active_quote.required_value, maintenance_threshold);
     assert!(active_quote.meets_threshold);
+}
+
+#[test]
+fn v3_wasm_derives_canonical_pool_valuation_from_accounted_shares() {
+    let fixture = Fixture::create();
+    let pool = fixture.loss_aware_pool(false).address.clone();
+    let depositor = Address::generate(&fixture.env);
+    let blnd_xlm = StellarAssetClient::new(&fixture.env, &fixture.next_token);
+    let usdc = StellarAssetClient::new(&fixture.env, &fixture.prefund_token);
+
+    fixture.legacy_token.mint(&depositor, &(5_000 * SCALAR_7));
+    blnd_xlm.mint(&depositor, &(5_000 * SCALAR_7));
+    usdc.mint(&depositor, &(5_500 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_blnd_usdc(&depositor, &pool, &(5_000 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_blnd_xlm(&depositor, &pool, &(5_000 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_usdc(&depositor, &pool, &(5_500 * SCALAR_7));
+    fixture
+        .candidate
+        .queue_blnd_usdc_withdrawal(&depositor, &pool, &(1_000 * SCALAR_7));
+    fixture
+        .candidate
+        .queue_blnd_xlm_withdrawal(&depositor, &pool, &(1_000 * SCALAR_7));
+    fixture
+        .candidate
+        .queue_usdc_withdrawal(&depositor, &pool, &(1_000 * SCALAR_7));
+
+    let valuation = fixture.candidate.pool_valuation(&pool);
+    assert_eq!(
+        valuation.active_blnd,
+        v3_backstop::BlndEmissionValues {
+            blnd_usdc: 4_000 * SCALAR_7,
+            blnd_xlm: 4_000 * SCALAR_7,
+        }
+    );
+    assert_eq!(
+        valuation.active_values,
+        v3_backstop::ActivationValues {
+            blnd_usdc: 4_000 * SCALAR_7,
+            blnd_xlm: 4_000 * SCALAR_7,
+            usdc: 4_500 * SCALAR_7,
+        }
+    );
+    assert_eq!(
+        valuation.queued_values,
+        v3_backstop::ActivationValues {
+            blnd_usdc: 1_000 * SCALAR_7,
+            blnd_xlm: 1_000 * SCALAR_7,
+            usdc: 1_000 * SCALAR_7,
+        }
+    );
+    assert_eq!(valuation.valid_until, u64::MAX);
+    assert!(
+        fixture
+            .candidate
+            .quote_pool_activation(&pool, &false)
+            .meets_threshold
+    );
+    assert!(fixture
+        .candidate
+        .try_pool_valuation(&Address::generate(&fixture.env))
+        .is_err());
 }
 
 #[test]
@@ -388,6 +473,10 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
     let candidate_id = candidate_deployer.deployed_address();
     let pool_hash = env.deployer().upload_contract_wasm(v3_pool::WASM);
     let factory_id = env.register(v3_pool_factory::WASM, (&candidate_id, &pool_hash));
+    let valuation_adapter_id = env.register(
+        v3_test_valuation_adapter::WASM,
+        (&legacy_token_id, &next_token_id),
+    );
     let candidate_hash = env.deployer().upload_contract_wasm(v3_backstop::WASM);
     assert_eq!(
         candidate_deployer.deploy_v2(
@@ -399,6 +488,7 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
                 &legacy_token_id,
                 &next_token_id,
                 &prefund_token_id,
+                &valuation_adapter_id,
             ),
         ),
         candidate_id

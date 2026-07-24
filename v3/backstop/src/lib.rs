@@ -49,6 +49,7 @@ enum DataKey {
     TotalMigrationTimeBasis,
     TotalMigrationWeight,
     ScheduledBackfill,
+    TotalBlndUsdcShares,
     TotalPrefundShares,
 }
 
@@ -56,6 +57,7 @@ enum DataKey {
 #[contracttype]
 enum PersistentKey {
     MigrationPosition(Address, Address),
+    PoolBlndUsdcShares(Address),
     PrefundShares(Address, Address),
     PoolPrefundShares(Address),
 }
@@ -109,6 +111,7 @@ pub struct EmitterSwap {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
+/// One continuous BLND:USDC tier position plus temporary backfill metadata.
 pub struct MigrationPosition {
     pub amount: i128,
     pub frozen_weight: Option<i128>,
@@ -342,6 +345,9 @@ impl BackstopContract {
             checked_sub_i128(&env, user_shares, shares),
         );
         let pool_shares = get_pool_prefund_shares(&env, &pool);
+        if shares > pool_shares {
+            panic_with_error!(&env, BackstopError::ArithmeticError);
+        }
         set_pool_prefund_shares(&env, &pool, checked_sub_i128(&env, pool_shares, shares));
         add_to_instance_total(&env, DataKey::TotalPrefundShares, -shares);
 
@@ -374,6 +380,31 @@ impl BackstopContract {
         env.storage()
             .instance()
             .get(&DataKey::TotalPrefundShares)
+            .unwrap_or(0)
+    }
+
+    /// Return one user's continuous BLND:USDC tier shares.
+    ///
+    /// Before migration these shares also qualify for migration backfill.
+    pub fn blnd_usdc_shares(env: Env, user: Address, pool: Address) -> i128 {
+        extend_instance_ttl(&env);
+        get_position(&env, &user, &pool).amount
+    }
+
+    /// Return the accounted BLND:USDC tier shares allocated to one pool.
+    pub fn pool_blnd_usdc_shares(env: Env, pool: Address) -> i128 {
+        extend_instance_ttl(&env);
+        get_pool_blnd_usdc_shares(&env, &pool)
+    }
+
+    /// Return all accounted BLND:USDC tier shares.
+    ///
+    /// Direct token transfers do not create shares and are excluded.
+    pub fn total_blnd_usdc_shares(env: Env) -> i128 {
+        extend_instance_ttl(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalBlndUsdcShares)
             .unwrap_or(0)
     }
 
@@ -516,76 +547,37 @@ impl BackstopContract {
         env.storage().instance().get(&DataKey::BackfillEnd)
     }
 
-    /// Deposit legacy backstop tokens into a pool-attributed migration position.
+    /// Deposit BLND:USDC into its continuous pool-attributed backstop tier.
     ///
-    /// Only shares still deposited when migration activates retain their
-    /// accumulated amount-times-time weight.
-    pub fn deposit_migration(env: Env, from: Address, pool: Address, amount: i128) {
+    /// Before migration, these same shares also count toward legacy-emitter
+    /// qualification and earn amount-times-time backfill weight. Deposits after
+    /// migration are ordinary tier shares and earn no retroactive backfill.
+    pub fn deposit_blnd_usdc(env: Env, from: Address, pool: Address, amount: i128) {
         extend_instance_ttl(&env);
-        require_not_active_for_deposit(&env);
-        require_positive(&env, amount);
-        from.require_auth();
-
-        try_open_epoch_from_current_queue(&env);
-        let mut position = get_position(&env, &from, &pool);
-        let timestamp = eligibility_timestamp(&env, env.ledger().timestamp());
-        position.amount = checked_add_i128(&env, position.amount, amount);
-        position.time_basis = checked_add_i128(
-            &env,
-            position.time_basis,
-            checked_mul_i128(&env, amount, timestamp as i128),
-        );
-        set_position(&env, &from, &pool, &position);
-
-        add_to_instance_total(&env, DataKey::TotalMigrationAmount, amount);
-        add_to_instance_total(
-            &env,
-            DataKey::TotalMigrationTimeBasis,
-            checked_mul_i128(&env, amount, timestamp as i128),
-        );
-
-        TokenClient::new(&env, &legacy_backstop_token(&env)).transfer(
-            &from,
-            &env.current_contract_address(),
-            &amount,
-        );
+        deposit_blnd_usdc_position(&env, from, pool, amount);
     }
 
-    /// Withdraw legacy tokens. Before activation, the withdrawn shares forfeit
-    /// their proportional accumulated backfill weight.
+    /// Compatibility alias for `deposit_blnd_usdc`.
+    pub fn deposit_migration(env: Env, from: Address, pool: Address, amount: i128) {
+        extend_instance_ttl(&env);
+        deposit_blnd_usdc_position(&env, from, pool, amount);
+    }
+
+    /// Withdraw BLND:USDC tier shares.
+    ///
+    /// Before emitter migration succeeds, withdrawn shares forfeit their
+    /// proportional accumulated backfill weight. The current immediate
+    /// withdrawal is temporary until the specified loss locks and withdrawal
+    /// queue are implemented.
+    pub fn withdraw_blnd_usdc(env: Env, from: Address, pool: Address, amount: i128, to: Address) {
+        extend_instance_ttl(&env);
+        withdraw_blnd_usdc_position(&env, from, pool, amount, to);
+    }
+
+    /// Compatibility alias for `withdraw_blnd_usdc`.
     pub fn withdraw_migration(env: Env, from: Address, pool: Address, amount: i128, to: Address) {
         extend_instance_ttl(&env);
-        require_positive(&env, amount);
-        from.require_auth();
-
-        let mut position = get_position(&env, &from, &pool);
-        if amount > position.amount {
-            panic_with_error!(&env, BackstopError::InsufficientBalance);
-        }
-
-        if let Some(backfill_end) = env
-            .storage()
-            .instance()
-            .get::<DataKey, u64>(&DataKey::BackfillEnd)
-        {
-            if position.frozen_weight.is_none() {
-                position.frozen_weight = Some(position_weight(&env, &position, backfill_end));
-            }
-        } else {
-            let basis_removed =
-                proportional_floor(&env, position.time_basis, amount, position.amount);
-            position.time_basis = checked_sub_i128(&env, position.time_basis, basis_removed);
-            add_to_instance_total(&env, DataKey::TotalMigrationAmount, -amount);
-            add_to_instance_total(&env, DataKey::TotalMigrationTimeBasis, -basis_removed);
-        }
-
-        position.amount = checked_sub_i128(&env, position.amount, amount);
-        set_position(&env, &from, &pool, &position);
-        TokenClient::new(&env, &legacy_backstop_token(&env)).transfer(
-            &env.current_contract_address(),
-            &to,
-            &amount,
-        );
+        withdraw_blnd_usdc_position(&env, from, pool, amount, to);
     }
 
     pub fn migration_position(env: Env, user: Address, pool: Address) -> MigrationPosition {
@@ -882,12 +874,6 @@ fn require_not_active(env: &Env) {
     }
 }
 
-fn require_not_active_for_deposit(env: &Env) {
-    if env.storage().instance().has(&DataKey::ActivatedAt) {
-        panic_with_error!(env, BackstopError::MigrationAlreadyActive);
-    }
-}
-
 fn require_positive(env: &Env, amount: i128) {
     if amount <= 0 {
         panic_with_error!(env, BackstopError::InvalidAmount);
@@ -1059,6 +1045,81 @@ fn eligibility_timestamp(env: &Env, timestamp: u64) -> u64 {
     }
 }
 
+fn deposit_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: i128) {
+    require_positive(env, amount);
+    from.require_auth();
+
+    let backfill_end = env
+        .storage()
+        .instance()
+        .get::<DataKey, u64>(&DataKey::BackfillEnd);
+    let mut position = get_position(env, &from, &pool);
+    if let Some(backfill_end) = backfill_end {
+        if position.frozen_weight.is_none() {
+            position.frozen_weight = Some(position_weight(env, &position, backfill_end));
+        }
+    } else {
+        try_open_epoch_from_current_queue(env);
+        let timestamp = eligibility_timestamp(env, env.ledger().timestamp());
+        let time_basis_delta = checked_mul_i128(env, amount, timestamp as i128);
+        position.time_basis = checked_add_i128(env, position.time_basis, time_basis_delta);
+        add_to_instance_total(env, DataKey::TotalMigrationAmount, amount);
+        add_to_instance_total(env, DataKey::TotalMigrationTimeBasis, time_basis_delta);
+    }
+    position.amount = checked_add_i128(env, position.amount, amount);
+    set_position(env, &from, &pool, &position);
+
+    let pool_shares = get_pool_blnd_usdc_shares(env, &pool);
+    set_pool_blnd_usdc_shares(env, &pool, checked_add_i128(env, pool_shares, amount));
+    add_to_instance_total(env, DataKey::TotalBlndUsdcShares, amount);
+
+    TokenClient::new(env, &legacy_backstop_token(env)).transfer(
+        &from,
+        &env.current_contract_address(),
+        &amount,
+    );
+}
+
+fn withdraw_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: i128, to: Address) {
+    require_positive(env, amount);
+    from.require_auth();
+
+    let mut position = get_position(env, &from, &pool);
+    if amount > position.amount {
+        panic_with_error!(env, BackstopError::InsufficientBalance);
+    }
+
+    if let Some(backfill_end) = env
+        .storage()
+        .instance()
+        .get::<DataKey, u64>(&DataKey::BackfillEnd)
+    {
+        if position.frozen_weight.is_none() {
+            position.frozen_weight = Some(position_weight(env, &position, backfill_end));
+        }
+    } else {
+        let basis_removed = proportional_floor(env, position.time_basis, amount, position.amount);
+        position.time_basis = checked_sub_i128(env, position.time_basis, basis_removed);
+        add_to_instance_total(env, DataKey::TotalMigrationAmount, -amount);
+        add_to_instance_total(env, DataKey::TotalMigrationTimeBasis, -basis_removed);
+    }
+
+    position.amount = checked_sub_i128(env, position.amount, amount);
+    set_position(env, &from, &pool, &position);
+    let pool_shares = get_pool_blnd_usdc_shares(env, &pool);
+    if amount > pool_shares {
+        panic_with_error!(env, BackstopError::ArithmeticError);
+    }
+    set_pool_blnd_usdc_shares(env, &pool, checked_sub_i128(env, pool_shares, amount));
+    add_to_instance_total(env, DataKey::TotalBlndUsdcShares, -amount);
+
+    TokenClient::new(env, &legacy_backstop_token(env)).transfer(
+        &env.current_contract_address(),
+        &to,
+        &amount,
+    );
+}
+
 fn get_position(env: &Env, user: &Address, pool: &Address) -> MigrationPosition {
     let key = PersistentKey::MigrationPosition(user.clone(), pool.clone());
     let position = env
@@ -1076,6 +1137,25 @@ fn get_position(env: &Env, user: &Address, pool: &Address) -> MigrationPosition 
             .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
     }
     position
+}
+
+fn get_pool_blnd_usdc_shares(env: &Env, pool: &Address) -> i128 {
+    let key = PersistentKey::PoolBlndUsdcShares(pool.clone());
+    let shares = env.storage().persistent().get(&key).unwrap_or(0);
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
+    }
+    shares
+}
+
+fn set_pool_blnd_usdc_shares(env: &Env, pool: &Address, shares: i128) {
+    let key = PersistentKey::PoolBlndUsdcShares(pool.clone());
+    env.storage().persistent().set(&key, &shares);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
 }
 
 fn get_prefund_shares(env: &Env, user: &Address, pool: &Address) -> i128 {
@@ -1126,9 +1206,11 @@ fn set_position(env: &Env, user: &Address, pool: &Address, position: &MigrationP
 
 fn add_to_instance_total(env: &Env, key: DataKey, delta: i128) {
     let current: i128 = env.storage().instance().get(&key).unwrap_or(0);
-    env.storage()
-        .instance()
-        .set(&key, &checked_add_i128(env, current, delta));
+    let next = checked_add_i128(env, current, delta);
+    if next < 0 {
+        panic_with_error!(env, BackstopError::ArithmeticError);
+    }
+    env.storage().instance().set(&key, &next);
 }
 
 fn position_weight(env: &Env, position: &MigrationPosition, end: u64) -> i128 {

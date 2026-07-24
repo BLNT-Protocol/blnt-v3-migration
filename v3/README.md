@@ -17,16 +17,18 @@ The workspace contains:
 
 The v3 backstop currently implements migration configuration, two verified
 retry queues within an immutable 76-day recovery horizon, emitter finalization,
-bounded per-queue direct-swap synchronization, migration deposits and
-withdrawals, deterministic 1-BLND-per-second backfill scheduling from the
-original queue start, a bounded 31-day prefunding campaign, and time-weighted
-survivor-allocation quotes. It intentionally does not yet implement BLND
-funding or claims, authoritative pool-status activation, loss tiers, or
-ongoing-emission allocation. It also provides one independently configured
-SEP-41 prefunding lane with exact one-token/one-share accounting. Prefund
-shares are isolated from migration and may be deposited or withdrawn before or
-after activation; they do not yet count toward activation, losses, backfill,
-or emissions.
+bounded per-queue direct-swap synchronization, continuous BLND:USDC tier
+deposits and withdrawals, deterministic 1-BLND-per-second backfill scheduling
+from the original queue start, a bounded 31-day prefunding campaign, and
+time-weighted survivor-allocation quotes. The same accounted BLND:USDC shares
+exist before and after migration; migration freezes only their temporary
+backfill weight, and later deposits receive no retroactive backfill. It
+intentionally does not yet implement BLND funding or claims, authoritative
+pool-status activation, loss execution, withdrawal queues, or ongoing-emission
+accrual. It also provides one independently configured SEP-41 prefunding lane
+with exact one-token/one-share accounting. Prefund shares are isolated from
+migration and may be deposited or withdrawn before or after activation; they
+do not yet count toward activation, losses, backfill, or emissions.
 
 The backstop exposes the canonical Milestone-5 activation arithmetic for
 verified, pool-specific values of BLND:XLM LP, BLND:USDC LP, plain USDC, and up

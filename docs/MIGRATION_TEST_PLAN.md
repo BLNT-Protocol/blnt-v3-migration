@@ -74,8 +74,21 @@ The test suite must verify:
 
 The v3 tests must verify:
 
-- BLND:USDC migration deposits are accounted for independently from any
-  post-migration backstop asset.
+- BLND:USDC migration deposits and the BLND:USDC first-loss tier use the same
+  token contract, user shares, pool totals, and global totals.
+- BLND:USDC shares continue across migration without conversion, reissuance, or
+  a second opt-in.
+- Pre-migration and post-migration BLND:USDC deposits follow the same
+  activation, waterfall, take-rate, and ongoing-emission eligibility rules,
+  except that ongoing emissions cannot accrue before the emitter migrates.
+- Migration activation freezes only backfill weight. A later BLND:USDC deposit
+  joins the tier without changing the depositor's or system's finalized
+  backfill weight.
+- A withdrawal updates the same tier totals on either side of migration; a
+  pre-migration withdrawal additionally forfeits the withdrawn shares'
+  proportional backfill weight.
+- Direct BLND:USDC transfers can affect the emitter's raw balance comparison
+  but do not mint tier shares or receive any other protocol role.
 - The prefunding token is configured independently from both the legacy
   migration token and the emitter's next designated token.
 - Prefund deposits mint one share per token base unit and conserve exact user,
@@ -85,11 +98,11 @@ The v3 tests must verify:
 - Prefund balances do not qualify the legacy emitter, earn migration backfill,
   or change scheduled backfill.
 - A direct transfer of the prefunding token does not create accounted shares.
-- Depositors cannot be double-counted across migration, activation, emissions,
-  or loss tiers.
+- One BLND:USDC position may serve migration, activation, emissions, and loss
+  roles, but its shares cannot be duplicated within any calculation.
 - Queued withdrawals receive the intended activation and emission treatment.
-- Legacy BLND:USDC depositors can reclaim or explicitly convert their
-  positions without an involuntary asset swap.
+- BLND:USDC depositors can withdraw the original LP asset under the tier's
+  ordinary withdrawal rules without an involuntary asset swap.
 - Each accepted asset has an explicit valuation, haircut, concentration limit,
   withdrawal policy, liquidation path, and loss-waterfall position.
 

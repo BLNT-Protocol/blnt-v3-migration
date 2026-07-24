@@ -213,6 +213,24 @@ fn v3_wasm_exposes_blnd_weighted_emission_quotes() {
 }
 
 #[test]
+fn direct_legacy_token_transfers_do_not_create_blnd_usdc_tier_shares() {
+    let fixture = Fixture::create();
+    let pool = Address::generate(&fixture.env);
+    let user = Address::generate(&fixture.env);
+    fixture
+        .legacy_token
+        .mint(&fixture.candidate.address, &(100 * SCALAR_7));
+
+    assert_eq!(fixture.candidate.blnd_usdc_shares(&user, &pool), 0);
+    assert_eq!(fixture.candidate.pool_blnd_usdc_shares(&pool), 0);
+    assert_eq!(fixture.candidate.total_blnd_usdc_shares(), 0);
+    assert_eq!(
+        fixture.legacy_token.balance(&fixture.candidate.address),
+        100 * SCALAR_7
+    );
+}
+
+#[test]
 fn legacy_emitter_finalizes_migration_to_v3_wasm() {
     let fixture = Fixture::create();
     assert_eq!(
@@ -727,6 +745,15 @@ fn withdrawn_shares_forfeit_weight_to_time_weighted_survivors() {
     fixture
         .candidate
         .deposit_migration(&bob, &pool, &(200 * SCALAR_7));
+    assert_eq!(
+        fixture.candidate.blnd_usdc_shares(&alice, &pool),
+        200 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.pool_blnd_usdc_shares(&pool),
+        500 * SCALAR_7
+    );
+    assert_eq!(fixture.candidate.total_blnd_usdc_shares(), 500 * SCALAR_7);
 
     fixture.enter_preparation_window();
     fixture.candidate.prepare_migration();
@@ -736,6 +763,11 @@ fn withdrawn_shares_forfeit_weight_to_time_weighted_survivors() {
     fixture
         .candidate
         .withdraw_migration(&carol, &pool, &(100 * SCALAR_7), &carol);
+    assert_eq!(
+        fixture.candidate.pool_blnd_usdc_shares(&pool),
+        350 * SCALAR_7
+    );
+    assert_eq!(fixture.candidate.total_blnd_usdc_shares(), 350 * SCALAR_7);
     fixture.unlock();
     let migration_time = fixture.env.ledger().timestamp();
     fixture.candidate.finalize_migration();
@@ -752,6 +784,39 @@ fn withdrawn_shares_forfeit_weight_to_time_weighted_survivors() {
         fixture.candidate.total_migration_weight(),
         alice_weight + bob_weight
     );
+
+    let dave = Address::generate(&fixture.env);
+    fixture.legacy_token.mint(&dave, &(50 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_blnd_usdc(&dave, &pool, &(50 * SCALAR_7));
+    assert_eq!(
+        fixture.candidate.blnd_usdc_shares(&dave, &pool),
+        50 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.pool_blnd_usdc_shares(&pool),
+        400 * SCALAR_7
+    );
+    assert_eq!(fixture.candidate.total_blnd_usdc_shares(), 400 * SCALAR_7);
+    assert_eq!(fixture.candidate.migration_weight(&dave, &pool), 0);
+    assert_eq!(
+        fixture.candidate.total_migration_weight(),
+        alice_weight + bob_weight
+    );
+    fixture
+        .candidate
+        .withdraw_blnd_usdc(&dave, &pool, &(20 * SCALAR_7), &dave);
+    assert_eq!(
+        fixture.candidate.blnd_usdc_shares(&dave, &pool),
+        30 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.pool_blnd_usdc_shares(&pool),
+        380 * SCALAR_7
+    );
+    assert_eq!(fixture.candidate.total_blnd_usdc_shares(), 380 * SCALAR_7);
+    assert_eq!(fixture.candidate.migration_weight(&dave, &pool), 0);
 
     let backfill = fixture.candidate.scheduled_backfill();
     assert_eq!(backfill, QUEUE_SECONDS as i128 * SCALAR_7);

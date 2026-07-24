@@ -46,7 +46,7 @@ require v3 source code to compile against intermediate SDK versions.
 - Ongoing BLND-emission distribution.
 - Pre-migration backfill accounting.
 - V2-to-v3 emitter migration.
-- Legacy backstop withdrawal or opt-in conversion.
+- Continuous BLND:USDC tier deposits and withdrawals across migration.
 - Deployment and testing of candidate pools and supporting contracts.
 
 ### 2.2 Out of scope for the first milestone
@@ -160,7 +160,10 @@ Before finalization, the candidate MUST:
   recovery-horizon anchor before backfill is finalized or claimable.
 - Store an immutable absolute migration deadline at construction, 138 days
   after the prefunding campaign begins.
-- Accept and account for migration deposits of the incumbent designated token.
+- Accept the incumbent BLND:USDC designated token directly into the continuous
+  BLND:USDC first-loss tier. The same accounted shares MUST serve migration,
+  activation, loss, take-rate, and emission roles without conversion or
+  duplicate balances.
 - Keep enough designated tokens directly at the candidate address to remain
   strictly larger than the incumbent.
 - Record user, pool, amount, shares, deposit time, and withdrawal state needed
@@ -186,6 +189,10 @@ During the 31-day queue:
   verified queue unlocks. Because another replacement requires a fresh 31-day
   delay, an unverified queue cannot unlock during that synchronization window.
 - The candidate MUST continue validating its qualifying balance.
+- BLND:USDC tier positions remain subject to the same pool attribution,
+  withdrawal, loss-commitment, activation, and reward rules that apply after
+  migration. Migration lifecycle state MUST NOT create a lower-risk temporary
+  version of the tier.
 - A loss of the strictly-greater balance MUST prevent finalization.
 - Accounting changes MUST NOT allow the same capital to support incompatible
   withdrawal and migration claims.
@@ -262,10 +269,11 @@ After finalization:
 - Ongoing BLND emissions accrue according to the v3 emission policy.
 - The new designated token controls qualification for the next protocol
   migration.
-- Legacy users MAY withdraw their original asset or explicitly opt into a
-  supported v3 position.
-- Unclaimed legacy positions MUST remain fully accounted for and MUST NOT be
-  treated as unencumbered protocol capital.
+- Existing BLND:USDC positions continue in the same first-loss tier without a
+  conversion, asset swap, or second opt-in.
+- A depositor MAY withdraw under the tier's ordinary withdrawal rules.
+  Unwithdrawn positions remain fully accounted for and MUST NOT be treated as
+  unencumbered protocol capital.
 
 ## 7. Multi-asset backstop
 
@@ -316,7 +324,40 @@ Share conversion MUST specify rounding direction for every operation. A user
 MUST NOT receive more assets than the position owns, and dust MUST have a
 documented destination.
 
-### 7.2.1 Initial single-asset prefunding lane
+### 7.2.1 Continuous BLND:USDC migration tier
+
+The incumbent BLND:USDC LP token and the candidate's BLND:USDC first-loss tier
+MUST use the same token contract and one continuous share ledger. A deposit
+through the accounted BLND:USDC entry point is a tier deposit from the moment
+it is accepted, whether it occurs before or after emitter migration.
+
+Before migration succeeds, the same shares additionally:
+
+- Contribute their tokens to the candidate's direct legacy-emitter qualifying
+  balance.
+- Accumulate migration-backfill weight while they remain deposited.
+
+Emitter migration freezes only the temporary backfill weight. It MUST NOT
+redeem, convert, reissue, or change ownership of the tier shares. Deposits made
+after migration join the same tier but receive no retroactive backfill.
+
+Pool activation value, first-loss capacity, take-rate eligibility, withdrawal
+restrictions, and underlying-BLND emission weight MUST use this one position
+and the same eligibility rules on both sides of migration. Ongoing BLND
+emissions remain unavailable before the emitter begins sending BLND to the
+candidate. Backfill remains a separate temporary allocation and MUST NOT cause
+the shares to be counted twice in ongoing emissions.
+
+The loss waterfall applies before migration only to liabilities of candidate
+v3 pools connected to this backstop. These shares do not absorb losses from
+incumbent v2 pools merely because their token balance also qualifies the
+candidate for emitter migration.
+
+Raw BLND:USDC tokens transferred directly to the candidate may affect the
+legacy emitter's balance comparison, but they MUST NOT create tier shares,
+activation value, loss capacity, take-rate eligibility, or emission weight.
+
+### 7.2.2 Initial single-asset prefunding lane
 
 Before activation policy or loss handling is implemented, the candidate MAY
 configure one post-migration prefunding token independently from both the
@@ -550,12 +591,12 @@ therefore produces at most 9,244,800 BLND. It intentionally cannot reach the
 theoretical 10 million BLND cap.
 
 Backfill eligibility MUST be proportional to each surviving migration
-position's deposited LP amount multiplied by its holding duration. Only shares
-still deposited when migration succeeds are eligible. A pre-activation
-withdrawal MUST forfeit the withdrawn shares' complete accumulated weight, and
-that weight MUST NOT remain in the denominator. A partial withdrawal MUST
-forfeit only the withdrawn shares' proportional weight. Re-deposited shares
-begin a new holding period.
+position's BLND:USDC tier shares multiplied by their holding duration. Only
+shares still deposited when emitter migration succeeds are eligible. A
+withdrawal before emitter migration succeeds MUST forfeit the withdrawn
+shares' complete accumulated weight, and that weight MUST NOT remain in the
+denominator. A partial withdrawal MUST forfeit only the withdrawn shares'
+proportional weight. Re-deposited shares begin a new holding period.
 
 The final allocation weight for position \(i\) is:
 
@@ -754,7 +795,8 @@ implemented:
 - Post-migration designated token.
 - Top-level BLND split between backstop depositors and pool supply/borrow
   positions.
-- Legacy-position withdrawal and optional conversion interface.
+- Production withdrawal queue and loss-lock interface for continuous
+  BLND:USDC positions.
 - Initial BLND drop recipient policy and lockups.
 - Protocol-fee existence and incidence.
 - Administrative, pause, and WASM-upgrade authority.
@@ -765,20 +807,23 @@ implemented:
 
 1. Preserve the v2 incumbent and migration harness.
 2. Add an isolated v3 backstop crate with emitter-compatible entry points.
-3. Implement legacy BLND:USDC migration deposits and checkpoints.
+3. Implement continuous BLND:USDC tier deposits and migration-backfill
+   checkpoints.
 4. Add one independently configured, prefundable post-migration backstop
    asset without activation, loss, backfill, or emission eligibility.
 5. Implement a canonical, testable activation-policy interface.
-6. Implement legacy withdrawal without forced conversion.
+6. Implement the production BLND:USDC withdrawal queue and loss locks without
+   forced conversion.
 7. Complete native, WASM, local-network, and testnet migration exercises.
 
 Milestones 1 through 5 are represented by the frozen v2 baseline, isolated
 Protocol-27 backstop crate, cross-version legacy-emitter migration harness, and
-the candidate's pool-attributed legacy migration deposits, time-weighted
-checkpoints, isolated single-asset prefunding lane, and canonical asset-neutral
-12,500-USDC entry and 10,000-USDC maintenance activation-policy arithmetic. The
-production valuation adapter, pool-status integration, and BLND funding and
-claims remain intentionally unimplemented.
+the candidate's pool-attributed continuous BLND:USDC shares, time-weighted
+migration checkpoints, isolated single-asset prefunding lane, and canonical
+asset-neutral 12,500-USDC entry and 10,000-USDC maintenance activation-policy
+arithmetic. The production withdrawal queue, loss locks, valuation adapter,
+pool-status integration, and BLND funding and claims remain intentionally
+unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

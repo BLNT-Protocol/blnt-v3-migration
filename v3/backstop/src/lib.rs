@@ -1967,16 +1967,20 @@ fn consume_expired_tier_q4w(
 }
 
 fn require_compatible_pool(env: &Env, pool: &Address) {
-    let factory: Address = env.storage().instance().get(&DataKey::PoolFactory).unwrap();
-    if !PoolFactoryClient::new(env, &factory).is_pool(pool) {
-        panic_with_error!(env, BackstopError::InvalidPool);
-    }
+    require_registered_pool(env, pool);
 
     // Probe interface availability before accepting custody. Either boolean is
     // valid here: an existing loss may block withdrawal without blocking new
     // capital. A missing or failed callback aborts the deposit atomically.
     let backstop = env.current_contract_address();
     let _ = PoolLossClient::new(env, pool).backstop_withdrawal_allowed(&backstop);
+}
+
+fn require_registered_pool(env: &Env, pool: &Address) {
+    let factory: Address = env.storage().instance().get(&DataKey::PoolFactory).unwrap();
+    if !PoolFactoryClient::new(env, &factory).is_pool(pool) {
+        panic_with_error!(env, BackstopError::InvalidPool);
+    }
 }
 
 fn queue_blnd_usdc_withdrawal(env: &Env, from: Address, pool: Address, amount: i128) -> Q4WEntry {
@@ -2334,7 +2338,11 @@ fn proportional_floor(env: &Env, value: i128, numerator: i128, denominator: i128
 }
 
 fn build_pool_valuation(env: &Env, pool: &Address) -> PoolValuation {
-    require_compatible_pool(env, pool);
+    // Valuation is invoked by the pool itself during status transitions.
+    // Factory registration is sufficient here and avoids a circular
+    // pool -> backstop -> pool compatibility probe. Custody entry points keep
+    // the stronger loss-interface check in `require_compatible_pool`.
+    require_registered_pool(env, pool);
     let adapter_address = valuation_adapter(env);
     let adapter = ValuationAdapterClient::new(env, &adapter_address);
     if adapter.version() != VALUATION_ADAPTER_VERSION {

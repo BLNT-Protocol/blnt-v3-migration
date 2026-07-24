@@ -479,14 +479,14 @@ Network:
 Artifacts:
   Frozen incumbent: SDK 22 pool, pool factory, and backstop
   Legacy emitter: blend-contract-sdk 1.22.0 published WASM
-  Candidate: SDK 27 pool, pool factory, and backstop
+  Candidate: SDK 27 pool, pool factory, backstop, and test valuation adapter
 
 Deployment:
   1. Create and fund isolated local issuer/operator and depositor identities.
   2. Issue local BLND, BLNDUSDC, BLNDXLM, and USDC assets.
   3. Deploy the legacy emitter and a coherent SDK-22 incumbent stack.
   4. Predict the candidate address, bind its immutable factory, and deploy it.
-  5. Deploy a registered v3 pool and deposit ${CANDIDATE_BALANCE} BLNDUSDC units.
+  5. Deploy a registered v3 pool with an immutable local operator and deposit ${CANDIDATE_BALANCE} BLNDUSDC units.
   6. Fund the incumbent with ${INCUMBENT_BALANCE} BLNDUSDC units.
   7. Assert strict candidate qualification and call begin_migration.
 
@@ -633,7 +633,9 @@ command_deploy() {
         "candidate deterministic address"
 
     pool_raw="$(invoke_transaction "deploy-v3-pool" "${v3_factory_id}" deploy \
-        --deployer "${operator}" --salt "${POOL_SALT}")"
+        --deployer "${operator}" \
+        --operator "${operator}" \
+        --salt "${POOL_SALT}")"
     pool_id="$(normalize_scalar "${pool_raw}")"
     require_contract_id "${pool_id}" "deployed v3 pool"
     state_set "v3_pool" "${pool_id}"
@@ -697,9 +699,10 @@ command_deploy() {
 }
 
 command_status() {
-    local emitter_id incumbent_id candidate_id next_token_id legacy_token_id
+    local emitter_id incumbent_id candidate_id pool_id next_token_id legacy_token_id
     local unlock_time prepare_not_before phase
-    local emitter_backstop incumbent_balance candidate_balance queued_swap migration_status now
+    local emitter_backstop incumbent_balance candidate_balance queued_swap migration_status
+    local pool_operator pool_status now
 
     validate_tools
     require_network
@@ -707,6 +710,7 @@ command_status() {
     emitter_id="$(state_value emitter)"
     incumbent_id="$(state_value incumbent_backstop)"
     candidate_id="$(state_value candidate_backstop)"
+    pool_id="$(state_value v3_pool)"
     next_token_id="$(state_value next_backstop_token)"
     legacy_token_id="$(state_value legacy_backstop_token)"
     unlock_time="$(state_value unlock_time)"
@@ -721,6 +725,10 @@ command_status() {
         "status-candidate-balance" "${legacy_token_id}" balance --id "${candidate_id}")")"
     queued_swap="$(invoke_view "status-emitter-queue" "${emitter_id}" get_queued_swap)"
     migration_status="$(invoke_view "status-candidate-migration" "${candidate_id}" migration_status)"
+    pool_operator="$(normalize_scalar "$(invoke_view \
+        "status-pool-operator" "${pool_id}" operator)")"
+    pool_status="$(normalize_scalar "$(invoke_view \
+        "status-pool-status" "${pool_id}" status)")"
     now="$(date +%s)"
 
     if [[ "${queued_swap}" != "null" ]]; then
@@ -738,6 +746,8 @@ Local migration status
   incumbent BLNDUSDC: ${incumbent_balance}
   candidate BLNDUSDC: ${candidate_balance}
   candidate state: ${migration_status}
+  candidate pool operator: ${pool_operator}
+  candidate pool status: ${pool_status}
   queued swap: ${queued_swap}
   prepare not before: $(format_timestamp "${prepare_not_before}") (${prepare_not_before})
   unlock: $(format_timestamp "${unlock_time}") (${unlock_time})
@@ -882,7 +892,7 @@ command_verify() {
     local operator emitter_id incumbent_id candidate_id factory_id pool_id
     local valuation_adapter_id legacy_token_id next_token_id emitter_backstop
     local candidate_legacy_token candidate_next_token candidate_valuation_adapter
-    local factory_backstop pool_backstop pool_registered
+    local factory_backstop pool_backstop pool_operator pool_registered pool_status
     local incumbent_balance candidate_balance queued_swap migration_status activated_at
 
     validate_tools
@@ -910,6 +920,10 @@ command_verify() {
         "verify-factory-backstop" "${factory_id}" backstop)")"
     pool_backstop="$(normalize_scalar "$(invoke_view \
         "verify-pool-backstop" "${pool_id}" backstop)")"
+    pool_operator="$(normalize_scalar "$(invoke_view \
+        "verify-pool-operator" "${pool_id}" operator)")"
+    pool_status="$(normalize_scalar "$(invoke_view \
+        "verify-pool-status" "${pool_id}" status)")"
     pool_registered="$(normalize_scalar "$(invoke_view \
         "verify-pool-registration" "${factory_id}" is_pool --pool "${pool_id}")")"
     incumbent_balance="$(normalize_scalar "$(invoke_view \
@@ -929,6 +943,8 @@ command_verify() {
         "candidate valuation adapter"
     assert_equal "${candidate_id}" "${factory_backstop}" "v3 factory binding"
     assert_equal "${candidate_id}" "${pool_backstop}" "v3 pool binding"
+    assert_equal "${operator}" "${pool_operator}" "v3 pool operator"
+    assert_equal "6" "${pool_status}" "unactivated v3 pool status"
     assert_equal "true" "${pool_registered}" "v3 pool registration"
     assert_equal "${INCUMBENT_BALANCE}" "${incumbent_balance}" "incumbent retained balance"
     assert_equal "${CANDIDATE_BALANCE}" "${candidate_balance}" "candidate retained balance"
@@ -957,6 +973,8 @@ Local migration verified
   candidate SDK-27 backstop: ${candidate_id}
   candidate pool factory: ${factory_id}
   candidate pool: ${pool_id}
+  candidate pool operator: ${pool_operator}
+  candidate pool status: ${pool_status}
   candidate valuation adapter: ${valuation_adapter_id}
   activation timestamp: ${activated_at}
   evidence directory: ${RUN_DIR}

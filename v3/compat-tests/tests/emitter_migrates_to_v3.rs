@@ -409,26 +409,29 @@ fn v3_factory_deploys_registered_loss_aware_pool_wasm() {
     let factory_id = env.register(v3_pool_factory::WASM, (&backstop, &pool_hash));
     let factory = v3_pool_factory::Client::new(&env, &factory_id);
     let deployer = Address::generate(&env);
+    let operator = Address::generate(&env);
     let salt = soroban_sdk::BytesN::from_array(&env, &[11; 32]);
 
-    assert!(factory.try_deploy(&deployer, &salt).is_err());
+    assert!(factory.try_deploy(&deployer, &operator, &salt).is_err());
     let pool_id = factory
         .mock_auths(&[MockAuth {
             address: &deployer,
             invoke: &MockAuthInvoke {
                 contract: &factory_id,
                 fn_name: "deploy",
-                args: (&deployer, salt.clone()).into_val(&env),
+                args: (&deployer, &operator, salt.clone()).into_val(&env),
                 sub_invokes: &[],
             },
         }])
-        .deploy(&deployer, &salt);
+        .deploy(&deployer, &operator, &salt);
     let pool = v3_pool::Client::new(&env, &pool_id);
 
     assert!(factory.is_pool(&pool_id));
     assert_eq!(factory.backstop(), backstop);
     assert_eq!(factory.pool_wasm_hash(), pool_hash);
     assert_eq!(pool.backstop(), backstop);
+    assert_eq!(pool.operator(), operator);
+    assert_eq!(pool.status(), 6);
     assert_eq!(
         pool.backstop_loss_state(),
         v3_pool::BackstopLossState {
@@ -495,7 +498,11 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
     );
 
     let factory = v3_pool_factory::Client::new(&env, &factory_id);
-    let pool_id = factory.deploy(&deployer, &soroban_sdk::BytesN::from_array(&env, &[22; 32]));
+    let pool_id = factory.deploy(
+        &deployer,
+        &deployer,
+        &soroban_sdk::BytesN::from_array(&env, &[22; 32]),
+    );
     let pool = v3_pool::Client::new(&env, &pool_id);
     let candidate = v3_backstop::Client::new(&env, &candidate_id);
     let user = Address::generate(&env);
@@ -510,6 +517,24 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
     candidate.withdraw_blnd_usdc(&user, &pool_id, &SCALAR_7, &user);
     assert_eq!(legacy_token.balance(&user), SCALAR_7);
     assert_eq!(candidate.blnd_usdc_shares(&user, &pool_id), 0);
+
+    legacy_token.mint(&user, &(12_500 * SCALAR_7));
+    candidate.deposit_blnd_usdc(&user, &pool_id, &(12_500 * SCALAR_7));
+    assert_eq!(pool.set_pool_status(&0), 0);
+    assert_eq!(pool.status(), 0);
+    assert!(pool.action_allowed(&4));
+
+    candidate.queue_blnd_usdc_withdrawal(&user, &pool_id, &(6_250 * SCALAR_7));
+    assert_eq!(pool.update_pool_status(), 3);
+    assert_eq!(pool.status(), 3);
+    assert!(!pool.action_allowed(&4));
+    assert!(!pool.action_allowed(&9));
+    assert!(pool.action_allowed(&0));
+
+    candidate.dequeue_blnd_usdc_withdrawal(&user, &pool_id, &(6_250 * SCALAR_7));
+    assert_eq!(pool.update_pool_status(), 1);
+    assert_eq!(pool.status(), 1);
+    assert!(pool.action_allowed(&4));
 }
 
 #[test]

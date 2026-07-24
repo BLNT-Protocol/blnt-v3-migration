@@ -27,6 +27,7 @@ enum PersistentKey {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PoolDeployed {
     pub deployer: Address,
+    pub operator: Address,
     pub pool: Address,
 }
 
@@ -57,8 +58,9 @@ impl PoolFactoryContract {
     }
 
     /// Deploy a pool whose immutable backstop is this factory's configured
-    /// candidate. The deployer authorizes use of its deterministic salt domain.
-    pub fn deploy(env: Env, deployer: Address, salt: BytesN<32>) -> Address {
+    /// candidate and whose local operator is fixed at construction. The
+    /// deployer authorizes use of its deterministic salt domain.
+    pub fn deploy(env: Env, deployer: Address, operator: Address, salt: BytesN<32>) -> Address {
         extend_instance_ttl(&env);
         deployer.require_auth();
 
@@ -76,7 +78,7 @@ impl PoolFactoryContract {
         let pool = env
             .deployer()
             .with_current_contract(effective_salt)
-            .deploy_v2(pool_wasm_hash, (&backstop,));
+            .deploy_v2(pool_wasm_hash, (&backstop, &operator));
         let key = PersistentKey::Pool(pool.clone());
         env.storage().persistent().set(&key, &true);
         env.storage()
@@ -85,6 +87,7 @@ impl PoolFactoryContract {
 
         PoolDeployed {
             deployer,
+            operator,
             pool: pool.clone(),
         }
         .publish(&env);

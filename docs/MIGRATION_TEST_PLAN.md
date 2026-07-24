@@ -243,6 +243,12 @@ The v3 tests must verify:
   relinquish an override into ordinary On-Ice status 3. Admin Active requires
   the applicable activation threshold and Q4W below 50%; Admin On-Ice and
   ordinary On-Ice require Q4W below 75%; Admin Frozen is always selectable.
+- The authenticated factory deployer explicitly fixes the pool-local operator
+  at construction; no entry point can rotate or recover it afterward.
+- Every successful permissionless or operator transition stores the canonical
+  result atomically and emits its previous status, new status, and whether the
+  transition was an operator action. Failed, disallowed, stale, or invalid
+  quotes leave stored status unchanged.
 - At or above 30% but below 50% Q4W, an otherwise qualified pool is ordinarily
   On-Ice, but the operator can select Admin Active and re-enable borrowing.
   Tests must treat this as an explicit bounded risk-on override rather than

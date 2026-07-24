@@ -331,6 +331,13 @@ does not gate a deposit: a pool with an existing loss MAY accept new
 loss-absorbing capital, while later withdrawal remains blocked until the pool
 reports it safe.
 
+Canonical valuation MUST require factory registration but MUST NOT repeat the
+pool loss-callback probe. A stored-status transition begins in the pool, calls
+the backstop for canonical valuation, and therefore cannot safely introduce a
+backstop-to-pool callback in the same invocation. The immutable factory deploys
+only the approved pool WASM, so registration is the authoritative identity
+check for this path. Custody entry points retain the stronger callback probe.
+
 `backstop_withdrawal_allowed(backstop)` is a permanent compatibility boundary.
 Every factory-approved pool MUST preserve its signature and fail-closed
 semantics across any WASM upgrade. A pool upgrade MUST be rejected unless the
@@ -679,6 +686,15 @@ the permissionless status-refresh entry point, using canonical values
 checkpointed for that transaction. Status refresh, operator status requests,
 pool-status enforcement, and BLND reward eligibility MUST consume the same
 canonical status result.
+
+The implemented v3 pool stores status 6 at construction, stores its operator
+immutably, and emits a status-change event after each successful transition.
+The factory accepts the operator as an explicit deployment argument while the
+authenticated deployer retains the deterministic salt domain. Permissionless
+refresh and operator requests call the immutable backstop, reject disallowed
+or invalid results, and store the returned status atomically. The pool exposes
+the centralized v2-compatible action predicate that future lending and auction
+entry points MUST enforce.
 
 ## 9. Loss waterfall
 
@@ -1123,15 +1139,17 @@ activation-policy arithmetic, an immutable versioned valuation-adapter
 boundary that derives active and queued values from canonical pool shares,
 and 17-day bounded withdrawal queues for all three tiers, exact one-time
 backfill funding and owner-authorized constant-time claims, an immutable
-Protocol-27 pool factory, and a fail-closed pool callback derived directly
-from three bounded canonical record maps. The local runner deploys
-independently issued assets, a coherent
+Protocol-27 pool factory, immutable per-pool operator and stored status,
+canonical permissionless and operator status transitions, the v2-compatible
+action predicate, and a fail-closed pool callback derived directly from three
+bounded canonical record maps. The local runner deploys independently issued
+assets, a coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
 local run, the public-testnet exercise, the lending, auction, and waterfall
 entry points that invoke those record transitions, a production LP valuation
-source, stored pool-status integration, and ongoing BLND-emission accrual
-remain intentionally unimplemented.
+source, enforcement of stored status by future lending and auction entry
+points, and ongoing BLND-emission accrual remain intentionally unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

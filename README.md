@@ -73,7 +73,9 @@ SDK-27 candidate contracts and test-only valuation adapter. The compatibility
 harness verifies both a cross-contract call into the SDK-22 backstop and a
 complete legacy-emitter migration into the v3 candidate on a Protocol-27
 host. The deterministic adapter exercises the immutable valuation boundary;
-it is not a production oracle.
+it is not a production oracle. The candidate pool persists v2-compatible
+status transitions using that canonical boundary and an immutable pool-local
+operator.
 
 Run both lanes:
 

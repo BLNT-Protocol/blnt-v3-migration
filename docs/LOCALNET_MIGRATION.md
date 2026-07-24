@@ -86,14 +86,15 @@ make localnet-keepalive
 ```
 
 This explicitly extends the legacy emitter instance, incumbent distribution
-checkpoint, and all four configured asset-contract instances for ten local
-days. It also refreshes the queued swap, candidate, factory registration, pool,
-depositor position, and relevant token balances through their supported access
-paths. Before reporting success, it verifies the saved queue target, next
-designated token, unlock time, and the candidate's strict balance majority. It
-does not alter queue timestamps, balances, shares, distribution timestamps, or
-migration eligibility. Each keepalive result and resource-cost report is
-retained in the run evidence directory.
+checkpoint, valuation-adapter instance, and all four configured asset-contract
+instances for ten local days. It also refreshes the queued swap, candidate,
+factory registration, pool, depositor position, and relevant token balances
+through their supported access paths. Before reporting success, it verifies
+the saved queue target, next designated token, unlock time, and the candidate's
+strict balance majority. It does not alter queue timestamps, balances, shares,
+pool status, distribution timestamps, or migration eligibility. Each
+keepalive result and resource-cost report is retained in the run evidence
+directory.
 
 If the Mac sleeps, the container may remain running while Stellar Core stops
 closing ledgers and the RPC reports stale health. Recover that process and
@@ -125,6 +126,8 @@ verifies:
 - The emitter queue is empty.
 - The candidate is active.
 - The candidate, factory, and deployed pool retain their immutable bindings.
+- The deployed pool retains its immutable local operator and remains in Setup
+  until an authorized status transition occurs.
 - The pool remains registered.
 - The legacy and next designated tokens match the deployment plan.
 - Incumbent and candidate balances are conserved.

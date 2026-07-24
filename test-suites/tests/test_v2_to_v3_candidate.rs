@@ -6,11 +6,11 @@ use test_suites::{
     test_fixture::{TestFixture, TokenIndex, SCALAR_7},
 };
 
-/// Establishes the v2-to-v3 emitter-migration harness.
+/// Preserves the historical SDK-22 emitter-migration baseline.
 ///
-/// Until the v3 backstop exists, a second v2 backstop is used as the candidate.
-/// The candidate constructor in this test is the replacement point for the
-/// first v3 backstop implementation.
+/// This root-workspace test intentionally uses a second v2 backstop. The real
+/// SDK-27 candidate is exercised against the legacy emitter WASM by the
+/// independent `v3/compat-tests` harness.
 #[test]
 fn test_v2_to_v3_candidate_migration_baseline() {
     let fixture = TestFixture::create(false);

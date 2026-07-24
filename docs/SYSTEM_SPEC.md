@@ -146,6 +146,20 @@ same test can deploy an incumbent and a candidate.
 
 Before finalization, the candidate MUST:
 
+- Start a public prefunding campaign at candidate construction.
+- Require the original emitter queue to begin no more than 31 days after the
+  prefunding campaign starts.
+- Provide a permissionless `begin_migration` operation that atomically creates
+  the canonical legacy-emitter queue and records its accounting epoch.
+- Open a public accounting epoch from the original queue's deterministic
+  31-day start without treating that early observation as finalization
+  verification.
+- Refuse to prepare migration unless the accounting epoch has already opened.
+- Prepare migration during the final seven days before a verified emitter queue
+  unlocks, using the registered original queue's unlock time as the immutable
+  recovery-horizon anchor before backfill is finalized or claimable.
+- Store an immutable absolute migration deadline at construction, 138 days
+  after the prefunding campaign begins.
 - Accept and account for migration deposits of the incumbent designated token.
 - Keep enough designated tokens directly at the candidate address to remain
   strictly larger than the incumbent.
@@ -160,6 +174,17 @@ Before finalization, the candidate MUST:
 During the 31-day queue:
 
 - The incumbent remains the emitter recipient.
+- Repeated preparation of the same queue MUST be idempotent.
+- At most two replacement queues MAY be verified. Each replacement MUST target
+  the configured candidate and designated token, MUST be prepared during its
+  final seven days, and MUST fit within the absolute recovery horizon.
+- The absolute recovery horizon MUST end 76 days after the original unlock and
+  MUST NOT be extended by cancellation or re-queueing.
+- No queue, retry, recovery, synchronization, or backfill endpoint MAY extend
+  beyond the deployment-anchored 138-day absolute migration deadline.
+- Direct-swap synchronization MUST expire seven days after the currently
+  verified queue unlocks. Because another replacement requires a fresh 31-day
+  delay, an unverified queue cannot unlock during that synchronization window.
 - The candidate MUST continue validating its qualifying balance.
 - A loss of the strictly-greater balance MUST prevent finalization.
 - Accounting changes MUST NOT allow the same capital to support incompatible
@@ -170,9 +195,13 @@ During the 31-day queue:
 
 Finalization MUST:
 
+- Require a previously prepared and currently verified queue.
+- Reject after the original queue's bounded recovery horizon, which itself
+  cannot exceed the deployment-anchored absolute deadline.
+- Invoke the legacy emitter swap in the canonical finalization path.
 - Verify that the emitter now recognizes the candidate.
-- Use the emitter finalization timestamp as the unambiguous cutoff between
-  pre-migration backfill and ongoing candidate emissions.
+- End time-weighted backfill at the earlier of actual activation or 76 days
+  after the original verified queue unlock.
 - Account for the emitter's final pre-swap distribution to the incumbent
   without crediting it to candidate depositors.
 - Stop new accrual under the pre-migration backfill regime.
@@ -184,6 +213,47 @@ Finalization MUST:
 Emitter finalization does not rewrite the candidate's WASM. Any lifecycle
 transition required by v3 MUST already be encoded in candidate code and MUST
 verify the emitter's state before becoming active.
+
+The legacy emitter's `swap_backstop` entry point is permissionless. If it is
+invoked directly, the candidate MUST permit permissionless lifecycle
+synchronization during the currently verified queue's bounded grace period
+after verifying that the emitter recognizes the candidate. Synchronization
+MUST NOT modify the original recovery-horizon anchor. After that queue's grace
+period, synchronization MUST reject rather than risk accepting an unverified
+replacement queue.
+
+The canonical operational path MUST call `candidate.finalize_migration()`, not
+the emitter directly. Candidate finalization invokes `swap_backstop`, verifies
+the emitter transition, and activates the candidate atomically.
+`candidate.sync_migration()` is only the recovery path when another caller
+invokes the emitter's permissionless `swap_backstop` first. Operators MUST
+monitor the emitter during the finalization window and invoke synchronization
+immediately after detecting that transition.
+
+The synchronization deadline is seven days after the currently verified
+queue's unlock time, not seven days after the direct swap transaction. A direct
+swap performed late in that interval leaves only the remaining portion of the
+same fixed grace period. Once the emitter swap succeeds, a subsequent loss of
+the candidate's strictly-greater legacy-token balance does not undo the emitter
+transition or prevent synchronization. Failure to synchronize before the fixed
+deadline can leave the emitter pointing to a candidate whose lifecycle remains
+`Prepared`; this draft accepts that bounded operational risk rather than adding
+a governance recovery path.
+
+The canonical queue-creation path MUST call `candidate.begin_migration()`.
+That operation atomically invokes the legacy emitter's permissionless
+`queue_swap_backstop` and records the returned queue as the candidate's
+original accounting epoch. `prepare_migration()` MUST NOT silently adopt a
+queue when no epoch has been recorded.
+
+If another caller creates a correct emitter queue directly,
+`candidate.open_migration_epoch()` is the permissionless recovery path.
+Operators MUST invoke it immediately after detecting the queue and before the
+queue can be canceled or replaced. The legacy emitter does not retain canceled
+queue history, so a queue that is both unobserved and canceled cannot later be
+reconstructed on-chain. This draft accepts that bounded operational assumption.
+The deployment-anchored absolute deadline ensures that an observed replacement
+can never extend migration beyond 138 days from candidate construction.
 
 ### 6.4 Post-migration
 
@@ -314,10 +384,63 @@ The candidate MUST distinguish:
 - Pool supply and borrow emissions.
 - Any other explicitly approved allocation.
 
-Backfill MUST use a deterministic checkpoint and MUST be based only on eligible
-pre-finalization positions. Ongoing emissions MUST begin from a deterministic
-post-finalization checkpoint. No interval or position may earn under both
-regimes unless the specification explicitly intends and tests that result.
+The migration backfill clock MUST start when the original legacy-emitter queue
+begins:
+
+\[
+T_{\mathrm{start}} = T_{\mathrm{original\ unlock}} - 31\text{ days}
+\]
+
+Scheduled backfill MUST accrue at 1 BLND per second until the bounded backfill
+end and retain the inherited 10 million BLND safety cap:
+
+\[
+B = \min(T_{\mathrm{end}} - T_{\mathrm{start}}, 10{,}000{,}000)
+\text{ BLND}
+\]
+
+With two 38-day retry periods, the longest scheduled interval is 107 days and
+therefore produces at most 9,244,800 BLND. It intentionally cannot reach the
+theoretical 10 million BLND cap.
+
+Backfill eligibility MUST be proportional to each surviving migration
+position's deposited LP amount multiplied by its holding duration. Only shares
+still deposited when migration succeeds are eligible. A pre-activation
+withdrawal MUST forfeit the withdrawn shares' complete accumulated weight, and
+that weight MUST NOT remain in the denominator. A partial withdrawal MUST
+forfeit only the withdrawn shares' proportional weight. Re-deposited shares
+begin a new holding period.
+
+The final allocation weight for position \(i\) is:
+
+\[
+W_i = \sum_k A_{i,k}(T_{\mathrm{end}} - T_{i,k})
+\]
+
+where \(A_{i,k}\) and \(T_{i,k}\) are the amount and effective deposit time of
+each surviving tranche, and \(T_{\mathrm{end}}\) is the earlier of activation
+or the absolute recovery-horizon end. The effective deposit time MUST be the
+actual deposit time. Prefunding used to establish the candidate's qualifying
+balance therefore earns proportional allocation weight before the original
+queue begins, while the 31-day campaign limit prevents unbounded early-weight
+accumulation. Prefunding weight changes only how scheduled BLND is divided; it
+does not move the 1-BLND-per-second scheduling start earlier than the original
+queue. A position's allocation is:
+
+\[
+B_i = \left\lfloor B \frac{W_i}{\sum_j W_j} \right\rfloor
+\]
+
+This makes the funded allocation, including weight forfeited by early
+withdrawals, available proportionally to positions that remain through
+successful migration, apart from deterministic integer-rounding dust.
+Finalization and claims MUST use accumulator/checkpoint accounting and MUST NOT
+iterate over all depositors. The funding transaction, claim authority, and
+rounding-dust destination remain separate implementation decisions.
+
+Ongoing accounting MUST be based on BLND actually received after the emitter
+changes recipients. No interval or position may earn under both regimes unless
+the specification explicitly intends and tests that result.
 
 The inherited v2 70/30 split is not enforced by the emitter. The v3 split is an
 open economic decision and MUST NOT be changed implicitly during unrelated
@@ -382,6 +505,10 @@ NOT be added.
 - Conversions MUST define floor or ceiling behavior.
 - Asset decimals MUST be validated.
 - Critical calls MUST use bounded work and bounded ledger footprints.
+- The top-level candidate MUST extend its code and instance TTL to 90 days at
+  construction and whenever the remaining TTL falls below 89 days.
+- TTL tests MUST advance ledger sequence, not only timestamp, and cover the
+  83 days from earliest preparation through the two-retry recovery horizon.
 - Large asset sets, tier sets, reward zones, and recipient lists MUST be
   processed in bounded batches or constrained by explicit limits.
 - Contract storage and WASM TTL requirements MUST be tested on a network-style
@@ -436,6 +563,11 @@ implemented:
 5. Implement a canonical, testable activation-policy interface.
 6. Implement legacy withdrawal without forced conversion.
 7. Complete native, WASM, local-network, and testnet migration exercises.
+
+Milestones 1 through 3 are represented by the frozen v2 baseline, isolated
+Protocol-27 backstop crate, cross-version legacy-emitter migration harness, and
+the candidate's pool-attributed legacy migration deposits and time-weighted
+checkpoints. BLND funding and claims remain intentionally unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

@@ -68,9 +68,10 @@ Check the v3 workspace with its pinned current toolchain:
 make check-v3
 ```
 
-This builds the historical v2 WASM, builds an SDK-27 compatibility-probe
-contract, and verifies a cross-contract call from the SDK-27 WASM into the
-SDK-22 backstop WASM on the current host.
+This builds the historical v2 WASM, the SDK-27 compatibility probe, and the
+first SDK-27 v3 backstop WASM. The compatibility harness verifies both a
+cross-contract call into the SDK-22 backstop and a complete legacy-emitter
+migration into the v3 candidate on a Protocol-27 host.
 
 Run both lanes:
 
@@ -81,7 +82,7 @@ make test-all
 ## Releases
 
 Automated tag-triggered releases are intentionally disabled while the v3
-workspace contains only compatibility scaffolding. Add a v3-specific release
+backstop remains an experimental migration skeleton. Add a v3-specific release
 workflow only after deployable v3 contract packages and their artifact checks
 exist. The repository must not publish the root SDK-22 contracts as v3
 artifacts.

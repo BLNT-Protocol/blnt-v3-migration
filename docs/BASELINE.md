@@ -59,5 +59,6 @@ must not modify the root v2 dependency graph or `Cargo.lock`.
 - `test-suites`: synthetic fixtures, WASM integration tests, ledger snapshot
   tests, and migration tests.
 
-The first v3 implementation milestone should replace the candidate backstop in
-the migration baseline without changing the incumbent v2 contracts.
+The Protocol-27 migration harness now uses the isolated v3 backstop as the
+candidate without changing the incumbent v2 contracts. The root SDK-22 test
+retains a second v2 backstop only as a frozen historical-emitter baseline.

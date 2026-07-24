@@ -8,9 +8,16 @@ test-v2-migration: build
 
 test-all: test check-v3
 
-check-v3: build
-	cargo +1.91.0 fmt --manifest-path v3/Cargo.toml --all -- --check
+build-v3:
+	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-backstop --target wasm32v1-none --release --locked
 	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked
+	mkdir -p v3/target/wasm32v1-none/optimized
+	stellar contract optimize \
+		--wasm v3/target/wasm32v1-none/release/blend_v3_backstop.wasm \
+		--wasm-out v3/target/wasm32v1-none/optimized/blend_v3_backstop.wasm
+
+check-v3: build build-v3
+	cargo +1.91.0 fmt --manifest-path v3/Cargo.toml --all -- --check
 	cargo +1.91.0 check --manifest-path v3/Cargo.toml --all-targets --locked
 	cargo +1.91.0 test --manifest-path v3/Cargo.toml --workspace --locked
 

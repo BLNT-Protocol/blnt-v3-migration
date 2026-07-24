@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["compat-probe", "compat-tests"]
+members = ["backstop", "compat-probe", "compat-tests"]
 
 [workspace.package]
 edition = "2021"

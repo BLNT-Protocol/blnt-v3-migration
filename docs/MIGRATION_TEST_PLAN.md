@@ -88,7 +88,11 @@ The v3 tests must verify:
 - The canonical pool callback rejects any address other than its configured
   backstop and returns false independently for nonzero backstop liabilities,
   committed loss or auction records, and unresolved bad-debt records.
-- Missing canonical pool loss state fails closed.
+- Missing canonical pool loss records fail closed.
+- Each canonical loss-record map is bounded to 30 entries. Reserve-keyed
+  amounts reject negatives, remove zeroes, and preserve their count on
+  replacement; committed-loss auctions use presence-only identifiers.
+- A failed multi-record loss transition rolls back every record change.
 - Canonical loss-state mutation has no administrator or governance override and
   is not exposed as a public boolean setter.
 - Once the lending, auction, and waterfall engines are implemented, native and

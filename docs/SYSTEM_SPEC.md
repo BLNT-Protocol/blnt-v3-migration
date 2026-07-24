@@ -431,13 +431,21 @@ record sets:
 - Capital committed to an active loss or auction.
 - Unresolved bad-debt records.
 
-The pool MAY cache the number of nonzero records in each set, but it MUST update
-the cached count atomically with the canonical record transition and MUST NOT
-combine monetary amounts from reserves with different units. The callback MUST
-return false for an address other than the pool's immutable backstop or when
-any count is nonzero. Missing canonical loss state MUST fail closed rather than
-being interpreted as zero. No administrator, governance address, or mutable
-boolean override may make the callback return true.
+The initial Protocol-27 pool stores these as three bounded canonical record
+maps in instance state and derives each count directly from its map length. Each
+map may contain at most 30 records. Liability and unresolved-bad-debt maps are
+keyed by reserve: a zero amount removes its record, negative amounts are
+invalid, and replacing an existing nonzero amount does not change the count.
+Committed losses are presence-only records keyed by auction identifier because
+a multi-asset auction has no single amount unit. Monetary amounts from reserves
+with different units MUST NOT be combined. Future lending, auction, and
+waterfall operations MUST update the records atomically with the transition
+they represent.
+
+The callback MUST return false for an address other than the pool's immutable
+backstop or when any count is nonzero. Missing canonical loss records MUST fail
+closed rather than being interpreted as empty. No administrator, governance
+address, or mutable boolean override may make the callback return true.
 
 The withdrawal implementation MUST:
 
@@ -447,11 +455,11 @@ The withdrawal implementation MUST:
 - Remain executable without iterating over an unbounded number of users or
   assets.
 
-The bounded Q4W accounting and Protocol-27 pool expose this fail-closed state
-boundary, but the lending, auction, and loss-waterfall engines that create and
-resolve its canonical records remain unimplemented. Until those engines update
-the state atomically with real loss transitions, these positions MUST NOT be
-treated as authoritative executable loss capacity.
+The bounded Q4W accounting and Protocol-27 pool implement this fail-closed
+record and state boundary, but the lending, auction, and loss-waterfall entry
+points that create and resolve records during real protocol operations remain
+unimplemented. Until those engines invoke the internal record transitions,
+these positions MUST NOT be treated as authoritative executable loss capacity.
 
 ## 8. Pool activation
 
@@ -845,8 +853,8 @@ implemented:
 - Per-tier auction, transfer, and disposal mechanisms.
 - Behavior when a tier's oracle or disposal market is unavailable.
 - Production LP price sources, averaging, staleness, and failure policy.
-- Exact lending, auction, and waterfall transitions that create and resolve
-  each canonical pool loss-state record.
+- Exact lending, auction, and waterfall entry points that invoke each canonical
+  pool loss-record transition.
 - Exact take-rate accrual integration and distribution cadence.
 - Post-migration designated token.
 - Top-level BLND split between backstop depositors and pool supply/borrow
@@ -879,10 +887,10 @@ pool-attributed continuous BLND:USDC shares, time-weighted migration
 checkpoints, isolated single-asset prefunding lane, canonical asset-neutral
 12,500-USDC entry and 10,000-USDC maintenance activation-policy arithmetic, and
 the 17-day bounded withdrawal queue, an immutable Protocol-27 pool factory, and
-a fail-closed pool callback derived from three canonical aggregate record
-counts. The lending, auction, and waterfall transitions behind those counts,
-the valuation adapter, pool-status integration, and BLND funding and claims
-remain intentionally unimplemented.
+a fail-closed pool callback derived directly from three bounded canonical
+record maps. The lending, auction, and waterfall entry points that invoke those
+record transitions, the valuation adapter, pool-status integration, and BLND
+funding and claims remain intentionally unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

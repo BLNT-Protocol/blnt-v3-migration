@@ -48,15 +48,19 @@ Prefund shares are isolated from migration and may be deposited or withdrawn
 before or after activation; they do not yet count toward activation, losses,
 backfill, or emissions.
 
-The v3 pool exposes canonical aggregate record counts for backstop liabilities,
-committed losses or auctions, and unresolved bad debt. Its withdrawal callback
-returns true only for its immutable backstop and only when all three counts are
-zero. Missing loss state traps rather than being treated as clear. There is no
-administrator-controlled withdrawal override. The state mutation boundary is
-internal: future lending, auction, and waterfall modules must update these
-counts atomically with their canonical records. Those engines are not yet
-implemented, so the current pool is an integration boundary rather than a
-complete lending pool.
+The v3 pool stores bounded canonical record maps for backstop liabilities,
+committed losses or auctions, and unresolved bad debt. It derives aggregate
+counts directly from those maps without combining reserve-denominated amounts.
+Each map permits at most 30 records. Reserve-keyed amounts reject negatives,
+remove zeroes, and preserve their count on replacement. Committed losses use
+presence-only auction identifiers because multi-asset auctions have no single
+amount unit. The withdrawal callback returns true only for its immutable
+backstop and only when all three maps are empty. Missing records trap rather
+than being treated as clear. There is no administrator-controlled withdrawal
+override. The mutation boundary is internal: future lending, auction, and
+waterfall entry points must update these records atomically with real protocol
+transitions. Those engines are not yet implemented, so the current pool is an
+integration boundary rather than a complete lending pool.
 
 The v3 pool factory stores immutable backstop and pool-WASM configuration,
 deploys pools with that backstop, and maintains the registry consumed by the

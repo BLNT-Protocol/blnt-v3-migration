@@ -11,10 +11,18 @@ test-all: test check-v3
 build-v3:
 	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-backstop --target wasm32v1-none --release --locked
 	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked
+	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-pool --target wasm32v1-none --release --locked
+	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-pool-factory --target wasm32v1-none --release --locked
 	mkdir -p v3/target/wasm32v1-none/optimized
 	stellar contract optimize \
 		--wasm v3/target/wasm32v1-none/release/blend_v3_backstop.wasm \
 		--wasm-out v3/target/wasm32v1-none/optimized/blend_v3_backstop.wasm
+	stellar contract optimize \
+		--wasm v3/target/wasm32v1-none/release/blend_v3_pool.wasm \
+		--wasm-out v3/target/wasm32v1-none/optimized/blend_v3_pool.wasm
+	stellar contract optimize \
+		--wasm v3/target/wasm32v1-none/release/blend_v3_pool_factory.wasm \
+		--wasm-out v3/target/wasm32v1-none/optimized/blend_v3_pool_factory.wasm
 
 check-v3: build build-v3
 	cargo +1.91.0 fmt --manifest-path v3/Cargo.toml --all -- --check

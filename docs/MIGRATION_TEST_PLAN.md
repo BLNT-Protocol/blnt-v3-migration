@@ -75,14 +75,25 @@ The test suite must verify:
 The v3 tests must verify:
 
 - The candidate stores one immutable v3 pool-factory address and rejects a
-  constructor configuration that does not expose the required `is_pool`
-  interface.
+  constructor configuration that does not expose the required `backstop` and
+  `is_pool` interfaces or is bound to another backstop.
 - BLND:USDC deposits reject unregistered pools and registered addresses without
   the required loss-state callback before transferring tokens or minting shares.
 - A registered compatible pool may accept new deposits while its callback
   blocks withdrawal.
 - Once pool WASM upgrades are implemented, upgrade tests preserve the
   `backstop_withdrawal_allowed(backstop)` interface and fail-closed semantics.
+- The immutable v3 factory deploys a registered Protocol-27 pool configured
+  with the candidate backstop.
+- The canonical pool callback rejects any address other than its configured
+  backstop and returns false independently for nonzero backstop liabilities,
+  committed loss or auction records, and unresolved bad-debt records.
+- Missing canonical pool loss state fails closed.
+- Canonical loss-state mutation has no administrator or governance override and
+  is not exposed as a public boolean setter.
+- Once the lending, auction, and waterfall engines are implemented, native and
+  WASM tests MUST prove each real record transition updates the corresponding
+  aggregate count atomically and blocks withdrawals until resolution.
 - BLND:USDC migration deposits and the BLND:USDC first-loss tier use the same
   token contract, user shares, pool totals, and global totals.
 - BLND:USDC shares continue across migration without conversion, reissuance, or

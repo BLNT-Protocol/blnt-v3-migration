@@ -110,6 +110,7 @@ pub enum BackstopError {
     WithdrawalNotExpired = 1226,
     PoolWithdrawalBlocked = 1227,
     InvalidPool = 1228,
+    InvalidPoolFactoryBinding = 1229,
 }
 
 #[derive(Clone)]
@@ -218,6 +219,7 @@ pub trait PoolLoss {
 /// Immutable registry of pools accepted by this backstop.
 #[contractclient(name = "PoolFactoryClient")]
 pub trait PoolFactory {
+    fn backstop(env: Env) -> Address;
     fn is_pool(env: Env, pool: Address) -> bool;
 }
 
@@ -296,7 +298,11 @@ impl BackstopContract {
             panic_with_error!(&env, BackstopError::AssetConfigurationCollision);
         }
         let candidate = env.current_contract_address();
-        let _ = PoolFactoryClient::new(&env, &pool_factory).is_pool(&candidate);
+        let pool_factory_client = PoolFactoryClient::new(&env, &pool_factory);
+        if pool_factory_client.backstop() != candidate {
+            panic_with_error!(&env, BackstopError::InvalidPoolFactoryBinding);
+        }
+        let _ = pool_factory_client.is_pool(&candidate);
         extend_instance_ttl(&env);
         let prefunding_start = env.ledger().timestamp();
         let absolute_migration_deadline =
@@ -1779,8 +1785,27 @@ mod tests {
     #[contract]
     struct MockPoolFactory;
 
+    #[derive(Clone)]
+    #[contracttype]
+    enum MockPoolFactoryKey {
+        Backstop,
+    }
+
     #[contractimpl]
     impl MockPoolFactory {
+        pub fn __constructor(env: Env, backstop: Address) {
+            env.storage()
+                .instance()
+                .set(&MockPoolFactoryKey::Backstop, &backstop);
+        }
+
+        pub fn backstop(env: Env) -> Address {
+            env.storage()
+                .instance()
+                .get(&MockPoolFactoryKey::Backstop)
+                .unwrap()
+        }
+
         pub fn is_pool(_env: Env, _pool: Address) -> bool {
             false
         }
@@ -1872,8 +1897,8 @@ mod tests {
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
         let prefund_token = Address::generate(&env);
-        let pool_factory = env.register(MockPoolFactory, ());
         let candidate_id = Address::generate(&env);
+        let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
         env.register_at(
             &candidate_id,
@@ -1933,8 +1958,8 @@ mod tests {
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
         let prefund_token = Address::generate(&env);
-        let pool_factory = env.register(MockPoolFactory, ());
         let candidate_id = Address::generate(&env);
+        let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
         env.register_at(
             &candidate_id,
@@ -1970,8 +1995,8 @@ mod tests {
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
         let prefund_token = Address::generate(&env);
-        let pool_factory = env.register(MockPoolFactory, ());
         let candidate_id = Address::generate(&env);
+        let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
         env.register_at(
             &candidate_id,
@@ -1999,8 +2024,8 @@ mod tests {
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
         let prefund_token = Address::generate(&env);
-        let pool_factory = env.register(MockPoolFactory, ());
         let candidate_id = Address::generate(&env);
+        let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
         env.register_at(
             &candidate_id,
@@ -2039,8 +2064,8 @@ mod tests {
         let prefund_token = env
             .register_stellar_asset_contract_v2(token_admin)
             .address();
-        let pool_factory = env.register(MockPoolFactory, ());
         let candidate_id = Address::generate(&env);
+        let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
         env.register_at(
             &candidate_id,
@@ -2138,6 +2163,31 @@ mod tests {
         let next_token = Address::generate(&env);
         let prefund_token = Address::generate(&env);
         let candidate = Address::generate(&env);
+
+        env.register_at(
+            &candidate,
+            BackstopContract,
+            (
+                &emitter,
+                &pool_factory,
+                &legacy_token,
+                &next_token,
+                &prefund_token,
+            ),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1229)")]
+    fn constructor_rejects_pool_factory_bound_to_another_backstop() {
+        let env = Env::default();
+        let emitter = Address::generate(&env);
+        let candidate = Address::generate(&env);
+        let other_backstop = Address::generate(&env);
+        let pool_factory = env.register(MockPoolFactory, (&other_backstop,));
+        let legacy_token = Address::generate(&env);
+        let next_token = Address::generate(&env);
+        let prefund_token = Address::generate(&env);
 
         env.register_at(
             &candidate,

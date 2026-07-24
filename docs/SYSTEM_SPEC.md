@@ -310,14 +310,15 @@ waterfall, and subject to the applicable withdrawal rules.
 
 ### 7.2 Position accounting
 
-The backstop MUST store one immutable v3 pool-factory address and MUST verify
-the factory's `is_pool` interface during construction. Before accepting an
-accounted BLND:USDC deposit, it MUST verify that the attributed pool is
-registered by that factory and that the pool exposes the fail-closed withdrawal
-callback. Registration or interface failure MUST abort before custody or
-accounting changes. The callback's current boolean result does not gate a
-deposit: a pool with an existing loss MAY accept new loss-absorbing capital,
-while later withdrawal remains blocked until the pool reports it safe.
+The backstop MUST store one immutable v3 pool-factory address, MUST verify the
+factory's `backstop` and `is_pool` interfaces during construction, and MUST
+reject a factory whose immutable backstop is not the candidate itself. Before
+accepting an accounted BLND:USDC deposit, it MUST verify that the attributed
+pool is registered by that factory and that the pool exposes the fail-closed
+withdrawal callback. Registration or interface failure MUST abort before
+custody or accounting changes. The callback's current boolean result does not
+gate a deposit: a pool with an existing loss MAY accept new loss-absorbing
+capital, while later withdrawal remains blocked until the pool reports it safe.
 
 `backstop_withdrawal_allowed(backstop)` is a permanent compatibility boundary.
 Every factory-approved pool MUST preserve its signature and fail-closed
@@ -423,6 +424,21 @@ The continuous BLND:USDC tier inherits the v2 queue-for-withdrawal shape:
   only when the backstop has no capital committed to a loss and no unresolved
   bad debt. A missing interface, failed call, or false result blocks withdrawal.
 
+The canonical pool callback MUST derive its result from three protocol-owned
+record sets:
+
+- Nonzero liabilities held by the configured backstop.
+- Capital committed to an active loss or auction.
+- Unresolved bad-debt records.
+
+The pool MAY cache the number of nonzero records in each set, but it MUST update
+the cached count atomically with the canonical record transition and MUST NOT
+combine monetary amounts from reserves with different units. The callback MUST
+return false for an address other than the pool's immutable backstop or when
+any count is nonzero. Missing canonical loss state MUST fail closed rather than
+being interpreted as zero. No administrator, governance address, or mutable
+boolean override may make the callback return true.
+
 The withdrawal implementation MUST:
 
 - Preserve a queue or delay sufficient to prevent capital from escaping known
@@ -431,10 +447,11 @@ The withdrawal implementation MUST:
 - Remain executable without iterating over an unbounded number of users or
   assets.
 
-The bounded Q4W accounting includes the fail-closed pool callback, but the
-authoritative pool loss engine remains unimplemented. Until that engine derives
-the callback result from canonical loss and bad-debt state, these positions
-MUST NOT be treated as authoritative executable loss capacity.
+The bounded Q4W accounting and Protocol-27 pool expose this fail-closed state
+boundary, but the lending, auction, and loss-waterfall engines that create and
+resolve its canonical records remain unimplemented. Until those engines update
+the state atomically with real loss transitions, these positions MUST NOT be
+treated as authoritative executable loss capacity.
 
 ## 8. Pool activation
 
@@ -828,8 +845,8 @@ implemented:
 - Per-tier auction, transfer, and disposal mechanisms.
 - Behavior when a tier's oracle or disposal market is unavailable.
 - Production LP price sources, averaging, staleness, and failure policy.
-- Canonical pool loss-state implementation behind the fail-closed withdrawal
-  callback.
+- Exact lending, auction, and waterfall transitions that create and resolve
+  each canonical pool loss-state record.
 - Exact take-rate accrual integration and distribution cadence.
 - Post-migration designated token.
 - Top-level BLND split between backstop depositors and pool supply/borrow
@@ -854,16 +871,18 @@ implemented:
    conversion.
 7. Complete native, WASM, local-network, and testnet migration exercises.
 
-Milestones 1 through 5 and the bounded-Q4W portion of milestone 6 are
+Milestones 1 through 5 and the bounded-Q4W and canonical-loss-state-boundary
+portions of milestone 6 are
 represented by the frozen v2 baseline, isolated Protocol-27 backstop crate,
 cross-version legacy-emitter migration harness, the candidate's
 pool-attributed continuous BLND:USDC shares, time-weighted migration
 checkpoints, isolated single-asset prefunding lane, canonical asset-neutral
 12,500-USDC entry and 10,000-USDC maintenance activation-policy arithmetic, and
-the 17-day bounded withdrawal queue and fail-closed pool callback. Canonical
-pool loss state, the valuation adapter,
-pool-status integration, and BLND funding and claims remain intentionally
-unimplemented.
+the 17-day bounded withdrawal queue, an immutable Protocol-27 pool factory, and
+a fail-closed pool callback derived from three canonical aggregate record
+counts. The lending, auction, and waterfall transitions behind those counts,
+the valuation adapter, pool-status integration, and BLND funding and claims
+remain intentionally unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

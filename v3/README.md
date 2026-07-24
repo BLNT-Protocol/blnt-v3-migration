@@ -11,6 +11,9 @@ The workspace targets Stellar Protocol 27 and pins:
 The workspace contains:
 
 - `backstop`: the first isolated v3 migration-lifecycle contract.
+- `pool`: the Protocol-27 pool boundary for canonical backstop-loss state.
+- `pool-factory`: an immutable Protocol-27 factory that deploys and registers
+  pools against one candidate backstop.
 - `compat-probe`: a minimal SDK-27 caller for the historical v2 backstop.
 - `compat-tests`: Protocol-27 WASM tests covering the SDK-22 boundary and the
   complete legacy-emitter swap into optimized v3 backstop WASM.
@@ -23,15 +26,16 @@ from the original queue start, a bounded 31-day prefunding campaign, and
 time-weighted survivor-allocation quotes. The same accounted BLND:USDC shares
 exist before and after migration; migration freezes only their temporary
 backfill weight, and later deposits receive no retroactive backfill. It
-stores one immutable v3 pool-factory address, validates the factory interface
-during construction, and accepts BLND:USDC deposits only for
+stores one immutable v3 pool-factory address, validates both the factory
+interface and its immutable binding to this candidate during construction, and
+accepts BLND:USDC deposits only for
 factory-registered pools that expose the required loss-state callback.
 Validation occurs before token custody or share accounting. The callback is a
 permanent compatibility boundary that factory-approved pool upgrades must
 preserve. It
 intentionally does not yet implement BLND funding or claims, authoritative
-pool-status activation, loss execution, canonical pool loss-state computation,
-or ongoing-emission accrual. BLND:USDC withdrawals use a bounded 17-day queue
+pool-status activation, loss execution, or ongoing-emission accrual.
+BLND:USDC withdrawals use a bounded 17-day queue
 with at most 20 entries per user and pool, FIFO withdrawal, and LIFO dequeue.
 Withdrawal also requires an affirmative, read-only response from the attributed
 pool's `backstop_withdrawal_allowed` interface; missing, failed, and false
@@ -43,6 +47,22 @@ configured SEP-41 prefunding lane with exact one-token/one-share accounting.
 Prefund shares are isolated from migration and may be deposited or withdrawn
 before or after activation; they do not yet count toward activation, losses,
 backfill, or emissions.
+
+The v3 pool exposes canonical aggregate record counts for backstop liabilities,
+committed losses or auctions, and unresolved bad debt. Its withdrawal callback
+returns true only for its immutable backstop and only when all three counts are
+zero. Missing loss state traps rather than being treated as clear. There is no
+administrator-controlled withdrawal override. The state mutation boundary is
+internal: future lending, auction, and waterfall modules must update these
+counts atomically with their canonical records. Those engines are not yet
+implemented, so the current pool is an integration boundary rather than a
+complete lending pool.
+
+The v3 pool factory stores immutable backstop and pool-WASM configuration,
+deploys pools with that backstop, and maintains the registry consumed by the
+backstop deposit path. Compatibility tests exercise the deterministic
+candidate-address deployment order needed to configure the factory before the
+candidate constructor validates it.
 
 The backstop exposes the canonical Milestone-5 activation arithmetic for
 verified, pool-specific values of BLND:XLM LP, BLND:USDC LP, plain USDC, and up

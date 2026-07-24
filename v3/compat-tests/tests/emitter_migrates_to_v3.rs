@@ -3,13 +3,23 @@
 use blend_contract_sdk::emitter::WASM as LEGACY_EMITTER_WASM;
 use soroban_sdk::{
     contract, contractclient, contractimpl, contracttype,
-    testutils::{Address as _, Ledger},
+    testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
     token::{StellarAssetClient, TokenClient},
-    Address, Env,
+    Address, Env, IntoVal,
 };
 
 mod v3_backstop {
     soroban_sdk::contractimport!(file = "../target/wasm32v1-none/optimized/blend_v3_backstop.wasm");
+}
+
+mod v3_pool {
+    soroban_sdk::contractimport!(file = "../target/wasm32v1-none/optimized/blend_v3_pool.wasm");
+}
+
+mod v3_pool_factory {
+    soroban_sdk::contractimport!(
+        file = "../target/wasm32v1-none/optimized/blend_v3_pool_factory.wasm"
+    );
 }
 
 #[derive(Clone)]
@@ -39,11 +49,25 @@ struct MockPoolFactory;
 #[derive(Clone)]
 #[contracttype]
 enum MockPoolFactoryKey {
+    Backstop,
     Pool(Address),
 }
 
 #[contractimpl]
 impl MockPoolFactory {
+    pub fn __constructor(env: Env, backstop: Address) {
+        env.storage()
+            .instance()
+            .set(&MockPoolFactoryKey::Backstop, &backstop);
+    }
+
+    pub fn backstop(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&MockPoolFactoryKey::Backstop)
+            .unwrap()
+    }
+
     pub fn is_pool(env: Env, pool: Address) -> bool {
         env.storage()
             .instance()
@@ -145,9 +169,10 @@ impl Fixture {
         StellarAssetClient::new(&env, &blnd_id).set_admin(&emitter_id);
         let emitter = LegacyEmitterClient::new(&env, &emitter_id);
         emitter.initialize(&blnd_id, &incumbent, &legacy_token_id);
-        let pool_factory_id = env.register(MockPoolFactory, ());
-
-        let candidate_id = env.register(
+        let candidate_id = Address::generate(&env);
+        let pool_factory_id = env.register(MockPoolFactory, (&candidate_id,));
+        env.register_at(
+            &candidate_id,
             v3_backstop::WASM,
             (
                 &emitter_id,
@@ -247,6 +272,111 @@ fn v3_wasm_exposes_asset_neutral_activation_hysteresis_quote() {
     assert_eq!(active_quote.eligible_value, 12_000 * SCALAR_7);
     assert_eq!(active_quote.required_value, maintenance_threshold);
     assert!(active_quote.meets_threshold);
+}
+
+#[test]
+fn v3_factory_deploys_registered_loss_aware_pool_wasm() {
+    let env = Env::default();
+    let backstop = Address::generate(&env);
+    let pool_hash = env.deployer().upload_contract_wasm(v3_pool::WASM);
+    let factory_id = env.register(v3_pool_factory::WASM, (&backstop, &pool_hash));
+    let factory = v3_pool_factory::Client::new(&env, &factory_id);
+    let deployer = Address::generate(&env);
+    let salt = soroban_sdk::BytesN::from_array(&env, &[11; 32]);
+
+    assert!(factory.try_deploy(&deployer, &salt).is_err());
+    let pool_id = factory
+        .mock_auths(&[MockAuth {
+            address: &deployer,
+            invoke: &MockAuthInvoke {
+                contract: &factory_id,
+                fn_name: "deploy",
+                args: (&deployer, salt.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .deploy(&deployer, &salt);
+    let pool = v3_pool::Client::new(&env, &pool_id);
+
+    assert!(factory.is_pool(&pool_id));
+    assert_eq!(factory.backstop(), backstop);
+    assert_eq!(factory.pool_wasm_hash(), pool_hash);
+    assert_eq!(pool.backstop(), backstop);
+    assert_eq!(
+        pool.backstop_loss_state(),
+        v3_pool::BackstopLossState {
+            committed_loss_entries: 0,
+            liability_entries: 0,
+            unresolved_bad_debt_entries: 0,
+        }
+    );
+    assert!(pool.backstop_withdrawal_allowed(&backstop));
+    assert!(!pool.backstop_withdrawal_allowed(&Address::generate(&env)));
+}
+
+#[test]
+fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+
+    let token_admin = Address::generate(&env);
+    let blnd_id = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let legacy_token_id = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let next_token_id = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let prefund_token_id = env
+        .register_stellar_asset_contract_v2(token_admin)
+        .address();
+    let incumbent = Address::generate(&env);
+    let emitter_id = env.register(LEGACY_EMITTER_WASM, ());
+    StellarAssetClient::new(&env, &blnd_id).set_admin(&emitter_id);
+    LegacyEmitterClient::new(&env, &emitter_id).initialize(&blnd_id, &incumbent, &legacy_token_id);
+
+    let deployer = Address::generate(&env);
+    let candidate_salt = soroban_sdk::BytesN::from_array(&env, &[21; 32]);
+    let candidate_deployer = env
+        .deployer()
+        .with_address(deployer.clone(), candidate_salt);
+    let candidate_id = candidate_deployer.deployed_address();
+    let pool_hash = env.deployer().upload_contract_wasm(v3_pool::WASM);
+    let factory_id = env.register(v3_pool_factory::WASM, (&candidate_id, &pool_hash));
+    let candidate_hash = env.deployer().upload_contract_wasm(v3_backstop::WASM);
+    assert_eq!(
+        candidate_deployer.deploy_v2(
+            candidate_hash,
+            (
+                &emitter_id,
+                &factory_id,
+                &legacy_token_id,
+                &next_token_id,
+                &prefund_token_id,
+            ),
+        ),
+        candidate_id
+    );
+
+    let factory = v3_pool_factory::Client::new(&env, &factory_id);
+    let pool_id = factory.deploy(&deployer, &soroban_sdk::BytesN::from_array(&env, &[22; 32]));
+    let pool = v3_pool::Client::new(&env, &pool_id);
+    let candidate = v3_backstop::Client::new(&env, &candidate_id);
+    let user = Address::generate(&env);
+    let legacy_token = StellarAssetClient::new(&env, &legacy_token_id);
+    legacy_token.mint(&user, &SCALAR_7);
+
+    candidate.deposit_blnd_usdc(&user, &pool_id, &SCALAR_7);
+    let queued = candidate.queue_blnd_usdc_withdrawal(&user, &pool_id, &SCALAR_7);
+    env.ledger().set_timestamp(queued.expires_at);
+
+    assert!(pool.backstop_withdrawal_allowed(&candidate_id));
+    candidate.withdraw_blnd_usdc(&user, &pool_id, &SCALAR_7, &user);
+    assert_eq!(legacy_token.balance(&user), SCALAR_7);
+    assert_eq!(candidate.blnd_usdc_shares(&user, &pool_id), 0);
 }
 
 #[test]

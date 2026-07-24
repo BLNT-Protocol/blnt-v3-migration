@@ -48,6 +48,15 @@ weight. This priority and weighting do not change equal-USDC activation
 accounting. Per-tier auction, take-rate accrual, and disposal mechanics remain
 implementation work.
 
+The backstop also exposes arithmetic-only ongoing BLND-emission quotes for the
+backstop-depositor tranche. Active pools are weighted by eligible underlying
+BLND across BLND:USDC and BLND:XLM positions, and users within each pool are
+weighted by their underlying BLND across those same tiers. Plain USDC and the
+custom tiers receive no BLND-emission weight. Production LP accounting,
+activation integration, accumulators, and claims remain implementation work;
+the top-level split between backstop and supply/borrow emissions remains an
+open economic decision.
+
 The contract extends its code and instance TTL to 90 days at construction and
 renews it whenever fewer than 89 days remain. This does not change the
 emitter's 31-day migration delay.

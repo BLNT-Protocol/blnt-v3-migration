@@ -185,6 +185,34 @@ fn v3_wasm_exposes_weighted_take_rate_quote() {
 }
 
 #[test]
+fn v3_wasm_exposes_blnd_weighted_emission_quotes() {
+    let fixture = Fixture::create();
+    let pool_values = v3_backstop::BlndEmissionValues {
+        blnd_usdc: 60 * SCALAR_7,
+        blnd_xlm: 40 * SCALAR_7,
+    };
+    let pool_quote = fixture.candidate.quote_pool_blnd_emissions(
+        &(1_000 * SCALAR_7),
+        &pool_values,
+        &(400 * SCALAR_7),
+        &true,
+    );
+    assert_eq!(pool_quote.eligible_blnd, 100 * SCALAR_7);
+    assert_eq!(pool_quote.allocation, 250 * SCALAR_7);
+
+    let user_quote = fixture.candidate.quote_user_blnd_emissions(
+        &(250 * SCALAR_7),
+        &v3_backstop::BlndEmissionValues {
+            blnd_usdc: 10 * SCALAR_7,
+            blnd_xlm: 15 * SCALAR_7,
+        },
+        &(100 * SCALAR_7),
+    );
+    assert_eq!(user_quote.eligible_blnd, 25 * SCALAR_7);
+    assert_eq!(user_quote.allocation, 625_000_000);
+}
+
+#[test]
 fn legacy_emitter_finalizes_migration_to_v3_wasm() {
     let fixture = Fixture::create();
     assert_eq!(

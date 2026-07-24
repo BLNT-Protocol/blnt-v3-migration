@@ -588,9 +588,69 @@ Ongoing accounting MUST be based on BLND actually received after the emitter
 changes recipients. No interval or position may earn under both regimes unless
 the specification explicitly intends and tests that result.
 
-The inherited v2 70/30 split is not enforced by the emitter. The v3 split is an
-open economic decision and MUST NOT be changed implicitly during unrelated
-implementation work.
+### 10.1 Ongoing backstop-depositor emissions
+
+This policy applies only to the BLND tranche assigned to backstop depositors,
+\(E_{\mathrm{backstop}}\). Pool supply and borrow emissions remain a separate
+allocation. The inherited v2 70/30 split is not enforced by the emitter, and
+the top-level v3 split remains an open economic decision.
+
+Only active pools are eligible for ongoing backstop-depositor emissions. A
+pool's weight is the eligible underlying BLND held through its BLND:USDC and
+BLND:XLM backstop tiers:
+
+\[
+B_p =
+B_{p,\mathrm{BLND:USDC}} +
+B_{p,\mathrm{BLND:XLM}}
+\]
+
+Plain USDC, Custom A, and Custom B contribute zero BLND-emission weight. The
+pool allocation is:
+
+\[
+E_p =
+\left\lfloor
+E_{\mathrm{backstop}}
+\frac{B_p}{\sum_{q \in \mathrm{active}} B_q}
+\right\rfloor
+\]
+
+Within active pool \(p\), user \(u\)'s weight is the user's eligible underlying
+BLND across the same two tiers:
+
+\[
+B_{p,u} =
+B_{p,u,\mathrm{BLND:USDC}} +
+B_{p,u,\mathrm{BLND:XLM}}
+\]
+
+and the user's allocation is:
+
+\[
+E_{p,u} =
+\left\lfloor
+E_p
+\frac{B_{p,u}}{B_p}
+\right\rfloor
+\]
+
+BLND held through either eligible tier earns at the same rate per underlying
+BLND. The USDC or XLM component of an LP position does not contribute emission
+weight.
+
+The production implementation MUST derive underlying BLND with
+manipulation-resistant, checkpointed LP accounting. It MUST NOT use untrusted
+caller values or a same-transaction reserve ratio. Pool and user allocation
+MUST use bounded accumulator/checkpoint accounting rather than iteration over
+all pools or depositors. Integer remainder MUST be retained at its allocation
+scope and included in a later distribution at that same scope.
+
+The accounting MUST define treatment of queued withdrawals, capital committed
+to losses, and activation-status transitions. A position MUST NOT earn
+simultaneously through both tiers or through both active and ineligible
+accounting. Changes in balances, underlying BLND per LP share, or pool status
+MUST NOT retroactively alter already accrued emissions.
 
 ## 11. Protocol fees and interest accounting
 
@@ -692,7 +752,8 @@ implemented:
 - Treatment of queued capital for take-rate allocation.
 - Exact take-rate accrual integration and distribution cadence.
 - Post-migration designated token.
-- Ongoing BLND-emission allocation.
+- Top-level BLND split between backstop depositors and pool supply/borrow
+  positions.
 - Legacy-position withdrawal and optional conversion interface.
 - Initial BLND drop recipient policy and lockups.
 - Protocol-fee existence and incidence.

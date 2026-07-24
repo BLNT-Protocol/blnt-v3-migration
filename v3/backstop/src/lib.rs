@@ -96,6 +96,7 @@ pub enum BackstopError {
     AssetConfigurationCollision = 1220,
     InvalidActivationValue = 1221,
     InvalidTakeRateValue = 1222,
+    InvalidEmissionValue = 1223,
 }
 
 #[derive(Clone)]
@@ -157,6 +158,23 @@ pub struct TakeRateQuote {
     pub custom_b: i128,
     pub remainder: i128,
     pub usdc: i128,
+}
+
+/// Eligible underlying BLND held through the two BLND-bearing backstop tiers,
+/// denominated in 7-decimal BLND base units.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BlndEmissionValues {
+    pub blnd_usdc: i128,
+    pub blnd_xlm: i128,
+}
+
+/// Arithmetic-only allocation quote for one BLND-emission scope.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BlndEmissionQuote {
+    pub allocation: i128,
+    pub eligible_blnd: i128,
 }
 
 #[contractclient(name = "EmitterClient")]
@@ -393,6 +411,37 @@ impl BackstopContract {
     pub fn quote_take_rate(env: Env, distribution: i128, values: TakeRateValues) -> TakeRateQuote {
         extend_instance_ttl(&env);
         quote_take_rate_values(&env, distribution, &values)
+    }
+
+    /// Quote an active pool's share of the backstop-depositor BLND tranche.
+    ///
+    /// `total_active_blnd` is the eligible underlying BLND across every active
+    /// pool. Values and active status MUST come from canonical checkpointed
+    /// accounting before this arithmetic is used for accrual.
+    pub fn quote_pool_blnd_emissions(
+        env: Env,
+        distribution: i128,
+        values: BlndEmissionValues,
+        total_active_blnd: i128,
+        active: bool,
+    ) -> BlndEmissionQuote {
+        extend_instance_ttl(&env);
+        quote_pool_blnd_emission_values(&env, distribution, &values, total_active_blnd, active)
+    }
+
+    /// Quote one user's share of an active pool's BLND-emission allocation.
+    ///
+    /// `pool_eligible_blnd` is the eligible underlying BLND held through both
+    /// BLND-bearing tiers for the pool. Values MUST come from canonical
+    /// checkpointed accounting before this arithmetic is used for accrual.
+    pub fn quote_user_blnd_emissions(
+        env: Env,
+        pool_distribution: i128,
+        values: BlndEmissionValues,
+        pool_eligible_blnd: i128,
+    ) -> BlndEmissionQuote {
+        extend_instance_ttl(&env);
+        quote_user_blnd_emission_values(&env, pool_distribution, &values, pool_eligible_blnd)
     }
 
     pub fn migration_status(env: Env) -> MigrationStatus {
@@ -1212,6 +1261,68 @@ fn quote_take_rate_values(env: &Env, distribution: i128, values: &TakeRateValues
     }
 }
 
+fn eligible_blnd(env: &Env, values: &BlndEmissionValues) -> i128 {
+    if values.blnd_usdc < 0 || values.blnd_xlm < 0 {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    checked_add_i128(env, values.blnd_usdc, values.blnd_xlm)
+}
+
+fn quote_pool_blnd_emission_values(
+    env: &Env,
+    distribution: i128,
+    values: &BlndEmissionValues,
+    total_active_blnd: i128,
+    active: bool,
+) -> BlndEmissionQuote {
+    if distribution < 0 || total_active_blnd < 0 {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    let pool_blnd = eligible_blnd(env, values);
+    if !active {
+        return BlndEmissionQuote {
+            allocation: 0,
+            eligible_blnd: pool_blnd,
+        };
+    }
+    if pool_blnd > total_active_blnd || (pool_blnd > 0 && total_active_blnd == 0) {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    let allocation = if pool_blnd == 0 {
+        0
+    } else {
+        proportional_floor(env, distribution, pool_blnd, total_active_blnd)
+    };
+    BlndEmissionQuote {
+        allocation,
+        eligible_blnd: pool_blnd,
+    }
+}
+
+fn quote_user_blnd_emission_values(
+    env: &Env,
+    pool_distribution: i128,
+    values: &BlndEmissionValues,
+    pool_eligible_blnd: i128,
+) -> BlndEmissionQuote {
+    if pool_distribution < 0 || pool_eligible_blnd < 0 {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    let user_blnd = eligible_blnd(env, values);
+    if user_blnd > pool_eligible_blnd || (user_blnd > 0 && pool_eligible_blnd == 0) {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    let allocation = if user_blnd == 0 {
+        0
+    } else {
+        proportional_floor(env, pool_distribution, user_blnd, pool_eligible_blnd)
+    };
+    BlndEmissionQuote {
+        allocation,
+        eligible_blnd: user_blnd,
+    }
+}
+
 fn checked_add_i128(env: &Env, left: i128, right: i128) -> i128 {
     left.checked_add(right)
         .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError))
@@ -1814,6 +1925,142 @@ mod tests {
             )
         }));
         assert!(overflow.is_err());
+    }
+
+    #[test]
+    fn blnd_emissions_allocate_active_pool_tranche_by_underlying_blnd() {
+        let env = Env::default();
+        let pool_values = BlndEmissionValues {
+            blnd_usdc: 60 * SCALAR_7,
+            blnd_xlm: 40 * SCALAR_7,
+        };
+        let quote = quote_pool_blnd_emission_values(
+            &env,
+            1_000 * SCALAR_7,
+            &pool_values,
+            400 * SCALAR_7,
+            true,
+        );
+        assert_eq!(quote.eligible_blnd, 100 * SCALAR_7);
+        assert_eq!(quote.allocation, 250 * SCALAR_7);
+
+        let inactive = quote_pool_blnd_emission_values(
+            &env,
+            1_000 * SCALAR_7,
+            &pool_values,
+            300 * SCALAR_7,
+            false,
+        );
+        assert_eq!(inactive.eligible_blnd, 100 * SCALAR_7);
+        assert_eq!(inactive.allocation, 0);
+
+        let empty = quote_pool_blnd_emission_values(
+            &env,
+            1_000 * SCALAR_7,
+            &BlndEmissionValues {
+                blnd_usdc: 0,
+                blnd_xlm: 0,
+            },
+            300 * SCALAR_7,
+            true,
+        );
+        assert_eq!(empty.eligible_blnd, 0);
+        assert_eq!(empty.allocation, 0);
+    }
+
+    #[test]
+    fn blnd_emissions_allocate_users_across_both_eligible_tiers() {
+        let env = Env::default();
+        let user_values = BlndEmissionValues {
+            blnd_usdc: 15 * SCALAR_7,
+            blnd_xlm: 10 * SCALAR_7,
+        };
+        let quote =
+            quote_user_blnd_emission_values(&env, 200 * SCALAR_7, &user_values, 100 * SCALAR_7);
+        assert_eq!(quote.eligible_blnd, 25 * SCALAR_7);
+        assert_eq!(quote.allocation, 50 * SCALAR_7);
+
+        let empty = quote_user_blnd_emission_values(
+            &env,
+            200 * SCALAR_7,
+            &BlndEmissionValues {
+                blnd_usdc: 0,
+                blnd_xlm: 0,
+            },
+            100 * SCALAR_7,
+        );
+        assert_eq!(empty.eligible_blnd, 0);
+        assert_eq!(empty.allocation, 0);
+    }
+
+    #[test]
+    fn blnd_emissions_reject_invalid_denominators_values_and_overflow() {
+        let env = Env::default();
+        let invalid_pool_total = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            quote_pool_blnd_emission_values(
+                &env,
+                SCALAR_7,
+                &BlndEmissionValues {
+                    blnd_usdc: 2,
+                    blnd_xlm: 0,
+                },
+                1,
+                true,
+            )
+        }));
+        assert!(invalid_pool_total.is_err());
+
+        let invalid_user_total = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            quote_user_blnd_emission_values(
+                &env,
+                SCALAR_7,
+                &BlndEmissionValues {
+                    blnd_usdc: 0,
+                    blnd_xlm: 1,
+                },
+                0,
+            )
+        }));
+        assert!(invalid_user_total.is_err());
+
+        let negative = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            quote_user_blnd_emission_values(
+                &env,
+                SCALAR_7,
+                &BlndEmissionValues {
+                    blnd_usdc: -1,
+                    blnd_xlm: 0,
+                },
+                SCALAR_7,
+            )
+        }));
+        assert!(negative.is_err());
+
+        let overflow = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            quote_pool_blnd_emission_values(
+                &env,
+                1,
+                &BlndEmissionValues {
+                    blnd_usdc: i128::MAX,
+                    blnd_xlm: 1,
+                },
+                i128::MAX,
+                true,
+            )
+        }));
+        assert!(overflow.is_err());
+
+        let wide_multiplication = quote_pool_blnd_emission_values(
+            &env,
+            i128::MAX,
+            &BlndEmissionValues {
+                blnd_usdc: i128::MAX,
+                blnd_xlm: 0,
+            },
+            i128::MAX,
+            true,
+        );
+        assert_eq!(wide_multiplication.allocation, i128::MAX);
     }
 
     fn advance_ledger_days(env: &Env, days: u32) {

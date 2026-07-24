@@ -164,6 +164,35 @@ The v3 tests must verify:
   the same pool.
 - Accrual and claims use bounded accumulator/checkpoint accounting.
 
+## Ongoing BLND-emission allocation
+
+The v3 tests must verify:
+
+- Only active pools receive the backstop-depositor BLND tranche.
+- Pool allocation is proportional to eligible underlying BLND across
+  BLND:USDC and BLND:XLM backstop positions.
+- BLND held through either eligible tier has equal emission weight per
+  underlying BLND.
+- Plain USDC, Custom A, and Custom B contribute zero BLND-emission weight.
+- Within a pool, each user's allocation is proportional to the user's eligible
+  underlying BLND across both eligible tiers.
+- A pool or user with zero eligible underlying BLND receives zero.
+- Pool weight cannot exceed total eligible underlying BLND across active
+  pools, and user weight cannot exceed its pool's eligible underlying BLND.
+- Negative values, invalid denominators, and checked-addition overflow are
+  rejected; large proportional multiplication is handled with wide arithmetic.
+- Pool-level and user-level integer remainders are conserved and carried
+  forward only within the same allocation scope.
+- Balance, LP-rate, and activation changes do not retroactively alter accrued
+  emissions.
+- Queued withdrawals and capital committed to losses receive the explicitly
+  selected eligibility treatment.
+- Underlying BLND values reject stale, caller-supplied, and same-transaction
+  manipulated LP data.
+- Accrual and claims use bounded accumulator/checkpoint accounting.
+- Supply and borrow emissions remain separate from the backstop-depositor
+  tranche.
+
 ## Execution environments
 
 1. Native Soroban `Env` tests for fast iteration and ledger time travel.

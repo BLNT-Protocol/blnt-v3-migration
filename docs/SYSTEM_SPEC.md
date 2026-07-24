@@ -877,10 +877,16 @@ implemented:
 6. Implement the bounded BLND:USDC withdrawal queue and its fail-closed pool
    callback, then connect that callback to canonical loss state without forced
    conversion.
-7. Complete native, WASM, local-network, and testnet migration exercises.
+7. Complete native, WASM, local-network, and testnet migration exercises. The
+   local-network lane uses exact production queue constants, so its
+   Quickstart runner is resumable across the wall-clock queue rather than
+   deploying shortened-delay evidence. A transaction-backed keepalive
+   compensates for Quickstart's faster ledger cadence without changing queue
+   timestamps or economic state.
 
-Milestones 1 through 5 and the bounded-Q4W and canonical-loss-state-boundary
-portions of milestone 6 are
+Milestones 1 through 5, the bounded-Q4W and canonical-loss-state-boundary
+portions of milestone 6, and the reproducible deployment runner for the local
+portion of milestone 7 are
 represented by the frozen v2 baseline, isolated Protocol-27 backstop crate,
 cross-version legacy-emitter migration harness, the candidate's
 pool-attributed continuous BLND:USDC shares, time-weighted migration
@@ -888,9 +894,13 @@ checkpoints, isolated single-asset prefunding lane, canonical asset-neutral
 12,500-USDC entry and 10,000-USDC maintenance activation-policy arithmetic, and
 the 17-day bounded withdrawal queue, an immutable Protocol-27 pool factory, and
 a fail-closed pool callback derived directly from three bounded canonical
-record maps. The lending, auction, and waterfall entry points that invoke those
-record transitions, the valuation adapter, pool-status integration, and BLND
-funding and claims remain intentionally unimplemented.
+record maps. The local runner deploys independently issued assets, a coherent
+SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
+limits while recording transaction and cost evidence. A completed wall-clock
+local run, the public-testnet exercise, the lending, auction, and waterfall
+entry points that invoke those record transitions, the valuation adapter,
+pool-status integration, and BLND funding and claims remain intentionally
+unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

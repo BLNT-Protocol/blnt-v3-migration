@@ -18,6 +18,13 @@ The workspace contains:
 - `compat-tests`: Protocol-27 WASM tests covering the SDK-22 boundary and the
   complete legacy-emitter swap into optimized v3 backstop WASM.
 
+The repository-level local-network runner deploys the published legacy emitter,
+a coherent frozen SDK-22 incumbent stack, independently issued local assets,
+and the SDK-27 candidate stack on Protocol-27 Quickstart with testnet resource
+limits. It preserves the production 31-day queue and exposes resumable
+deployment, status, preparation, finalization, and verification commands.
+See `docs/LOCALNET_MIGRATION.md`.
+
 The v3 backstop currently implements migration configuration, two verified
 retry queues within an immutable 76-day recovery horizon, emitter finalization,
 bounded per-queue direct-swap synchronization, continuous BLND:USDC tier

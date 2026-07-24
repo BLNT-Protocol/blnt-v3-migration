@@ -10,3 +10,6 @@ test_snapshots/
 local.*
 
 /js
+
+# Ephemeral Stellar Quickstart configuration, deployment state, and cost logs.
+/.localnet/

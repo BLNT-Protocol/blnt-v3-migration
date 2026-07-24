@@ -252,6 +252,36 @@ The v3 tests must verify:
 4. An isolated public-testnet deployment of an incumbent v2 stack and a v3
    candidate stack.
 
+The local-network runner MUST use the exact production queue constants and
+MUST NOT deploy a shortened-delay candidate as migration evidence. It MUST
+record contract IDs, transaction results, CLI resource-cost diagnostics,
+balances, queue timestamps, and final invariants. Because Quickstart ledger
+timestamps advance with wall-clock time, the runner is resumable across the
+open, prepared, and active phases; native and WASM tests remain the accelerated
+time-travel environments.
+
+The local runner MUST use independently issued local assets and verify the
+published legacy emitter WASM digest before deployment. Final verification MUST
+prove that the emitter points to the active candidate, its queue is cleared,
+the candidate/factory/pool bindings remain consistent, the pool is registered,
+the incumbent and candidate balances are conserved, and the candidate retains
+a strictly greater legacy-token balance.
+
+Because local Quickstart closes ledgers faster than the five-second cadence
+assumed by incumbent and candidate TTL constants, the runner MUST provide a
+transaction-backed keepalive for the emitter queue, candidate, pool factory
+registration, pool, depositor position, relevant token balances, and BLND
+asset state. The keepalive MUST preserve all economic state and queue
+timestamps, and its cadence MUST remain safely inside the shortest effective
+local TTL. Legacy instance and distribution-checkpoint entries that lack
+read-path TTL renewal MUST be extended explicitly rather than mutated through
+an economic contract entry point. Asset-contract instances whose supported
+read paths renew less than that cadence MUST also be extended explicitly.
+The keepalive MUST fail unless the live queue still matches the saved
+candidate, next designated token, and unlock time and the candidate retains a
+strict legacy-token balance majority. Repeated monitoring MUST retain earlier
+results and resource-cost evidence rather than overwrite them.
+
 Native tests MUST advance ledger sequence through the 83 days from earliest
 preparation through the two-retry horizon and verify the candidate's 89/90-day
 TTL renewal policy.

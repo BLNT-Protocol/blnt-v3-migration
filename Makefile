@@ -8,6 +8,42 @@ test-v2-migration: build
 
 test-all: test check-v3
 
+localnet-plan:
+	bash scripts/localnet-migration.sh plan
+
+localnet-validate:
+	bash scripts/localnet-migration.sh validate
+
+localnet-start:
+	bash scripts/localnet-migration.sh start
+
+localnet-deploy:
+	bash scripts/localnet-migration.sh deploy
+
+localnet-run:
+	bash scripts/localnet-migration.sh run
+
+localnet-status:
+	bash scripts/localnet-migration.sh status
+
+localnet-keepalive:
+	bash scripts/localnet-migration.sh keepalive
+
+localnet-recover:
+	bash scripts/localnet-migration.sh recover
+
+localnet-prepare:
+	bash scripts/localnet-migration.sh prepare
+
+localnet-finalize:
+	bash scripts/localnet-migration.sh finalize
+
+localnet-verify:
+	bash scripts/localnet-migration.sh verify
+
+localnet-stop:
+	bash scripts/localnet-migration.sh stop
+
 build-v3:
 	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-backstop --target wasm32v1-none --release --locked
 	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked

@@ -65,13 +65,39 @@ side effect of work in this repository.
 - Failed operations must not leave partially updated accounting.
 - A token or share must not be double-counted across activation, migration,
   emissions, queued withdrawals, or loss absorption.
+- Shares queued for withdrawal remain take-rate eligible until actually
+  withdrawn, but are excluded immediately from activation value and ongoing
+  BLND-emission weight. Queueing does not shield their redemption value from
+  losses absorbed by their tier.
 - Assets counted as backstop capital must be available to the specified loss
   waterfall.
 - Legacy migration qualification uses the candidate contract's direct balance
   of the incumbent emitter-designated token and requires a strictly greater
   balance.
+- Do not introduce protocol governance, multisig control, administrator
+  recovery, privileged WASM replacement, a protocol-wide emergency override,
+  or an alternate upgrade path. Future protocol replacement must use the
+  legacy emitter's permissionless queue and swap mechanism.
+- A successful migration awards zero discretionary BLND. Any one-time BLND
+  distributed in connection with migration must fund only the scheduled,
+  time-weighted BLND:USDC backfill and must not exceed 10 million BLND.
 - An activation-policy change must produce consistent pool-status and
   reward-eligibility results from one canonical calculation.
+- Pool status preserves v2 codes and hard Q4W thresholds: normal On-Ice at
+  30%, Admin Active On-Ice at 50%, normal Frozen at 60%, and Admin On-Ice
+  Frozen at 75%. The pool-local operator may select statuses 0, 2, and 4 or
+  relinquish an override into ordinary On-Ice status 3. This is the sole
+  continuing privileged operating-authority exception. It includes the bounded
+  risk-on Admin Active override between the normal 30% and admin 50% Q4W
+  limits; its Admin On-Ice and Admin Frozen modes are the sole emergency-control
+  exception. It is not protocol governance and grants no upgrade, migration,
+  configuration, or withdrawal-safety authority.
+- The pool-local operator is immutable. A compromised operator can always
+  select Admin Frozen, and an unavailable operator cannot release a pool from
+  Admin Frozen. Do not add a rotation or recovery path that weakens the stated
+  immutability model.
+- Preserve the v2 action matrix: On-Ice blocks borrowing and auction
+  cancellation; Frozen additionally blocks both supply and collateral supply.
 - Never involuntarily swap a depositor's legacy backstop asset. Conversion
   requires explicit opt-in.
 - Bound loops and ledger footprints. Critical operations must remain executable

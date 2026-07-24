@@ -23,6 +23,17 @@ const BLND_SCALAR: i128 = SCALAR_7;
 const MAX_BACKFILL_BLND: i128 = 10_000_000 * BLND_SCALAR;
 const ACTIVATION_ENTRY_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
 const ACTIVATION_MAINTENANCE_THRESHOLD_USDC: i128 = 10_000 * SCALAR_7;
+const STATUS_ADMIN_ACTIVE: u32 = 0;
+const STATUS_ACTIVE: u32 = 1;
+const STATUS_ADMIN_ON_ICE: u32 = 2;
+const STATUS_ON_ICE: u32 = 3;
+const STATUS_ADMIN_FROZEN: u32 = 4;
+const STATUS_FROZEN: u32 = 5;
+const STATUS_SETUP: u32 = 6;
+const Q4W_ON_ICE_THRESHOLD: i128 = 3_000_000;
+const Q4W_ADMIN_ACTIVE_LIMIT: i128 = 5_000_000;
+const Q4W_FROZEN_THRESHOLD: i128 = 6_000_000;
+const Q4W_ADMIN_ON_ICE_LIMIT: i128 = 7_500_000;
 // Exact integer representation of the relative weights 2.5:2.5:2:2:1.
 const TAKE_RATE_WEIGHT_BLND_USDC: i128 = 5;
 const TAKE_RATE_WEIGHT_BLND_XLM: i128 = 5;
@@ -111,6 +122,7 @@ pub enum BackstopError {
     PoolWithdrawalBlocked = 1227,
     InvalidPool = 1228,
     InvalidPoolFactoryBinding = 1229,
+    InvalidPoolStatus = 1230,
 }
 
 #[derive(Clone)]
@@ -158,6 +170,18 @@ pub struct ActivationQuote {
     pub eligible_value: i128,
     pub meets_threshold: bool,
     pub required_value: i128,
+}
+
+/// Arithmetic-only quote for one v2-compatible pool-status transition.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PoolStatusQuote {
+    pub eligible_value: i128,
+    pub meets_activation_threshold: bool,
+    pub q4w_percentage: i128,
+    pub required_value: i128,
+    pub status: u32,
+    pub transition_allowed: bool,
 }
 
 /// Reward-eligible, pool-specific tier values denominated in 7-decimal USDC.
@@ -460,15 +484,20 @@ impl BackstopContract {
             .unwrap_or(0)
     }
 
-    /// Return one user's continuous BLND:USDC tier shares.
+    /// Return one user's total continuous BLND:USDC tier shares.
     ///
-    /// Before migration these shares also qualify for migration backfill.
+    /// Includes shares queued for withdrawal. Before migration these shares
+    /// also qualify for migration backfill, and while in custody they remain
+    /// eligible for take-rate accounting and proportionally exposed to losses.
     pub fn blnd_usdc_shares(env: Env, user: Address, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         get_position(&env, &user, &pool).amount
     }
 
-    /// Return one user's shares that are not queued for withdrawal.
+    /// Return one user's unqueued share basis for activation and emissions.
+    ///
+    /// Final eligibility also depends on migration lifecycle, pool status, and
+    /// asset-policy gates.
     pub fn blnd_usdc_active_shares(env: Env, user: Address, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         let total = get_position(&env, &user, &pool).amount;
@@ -491,7 +520,10 @@ impl BackstopContract {
         get_blnd_usdc_q4w(&env, &user, &pool)
     }
 
-    /// Return the accounted BLND:USDC tier shares allocated to one pool.
+    /// Return the total accounted BLND:USDC tier shares allocated to one pool.
+    ///
+    /// Includes queued shares and is the canonical share amount for take-rate
+    /// and within-tier loss accounting while those shares remain in custody.
     pub fn pool_blnd_usdc_shares(env: Env, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         get_pool_blnd_usdc_shares(&env, &pool)
@@ -503,7 +535,10 @@ impl BackstopContract {
         get_pool_blnd_usdc_queued_shares(&env, &pool)
     }
 
-    /// Return one pool's BLND:USDC shares eligible for active calculations.
+    /// Return one pool's unqueued share basis for activation and emissions.
+    ///
+    /// Final eligibility also depends on migration lifecycle, pool status, and
+    /// asset-policy gates.
     pub fn pool_blnd_usdc_active_shares(env: Env, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         checked_nonnegative_sub_i128(
@@ -515,7 +550,9 @@ impl BackstopContract {
 
     /// Return all accounted BLND:USDC tier shares.
     ///
-    /// Direct token transfers do not create shares and are excluded.
+    /// Includes queued shares and is the canonical share amount for take-rate
+    /// and within-tier loss accounting. Direct token transfers do not create
+    /// shares and are excluded.
     pub fn total_blnd_usdc_shares(env: Env) -> i128 {
         extend_instance_ttl(&env);
         env.storage()
@@ -533,7 +570,10 @@ impl BackstopContract {
             .unwrap_or(0)
     }
 
-    /// Return all BLND:USDC shares eligible for active calculations.
+    /// Return the global unqueued share basis for activation and emissions.
+    ///
+    /// Final eligibility also depends on migration lifecycle, pool status, and
+    /// asset-policy gates.
     pub fn total_blnd_usdc_active_shares(env: Env) -> i128 {
         extend_instance_ttl(&env);
         let total: i128 = env
@@ -580,6 +620,43 @@ impl BackstopContract {
     ) -> ActivationQuote {
         extend_instance_ttl(&env);
         quote_activation_values(&env, &values, currently_active)
+    }
+
+    /// Quote the permissionless v2-compatible status refresh.
+    ///
+    /// Active and queued values MUST use the same canonical, manipulation-
+    /// resistant USDC valuation. This function defines arithmetic only; the
+    /// production pool remains responsible for storing and enforcing status.
+    pub fn quote_update_pool_status(
+        env: Env,
+        current_status: u32,
+        active_values: ActivationValues,
+        queued_values: ActivationValues,
+    ) -> PoolStatusQuote {
+        extend_instance_ttl(&env);
+        quote_update_pool_status_values(&env, current_status, &active_values, &queued_values)
+    }
+
+    /// Quote a pool-local operator's v2-compatible status request.
+    ///
+    /// This function performs no authorization and defines arithmetic only.
+    /// The production pool MUST require its immutable operator and MUST NOT
+    /// grant that operator any protocol-wide or withdrawal-safety authority.
+    pub fn quote_set_pool_status(
+        env: Env,
+        current_status: u32,
+        requested_status: u32,
+        active_values: ActivationValues,
+        queued_values: ActivationValues,
+    ) -> PoolStatusQuote {
+        extend_instance_ttl(&env);
+        quote_set_pool_status_values(
+            &env,
+            current_status,
+            requested_status,
+            &active_values,
+            &queued_values,
+        )
     }
 
     /// Quote one take-rate asset across the five weighted tiers.
@@ -1573,6 +1650,20 @@ fn quote_activation_values(
     values: &ActivationValues,
     currently_active: bool,
 ) -> ActivationQuote {
+    let eligible_value = sum_activation_values(env, values);
+    let required_value = if currently_active {
+        ACTIVATION_MAINTENANCE_THRESHOLD_USDC
+    } else {
+        ACTIVATION_ENTRY_THRESHOLD_USDC
+    };
+    ActivationQuote {
+        eligible_value,
+        meets_threshold: eligible_value >= required_value,
+        required_value,
+    }
+}
+
+fn sum_activation_values(env: &Env, values: &ActivationValues) -> i128 {
     if values.blnd_xlm < 0
         || values.blnd_usdc < 0
         || values.usdc < 0
@@ -1581,7 +1672,7 @@ fn quote_activation_values(
     {
         panic_with_error!(env, BackstopError::InvalidActivationValue);
     }
-    let eligible_value = checked_add_i128(
+    checked_add_i128(
         env,
         checked_add_i128(
             env,
@@ -1593,16 +1684,117 @@ fn quote_activation_values(
             values.custom_a,
         ),
         values.custom_b,
-    );
-    let required_value = if currently_active {
-        ACTIVATION_MAINTENANCE_THRESHOLD_USDC
-    } else {
-        ACTIVATION_ENTRY_THRESHOLD_USDC
+    )
+}
+
+fn quote_update_pool_status_values(
+    env: &Env,
+    current_status: u32,
+    active_values: &ActivationValues,
+    queued_values: &ActivationValues,
+) -> PoolStatusQuote {
+    require_valid_pool_status(env, current_status);
+    let currently_active = current_status == STATUS_ADMIN_ACTIVE || current_status == STATUS_ACTIVE;
+    let activation = quote_activation_values(env, active_values, currently_active);
+    let q4w_percentage = calculate_q4w_percentage(env, active_values, queued_values);
+
+    let (status, transition_allowed) = match current_status {
+        STATUS_SETUP | STATUS_ADMIN_FROZEN => (current_status, false),
+        STATUS_ADMIN_ON_ICE => {
+            if q4w_percentage >= Q4W_ADMIN_ON_ICE_LIMIT {
+                (STATUS_FROZEN, true)
+            } else {
+                (STATUS_ADMIN_ON_ICE, true)
+            }
+        }
+        STATUS_ADMIN_ACTIVE => {
+            if !activation.meets_threshold || q4w_percentage >= Q4W_ADMIN_ACTIVE_LIMIT {
+                (STATUS_ON_ICE, true)
+            } else {
+                (STATUS_ADMIN_ACTIVE, true)
+            }
+        }
+        STATUS_ACTIVE | STATUS_ON_ICE | STATUS_FROZEN => {
+            if q4w_percentage >= Q4W_FROZEN_THRESHOLD {
+                (STATUS_FROZEN, true)
+            } else if !activation.meets_threshold || q4w_percentage >= Q4W_ON_ICE_THRESHOLD {
+                (STATUS_ON_ICE, true)
+            } else {
+                (STATUS_ACTIVE, true)
+            }
+        }
+        _ => panic_with_error!(env, BackstopError::InvalidPoolStatus),
     };
-    ActivationQuote {
-        eligible_value,
-        meets_threshold: eligible_value >= required_value,
-        required_value,
+
+    PoolStatusQuote {
+        eligible_value: activation.eligible_value,
+        meets_activation_threshold: activation.meets_threshold,
+        q4w_percentage,
+        required_value: activation.required_value,
+        status,
+        transition_allowed,
+    }
+}
+
+fn quote_set_pool_status_values(
+    env: &Env,
+    current_status: u32,
+    requested_status: u32,
+    active_values: &ActivationValues,
+    queued_values: &ActivationValues,
+) -> PoolStatusQuote {
+    require_valid_pool_status(env, current_status);
+    let currently_active = current_status == STATUS_ADMIN_ACTIVE || current_status == STATUS_ACTIVE;
+    let activation = quote_activation_values(env, active_values, currently_active);
+    let q4w_percentage = calculate_q4w_percentage(env, active_values, queued_values);
+    let transition_allowed = match requested_status {
+        STATUS_ADMIN_ACTIVE => {
+            activation.meets_threshold && q4w_percentage < Q4W_ADMIN_ACTIVE_LIMIT
+        }
+        STATUS_ADMIN_ON_ICE | STATUS_ON_ICE => q4w_percentage < Q4W_ADMIN_ON_ICE_LIMIT,
+        STATUS_ADMIN_FROZEN => true,
+        _ => panic_with_error!(env, BackstopError::InvalidPoolStatus),
+    };
+
+    PoolStatusQuote {
+        eligible_value: activation.eligible_value,
+        meets_activation_threshold: activation.meets_threshold,
+        q4w_percentage,
+        required_value: activation.required_value,
+        status: if transition_allowed {
+            requested_status
+        } else {
+            current_status
+        },
+        transition_allowed,
+    }
+}
+
+fn calculate_q4w_percentage(
+    env: &Env,
+    active_values: &ActivationValues,
+    queued_values: &ActivationValues,
+) -> i128 {
+    let active_value = sum_activation_values(env, active_values);
+    let queued_value = sum_activation_values(env, queued_values);
+    let total_value = checked_add_i128(env, active_value, queued_value);
+    if total_value == 0 {
+        return 0;
+    }
+
+    let numerator = I256::from_i128(env, queued_value).mul(&I256::from_i128(env, SCALAR_7));
+    let denominator = I256::from_i128(env, total_value);
+    numerator
+        .add(&denominator)
+        .sub(&I256::from_i32(env, 1))
+        .div(&denominator)
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError))
+}
+
+fn require_valid_pool_status(env: &Env, status: u32) {
+    if status > STATUS_SETUP {
+        panic_with_error!(env, BackstopError::InvalidPoolStatus);
     }
 }
 
@@ -2371,6 +2563,201 @@ mod tests {
             )
         }));
         assert!(overflow.is_err());
+    }
+
+    #[test]
+    fn pool_status_policy_applies_v2_q4w_thresholds() {
+        let env = Env::default();
+        let values = |amount| ActivationValues {
+            blnd_xlm: amount,
+            blnd_usdc: 0,
+            custom_a: 0,
+            custom_b: 0,
+            usdc: 0,
+        };
+        let total = 20_000 * SCALAR_7;
+        let quote = |status, q4w_percentage| {
+            let queued = total * q4w_percentage / SCALAR_7;
+            let result = quote_update_pool_status_values(
+                &env,
+                status,
+                &values(total - queued),
+                &values(queued),
+            );
+            assert_eq!(result.q4w_percentage, q4w_percentage);
+            result
+        };
+
+        assert_eq!(
+            quote(STATUS_ACTIVE, Q4W_ON_ICE_THRESHOLD - 1).status,
+            STATUS_ACTIVE
+        );
+        assert_eq!(
+            quote(STATUS_ACTIVE, Q4W_ON_ICE_THRESHOLD).status,
+            STATUS_ON_ICE
+        );
+        assert_eq!(
+            quote(STATUS_ACTIVE, Q4W_FROZEN_THRESHOLD - 1).status,
+            STATUS_ON_ICE
+        );
+        assert_eq!(
+            quote(STATUS_ACTIVE, Q4W_FROZEN_THRESHOLD).status,
+            STATUS_FROZEN
+        );
+
+        assert_eq!(
+            quote(STATUS_ADMIN_ACTIVE, Q4W_ADMIN_ACTIVE_LIMIT - 1).status,
+            STATUS_ADMIN_ACTIVE
+        );
+        assert_eq!(
+            quote(STATUS_ADMIN_ACTIVE, Q4W_ADMIN_ACTIVE_LIMIT).status,
+            STATUS_ON_ICE
+        );
+        assert_eq!(
+            quote(STATUS_ADMIN_ON_ICE, Q4W_ADMIN_ON_ICE_LIMIT - 1).status,
+            STATUS_ADMIN_ON_ICE
+        );
+        assert_eq!(
+            quote(STATUS_ADMIN_ON_ICE, Q4W_ADMIN_ON_ICE_LIMIT).status,
+            STATUS_FROZEN
+        );
+    }
+
+    #[test]
+    fn pool_status_policy_preserves_activation_hysteresis() {
+        let env = Env::default();
+        let values = |amount| ActivationValues {
+            blnd_xlm: 0,
+            blnd_usdc: amount,
+            custom_a: 0,
+            custom_b: 0,
+            usdc: 0,
+        };
+        let zero = values(0);
+
+        let active_at_maintenance = quote_update_pool_status_values(
+            &env,
+            STATUS_ACTIVE,
+            &values(ACTIVATION_MAINTENANCE_THRESHOLD_USDC),
+            &zero,
+        );
+        assert_eq!(active_at_maintenance.status, STATUS_ACTIVE);
+        assert_eq!(
+            active_at_maintenance.required_value,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC
+        );
+
+        let active_below_maintenance = quote_update_pool_status_values(
+            &env,
+            STATUS_ACTIVE,
+            &values(ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 1),
+            &zero,
+        );
+        assert_eq!(active_below_maintenance.status, STATUS_ON_ICE);
+
+        let inactive_in_band = quote_update_pool_status_values(
+            &env,
+            STATUS_ON_ICE,
+            &values(ACTIVATION_MAINTENANCE_THRESHOLD_USDC),
+            &zero,
+        );
+        assert_eq!(inactive_in_band.status, STATUS_ON_ICE);
+        assert_eq!(
+            inactive_in_band.required_value,
+            ACTIVATION_ENTRY_THRESHOLD_USDC
+        );
+
+        let inactive_at_entry = quote_update_pool_status_values(
+            &env,
+            STATUS_ON_ICE,
+            &values(ACTIVATION_ENTRY_THRESHOLD_USDC),
+            &zero,
+        );
+        assert_eq!(inactive_at_entry.status, STATUS_ACTIVE);
+    }
+
+    #[test]
+    fn pool_status_policy_bounds_pool_operator_overrides() {
+        let env = Env::default();
+        let values = |amount| ActivationValues {
+            blnd_xlm: 0,
+            blnd_usdc: 0,
+            custom_a: 0,
+            custom_b: 0,
+            usdc: amount,
+        };
+        let total = 20_000 * SCALAR_7;
+        let quote = |current, requested, queued_pct| {
+            let queued = total * queued_pct / 100;
+            quote_set_pool_status_values(
+                &env,
+                current,
+                requested,
+                &values(total - queued),
+                &values(queued),
+            )
+        };
+
+        let ordinary_at_37 = quote_update_pool_status_values(
+            &env,
+            STATUS_ON_ICE,
+            &values(63 * total / 100),
+            &values(37 * total / 100),
+        );
+        assert_eq!(ordinary_at_37.status, STATUS_ON_ICE);
+
+        let active_allowed = quote(STATUS_ON_ICE, STATUS_ADMIN_ACTIVE, 37);
+        assert!(active_allowed.transition_allowed);
+        assert_eq!(active_allowed.status, STATUS_ADMIN_ACTIVE);
+
+        let active_blocked = quote(STATUS_ON_ICE, STATUS_ADMIN_ACTIVE, 50);
+        assert!(!active_blocked.transition_allowed);
+        assert_eq!(active_blocked.status, STATUS_ON_ICE);
+
+        let on_ice_allowed = quote(STATUS_ACTIVE, STATUS_ADMIN_ON_ICE, 74);
+        assert!(on_ice_allowed.transition_allowed);
+        assert_eq!(on_ice_allowed.status, STATUS_ADMIN_ON_ICE);
+
+        let on_ice_blocked = quote(STATUS_ACTIVE, STATUS_ADMIN_ON_ICE, 75);
+        assert!(!on_ice_blocked.transition_allowed);
+        assert_eq!(on_ice_blocked.status, STATUS_ACTIVE);
+
+        let relinquished_override = quote(STATUS_ADMIN_ON_ICE, STATUS_ON_ICE, 74);
+        assert!(relinquished_override.transition_allowed);
+        assert_eq!(relinquished_override.status, STATUS_ON_ICE);
+
+        let frozen = quote(STATUS_ACTIVE, STATUS_ADMIN_FROZEN, 100);
+        assert!(frozen.transition_allowed);
+        assert_eq!(frozen.status, STATUS_ADMIN_FROZEN);
+    }
+
+    #[test]
+    fn pool_status_policy_uses_usdc_value_and_rounds_q4w_up() {
+        let env = Env::default();
+        let active = ActivationValues {
+            blnd_xlm: 1,
+            blnd_usdc: 1,
+            custom_a: 0,
+            custom_b: 0,
+            usdc: 0,
+        };
+        let queued = ActivationValues {
+            blnd_xlm: 0,
+            blnd_usdc: 0,
+            custom_a: 0,
+            custom_b: 1,
+            usdc: 0,
+        };
+        let quote = quote_update_pool_status_values(&env, STATUS_ACTIVE, &active, &queued);
+        assert_eq!(quote.q4w_percentage, 3_333_334);
+
+        let blocked = quote_update_pool_status_values(&env, STATUS_ADMIN_FROZEN, &active, &queued);
+        assert!(!blocked.transition_allowed);
+        assert_eq!(blocked.status, STATUS_ADMIN_FROZEN);
+
+        let setup = quote_update_pool_status_values(&env, STATUS_SETUP, &active, &queued);
+        assert!(!setup.transition_allowed);
+        assert_eq!(setup.status, STATUS_SETUP);
     }
 
     #[test]

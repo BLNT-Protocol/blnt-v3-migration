@@ -16,8 +16,9 @@ The initial candidate focuses on:
   loss absorption.
 - A safe path for legacy BLND:USDC backstop depositors.
 
-This document does not claim that unresolved economic parameters or governance
-choices have been approved.
+This document does not claim that unresolved economic parameters have been
+approved. It explicitly rejects a separate governance or administrative
+upgrade system for this candidate.
 
 Normative terms `MUST`, `MUST NOT`, `SHOULD`, and `MAY` describe candidate
 requirements.
@@ -52,7 +53,7 @@ require v3 source code to compile against intermediate SDK versions.
 ### 2.2 Out of scope for the first milestone
 
 - Mainnet deployment.
-- A final governance or upgradeability system.
+- Any governance, multisig, or alternate upgradeability system.
 - Cross-chain collateral.
 - Permissioned lending hooks.
 - Fixed-term or fixed-rate lending.
@@ -111,6 +112,16 @@ activation.
 
 The candidate MUST NOT place qualifying migration capital in a child vault if
 doing so removes it from the candidate backstop address's direct token balance.
+
+The legacy emitter's permissionless, economically gated queue and swap are the
+candidate's only protocol-wide replacement mechanism. The candidate MUST NOT
+add a governance vote, multisig approval, administrator key, or alternate
+upgrade entry point that can bypass or replace that mechanism.
+
+Successful migration MUST award zero discretionary BLND. The emitter's
+otherwise available initial-drop capacity MUST NOT be distributed to the
+deployer, transaction submitters, a treasury, migration participants
+generally, or any other discretionary recipient.
 
 ## 5. Logical architecture
 
@@ -212,6 +223,7 @@ Finalization MUST:
 - Account for the emitter's final pre-swap distribution to the incumbent
   without crediting it to candidate depositors.
 - Stop new accrual under the pre-migration backfill regime.
+- Award zero discretionary BLND for successful migration.
 - Activate the post-migration emission policy.
 - Preserve each depositor's enforceable legacy claim.
 - Avoid swapping user assets without explicit authorization.
@@ -339,6 +351,12 @@ Share conversion MUST specify rounding direction for every operation. A user
 MUST NOT receive more assets than the position owns, and dust MUST have a
 documented destination.
 
+Active and queued shares in one tier MUST use the same share-to-asset exchange
+rate. Queueing MUST NOT snapshot or guarantee the position's current asset
+value. A gain or loss applied to the tier changes the redemption value of
+active and queued shares proportionally; the implementation MUST NOT preserve
+queued principal by charging the change only to active shares.
+
 ### 7.2.1 Continuous BLND:USDC migration tier
 
 The incumbent BLND:USDC LP token and the candidate's BLND:USDC first-loss tier
@@ -415,8 +433,18 @@ The continuous BLND:USDC tier inherits the v2 queue-for-withdrawal shape:
 - Queuing alone does not forfeit migration-backfill weight. If the tokens are
   actually withdrawn before emitter migration succeeds, the withdrawn shares
   forfeit their proportional accumulated backfill weight.
-- Queued shares are excluded from activation value, take-rate allocation, and
-  ongoing BLND-emission weight immediately upon queueing.
+- Queued shares are excluded from activation value and ongoing BLND-emission
+  weight immediately upon queueing.
+- Queued shares remain eligible for take-rate allocation while they remain in
+  contract custody. Take-rate eligibility uses total accounted tier shares,
+  including active and queued shares, exactly once.
+- Queued shares remain exposed to the tier's loss waterfall until actual
+  withdrawal. Queueing does not reserve their underlying assets or protect
+  their redemption value; a tier loss reduces active and queued share value
+  proportionally through their common exchange rate, as in v2.
+- Queueing and dequeueing do not change take-rate eligibility. Actual
+  withdrawal MUST checkpoint accrued take-rate value before removing the
+  withdrawn shares from future take-rate allocations.
 - User, pool, and global total shares are reduced only when an expired
   withdrawal transfers the tokens out of the contract.
 - Every withdrawal calls the attributed pool's read-only
@@ -531,8 +559,99 @@ The implemented activation policy MUST:
 - Use one canonical result for pool status and reward eligibility.
 - Define behavior exactly at the threshold.
 
-Activation status MUST be refreshable permissionlessly unless a later
-governance specification explicitly defines another safe mechanism.
+Activation status MUST be refreshable permissionlessly.
+
+### 8.1 V2-compatible pool statuses
+
+V3 preserves the v2 numeric status codes and action restrictions:
+
+| Code | Status | Selected by |
+| ---: | --- | --- |
+| 0 | Admin Active | Pool-local operator |
+| 1 | Active | Permissionless status refresh |
+| 2 | Admin On-Ice | Pool-local operator |
+| 3 | On-Ice | Permissionless status refresh |
+| 4 | Admin Frozen | Pool-local operator |
+| 5 | Frozen | Permissionless status refresh |
+| 6 | Setup | Pool initialization |
+
+On-Ice status MUST disable new borrowing and auction cancellation. Frozen
+status MUST additionally disable new supply and collateral supply, exactly
+matching the v2 action matrix. Repayment, withdrawals, liquidation and auction
+fills, and other actions not prohibited by that matrix MUST remain available
+subject to their ordinary authorization, health, and accounting checks.
+
+The pool's Q4W percentage MUST use verified USDC value because v3 tiers have
+different assets and share units. For pool \(p\):
+
+\[
+Q_p =
+\left\lceil
+\frac{V_{p,\mathrm{queued}}}
+{V_{p,\mathrm{active}} + V_{p,\mathrm{queued}}}
+10^7
+\right\rceil
+\]
+
+where the active and queued values use the same canonical, manipulation-
+resistant valuation inputs. Take-rate weights MUST NOT affect this ratio. If
+the denominator is zero, \(Q_p = 0\); the activation threshold independently
+keeps the pool On-Ice. The upward rounding and every status comparison occur at
+seven-decimal precision.
+
+A permissionless status refresh MUST apply these inclusive boundaries:
+
+- For status 0, failure of the active-pool maintenance threshold or
+  \(Q_p \ge 50\%\) moves the pool to status 3; otherwise it remains status 0.
+- For status 2, \(Q_p \ge 75\%\) moves the pool to status 5; otherwise it
+  remains status 2.
+- For statuses 1, 3, and 5, \(Q_p \ge 60\%\) produces status 5;
+  \(Q_p \ge 30\%\) or failure of the applicable activation threshold produces
+  status 3; otherwise the result is status 1.
+- Statuses 4 and 6 reject permissionless refresh.
+
+Statuses 0 and 1 use the 10,000-USDC maintenance threshold. Statuses 2, 3, 4,
+5, and 6 are inactive and MUST meet the 12,500-USDC entry threshold before
+returning to an active status. This preserves the v3 activation hysteresis
+while adopting the v2 Q4W status thresholds.
+
+Each pool MAY configure one immutable pool-local operator at construction.
+That operator MAY request only:
+
+- Status 0 when the applicable activation threshold is met and
+  \(Q_p < 50\%\).
+- Status 2 when \(Q_p < 75\%\).
+- Status 3 when \(Q_p < 75\%\), allowing the operator to relinquish an
+  override into ordinary permissionless On-Ice mode.
+- Status 4 without an additional Q4W condition.
+
+Status 0 is a bounded risk-on override. At \(30\% \le Q_p < 50\%\), ordinary
+permissionless policy produces On-Ice, but an operator may select Admin Active
+and re-enable borrowing when the applicable activation threshold is met.
+Statuses 2 and 4 are bounded risk-off controls.
+
+This status-selection authority is the sole continuing privileged
+operating-authority exception. Its Admin On-Ice and Admin Frozen modes are the
+sole exception to the prohibition on emergency control. It MUST NOT change
+status codes, thresholds, valuation rules, backstop configuration, asset
+configuration, the loss waterfall, withdrawal eligibility, contract WASM,
+emitter migration, or any protocol-wide rule. It is therefore pool-local
+operational authority rather than protocol governance, an administrative
+recovery path, or a protocol-wide emergency override.
+
+The operator is immutable and has no rotation or recovery path. A compromised
+operator can always select Admin Frozen. Because status 4 rejects permissionless
+refresh, an unavailable operator while status 4 is selected leaves the pool
+Admin Frozen indefinitely. This availability risk is accepted to preserve the
+no-governance and no-administrator-recovery model. Admin Frozen MUST continue to
+permit the actions allowed by the v2 Frozen action matrix, including repayment,
+withdrawals subject to ordinary safety checks, and auction fills.
+
+Queueing shares does not itself change stored pool status. A caller MUST invoke
+the permissionless status-refresh entry point, using canonical values
+checkpointed for that transaction. Status refresh, operator status requests,
+pool-status enforcement, and BLND reward eligibility MUST consume the same
+canonical status result.
 
 ## 9. Loss waterfall
 
@@ -551,6 +670,13 @@ uncommitted capital in a tier before consuming capital from the next tier.
 Activation weighting is independent of this ordering: one USDC of verified
 eligible value continues to contribute one USDC to the activation score
 regardless of tier. An unconfigured optional tier contributes zero.
+
+Capital queued for withdrawal is excluded from activation but remains
+loss-bearing capital while it is still in custody. Within a tier, a loss MUST
+impair active and queued shares proportionally through their common
+share-to-asset exchange rate. The implementation MUST NOT consume active
+shares first, preserve the queued shares' pre-loss redemption value, or permit
+withdrawal while the pool reports a committed or unresolved loss.
 
 Losses and tier capacity MUST be compared in the same verified USDC unit used
 by the activation policy. Rounding MUST NOT understate the loss passed to a
@@ -610,6 +736,14 @@ contributes zero to the numerator and denominator. The formula therefore
 renormalizes across only populated, reward-eligible tiers. Within each tier,
 allocation MUST be proportional to reward-eligible depositor shares.
 
+For take-rate purposes, reward-eligible value and shares include every
+accounted position still held in contract custody, whether active or queued
+for withdrawal. Queue expiry alone does not change eligibility. The protocol
+MUST checkpoint a position's accrued allocation before an actual withdrawal
+removes its shares from the tier. Queueing or dequeueing MUST NOT add or remove
+take-rate value, and active plus queued views MUST NOT cause the same share to
+be counted twice.
+
 The fixed weights compensate earlier-loss capital more per USDC of eligible
 value without changing activation weighting. Take-rate weighting is separate
 from BLND-emission allocation and does not determine the loss amount charged to
@@ -654,6 +788,26 @@ With two 38-day retry periods, the longest scheduled interval is 107 days and
 therefore produces at most 9,244,800 BLND. It intentionally cannot reach the
 theoretical 10 million BLND cap.
 
+The one-time migration issuance policy is:
+
+\[
+A_{\mathrm{migration}} = 0
+\]
+
+\[
+D_{\mathrm{one\mbox{-}time}} = B \le 10{,}000{,}000\text{ BLND}
+\]
+
+where \(A_{\mathrm{migration}}\) is the discretionary award for completing
+migration and \(D_{\mathrm{one\mbox{-}time}}\) is the only permitted one-time
+distribution: funding for scheduled backfill. If the emitter's initial-drop
+facility funds backfill, its aggregate distribution MUST equal \(B\), MUST
+NOT exceed 10 million BLND, and its only recipient MUST be the candidate
+backstop coordinator that accounts the surviving BLND:USDC claims.
+The remainder of the emitter's 50 million BLND ceiling, including the
+otherwise available allocation of up to 40 million BLND, MUST remain
+undistributed.
+
 Backfill eligibility MUST be proportional to each surviving migration
 position's BLND:USDC tier shares multiplied by their holding duration. Only
 shares still deposited when emitter migration succeeds are eligible. A
@@ -686,8 +840,11 @@ This makes the funded allocation, including weight forfeited by early
 withdrawals, available proportionally to positions that remain through
 successful migration, apart from deterministic integer-rounding dust.
 Finalization and claims MUST use accumulator/checkpoint accounting and MUST NOT
-iterate over all depositors. The funding transaction, claim authority, and
-rounding-dust destination remain separate implementation decisions.
+iterate over all depositors. The funding transaction MUST reject an amount
+other than the immutable scheduled backfill obligation and MUST NOT create a
+separate migration award. Claim authority and the rounding-dust destination
+remain separate implementation decisions; neither may redirect value to a
+discretionary migration recipient.
 
 Ongoing accounting MUST be based on BLND actually received after the emitter
 changes recipients. No interval or position may earn under both regimes unless
@@ -751,8 +908,11 @@ MUST use bounded accumulator/checkpoint accounting rather than iteration over
 all pools or depositors. Integer remainder MUST be retained at its allocation
 scope and included in a later distribution at that same scope.
 
-The accounting MUST define treatment of queued withdrawals, capital committed
-to losses, and activation-status transitions. A position MUST NOT earn
+Queued withdrawals receive zero ongoing BLND-emission weight immediately after
+their emissions are checkpointed at queue time. Dequeueing restores emission
+eligibility only prospectively and MUST NOT grant emissions for the queued
+interval. The accounting MUST separately define treatment of capital committed
+to losses and activation-status transitions. A position MUST NOT earn
 simultaneously through both tiers or through both active and ineligible
 accounting. Changes in balances, underlying BLND per LP share, or pool status
 MUST NOT retroactively alter already accrued emissions.
@@ -790,21 +950,46 @@ Before queuing a token, the candidate design MUST verify:
 Selecting the designated token is separate from choosing which assets count
 toward pool activation.
 
-## 13. Authorization and administration
+## 13. Authorization, immutability, and protocol replacement
 
-Every privileged operation MUST identify its authorizing principal and event.
-Administrative powers MUST be minimized and separately documented.
+The v3 candidate MUST NOT introduce protocol governance, multisig control,
+administrator-controlled recovery, a protocol-wide emergency override, or an
+independent WASM upgrade authority.
 
-The final system must specify:
+The candidate backstop, factory, migration policy, activation policy,
+emissions policy, and loss-waterfall rules MUST be immutable after deployment.
+Their contract interfaces MUST NOT expose an entry point that replaces contract
+WASM or changes those protocol-wide rules through a privileged caller.
 
-- Whether contract WASM is upgradeable.
-- Who may change asset configurations and risk parameters.
-- Applicable timelocks and bounds.
-- Emergency pause powers and their scope.
-- How authority can be revoked.
+Future protocol-wide changes MUST deploy a new candidate and use the existing
+legacy-emitter replacement mechanism:
 
-Until that specification exists, new unrestricted administrative setters MUST
-NOT be added.
+1. The new candidate directly acquires a strictly greater balance of the
+   incumbent designated token.
+2. A permissionless caller creates and observes the emitter's 31-day queue.
+3. Permissionless preparation verifies the queue during its final seven days.
+4. A permissionless caller finalizes the emitter swap after unlock.
+
+Deployment keys and transaction submitters are operational actors only. They
+MUST NOT receive continuing protocol authority merely because they deploy,
+fund, prepare, finalize, or synchronize a candidate.
+
+The sole continuing privileged operating-authority exception is a separately
+and explicitly configured immutable pool-local operator holding only the
+bounded status-selection authority in Section 8.1. It includes the
+v2-compatible risk-on Admin Active override and risk-off Admin On-Ice and Admin
+Frozen controls. The authority is not inherited merely by deploying a pool and
+cannot act as governance, recovery, a protocol-wide emergency override, or a
+protocol-upgrade path.
+
+User authorization remains required for custody-changing actions involving
+that user's assets or shares. This is distinct from protocol governance and
+MUST NOT create authority to alter global policy or bypass migration
+invariants.
+
+No recovery path may override the emitter's queue, balance comparison, or
+unlock time. Bounded permissionless recovery may only observe, validate, or
+synchronize state already established by the legacy emitter.
 
 ## 14. Numeric and resource safety
 
@@ -859,9 +1044,7 @@ implemented:
 - Post-migration designated token.
 - Top-level BLND split between backstop depositors and pool supply/borrow
   positions.
-- Initial BLND drop recipient policy and lockups.
 - Protocol-fee existence and incidence.
-- Administrative, pause, and WASM-upgrade authority.
 - Whether existing v2 pool positions remain isolated or receive an explicit
   position-migration mechanism.
 

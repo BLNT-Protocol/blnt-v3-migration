@@ -48,9 +48,13 @@ Withdrawal also requires an affirmative, read-only response from the attributed
 pool's `backstop_withdrawal_allowed` interface; missing, failed, and false
 responses block the transfer. Queued shares remain in custody and retain
 migration-backfill eligibility until actual withdrawal. Active-share queries
-exclude them for use by the future canonical activation, take-rate, and
-ongoing-emission integrations. The workspace also provides one independently
-configured SEP-41 prefunding lane with exact one-token/one-share accounting.
+exclude them for use by the future canonical activation and ongoing-emission
+integrations. Queued shares remain take-rate eligible until actual withdrawal,
+and remain proportionally exposed to tier losses through the same exchange
+rate as active shares, matching the inherited v2 economics. Total accounted
+in-custody shares are the canonical take-rate and within-tier loss-allocation
+input. The workspace also provides one independently configured SEP-41
+prefunding lane with exact one-token/one-share accounting.
 Prefund shares are isolated from migration and may be deposited or withdrawn
 before or after activation; they do not yet count toward activation, losses,
 backfill, or emissions.
@@ -85,6 +89,30 @@ production valuation adapter and loss-eligible position accounting are still
 required, and untrusted caller inputs or instantaneous Comet reserve ratios
 must not be used as authoritative values.
 
+The backstop also exposes non-authoritative arithmetic for the v2-compatible
+pool statuses `0` through `6`. Multi-asset Q4W percentage uses verified USDC
+value and rounds upward to seven decimals. Normal status becomes On-Ice at 30%
+Q4W and Frozen at 60%; Admin Active becomes On-Ice at 50%, and Admin On-Ice
+becomes Frozen at 75%. Admin modes 0, 2, and 4 are bounded pool-local operator
+controls, not protocol governance; the operator may also relinquish an override
+into ordinary On-Ice status 3. Admin Active is a bounded risk-on override that
+can re-enable borrowing from 30% through immediately below 50% Q4W when the
+activation threshold is met. Admin On-Ice and Admin Frozen are risk-off
+controls. On-Ice blocks borrowing and auction cancellation. Frozen additionally
+blocks both supply and collateral supply, matching the v2 action matrix. This
+status authority is the sole continuing privileged operating-authority
+exception and cannot alter protocol-wide policy, migration, configuration,
+withdrawal safety, or WASM. The production pool-status storage, operator
+authorization, action enforcement, and canonical valuation integration remain
+implementation work.
+
+The pool-local operator is immutable and has no rotation or recovery path. A
+compromised operator can always select Admin Frozen; if the operator is
+unavailable while Admin Frozen is selected, permissionless refresh cannot
+release the pool and it remains frozen indefinitely. Repayment, ordinary safe
+withdrawals, and auction fills remain available under the v2 Frozen action
+matrix.
+
 The specified, but not yet implemented, loss waterfall consumes BLND:USDC LP,
 BLND:XLM LP, plain USDC, optional Custom A, and optional Custom B in that order.
 Pool suppliers absorb only a remaining shortfall after all configured,
@@ -107,6 +135,21 @@ open economic decision.
 The contract extends its code and instance TTL to 90 days at construction and
 renews it whenever fewer than 89 days remain. This does not change the
 emitter's 31-day migration delay.
+
+The candidate has no protocol-governance, multisig, administrator-recovery,
+protocol-wide emergency override, or WASM-upgrade path. Its only continuing
+privileged operating-authority exception is the bounded pool-local
+v2-compatible status authority described above. Protocol replacement uses only
+the legacy emitter's permissionless, economically gated queue and swap
+mechanism. Deployment and transaction-submission identities retain no authority
+over the deployed candidate. User authorization is still required for actions
+that move that user's assets or shares.
+
+Successful migration awards zero discretionary BLND. The candidate schedules
+only the time-weighted BLND:USDC backfill, capped at 10 million BLND, and the
+otherwise available allocation of up to 40 million BLND remains undistributed.
+Backfill funding and claims remain implementation work and MUST NOT introduce
+a separate migration award.
 
 ## Migration operations
 

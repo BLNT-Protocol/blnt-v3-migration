@@ -20,6 +20,17 @@ The classic-asset issuer/operator and candidate depositor use separate local
 identities. The runner creates the depositor's `BLNDUSDC` trustline explicitly
 before minting and depositing the candidate's qualifying balance.
 
+The local operator pays for deployment and migration transactions but receives
+no continuing protocol authority. The exercise uses only the legacy emitter's
+permissionless queue and swap mechanism; it deploys no governance, multisig,
+administrator recovery, or alternate upgrade path.
+
+Successful migration awards zero discretionary BLND. The current runner does
+not invoke the emitter's initial-drop facility. A future backfill-funding path
+may use that facility only for the scheduled, time-weighted BLND:USDC backfill,
+capped at 10 million BLND; it must leave the otherwise available allocation of
+up to 40 million BLND undistributed.
+
 ## Prerequisites
 
 - Stellar CLI 27

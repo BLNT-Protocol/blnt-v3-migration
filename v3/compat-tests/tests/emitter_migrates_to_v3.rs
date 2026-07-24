@@ -275,6 +275,39 @@ fn v3_wasm_exposes_asset_neutral_activation_hysteresis_quote() {
 }
 
 #[test]
+fn v3_wasm_exposes_v2_compatible_pool_status_quotes() {
+    let fixture = Fixture::create();
+    let values = |amount| v3_backstop::ActivationValues {
+        blnd_usdc: amount,
+        blnd_xlm: 0,
+        custom_a: 0,
+        custom_b: 0,
+        usdc: 0,
+    };
+    let total = 20_000 * SCALAR_7;
+
+    let on_ice = fixture.candidate.quote_update_pool_status(
+        &1,
+        &values(14_000 * SCALAR_7),
+        &values(6_000 * SCALAR_7),
+    );
+    assert!(on_ice.transition_allowed);
+    assert_eq!(on_ice.q4w_percentage, 3_000_000);
+    assert_eq!(on_ice.status, 3);
+    assert_eq!(on_ice.eligible_value, 14_000 * SCALAR_7);
+
+    let admin_active = fixture.candidate.quote_set_pool_status(
+        &3,
+        &0,
+        &values(13_000 * SCALAR_7),
+        &values(total - 13_000 * SCALAR_7),
+    );
+    assert!(admin_active.transition_allowed);
+    assert_eq!(admin_active.q4w_percentage, 3_500_000);
+    assert_eq!(admin_active.status, 0);
+}
+
+#[test]
 fn v3_factory_deploys_registered_loss_aware_pool_wasm() {
     let env = Env::default();
     let backstop = Address::generate(&env);

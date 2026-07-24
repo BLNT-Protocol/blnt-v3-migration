@@ -52,6 +52,17 @@ The test suite must verify:
   synchronization.
 - Synchronization rejects a replacement queue finalized after cancellation,
   including one that registers an unexpected next designated token.
+- Queue creation, epoch opening, preparation, finalization, and direct-swap
+  synchronization require no governance, multisig, or administrator
+  authorization.
+- Candidate interfaces expose no governance recovery, protocol-wide emergency
+  override, privileged WASM replacement, or administrative migration bypass.
+- The only continuing privileged operating-authority exception is the bounded,
+  pool-local v2-compatible status authority described below. Its risk-off modes
+  are the only emergency-control exception, and it cannot alter migration,
+  protocol configuration, withdrawal safety, or protocol-wide policy.
+- Deployment and transaction-submission identities receive no continuing
+  protocol authority.
 - A full early withdrawal receives zero backfill weight.
 - A partial early withdrawal forfeits only the withdrawn shares' proportional
   weight.
@@ -68,7 +79,14 @@ The test suite must verify:
   9,244,800 BLND rather than the theoretical 10 million maximum.
 - Finalization moves BLND emissions from the incumbent to the candidate.
 - The newly queued designated token is used for the next migration.
-- The initial BLND drop and backfilled emissions cannot be claimed twice.
+- Successful migration awards zero discretionary BLND.
+- If the initial BLND drop funds backfill, its aggregate distribution equals
+  the immutable scheduled backfill obligation, does not exceed 10 million
+  BLND, and names only the candidate backstop coordinator as recipient.
+- The otherwise available allocation of up to 40 million BLND remains
+  undistributed.
+- No deployer, operator, treasury, or general migration-participant award can
+  be funded, and backfill cannot be funded or claimed twice.
 
 ## Candidate backstop
 
@@ -117,8 +135,14 @@ The v3 tests must verify:
 - Each user/pool BLND:USDC queue is bounded to 20 entries.
 - Queued shares remain in custody and in the raw migration balance, retain
   backfill eligibility until actual withdrawal, and are exposed separately
-  from active shares so the future canonical activation, take-rate, and
-  ongoing-emission integrations can exclude them.
+  from active shares so canonical activation and ongoing-emission integrations
+  can exclude them.
+- Queued shares remain take-rate eligible until actual withdrawal. Queueing
+  and dequeueing leave the take-rate denominator unchanged, and withdrawal
+  checkpoints accrued value before removing shares from future allocations.
+- Queued shares remain exposed to tier losses until actual withdrawal.
+  Queueing does not snapshot redemption value, and a loss changes active and
+  queued share value proportionally through one common exchange rate.
 - Queue, dequeue, and withdrawal conserve user, pool, and global active,
   queued, and total shares.
 - Withdrawal before expiry is rejected.
@@ -138,7 +162,8 @@ The v3 tests must verify:
 - One BLND:USDC position may serve migration, activation, emissions, and loss
   roles, but its shares cannot be duplicated within any calculation.
 - The active-share interface excludes queued withdrawals; future canonical
-  activation, take-rate, and ongoing-emission integrations MUST use it.
+  activation and ongoing-emission integrations MUST use it. Take-rate
+  integration MUST instead use total accounted in-custody shares.
 - BLND:USDC depositors can withdraw the original LP asset under the tier's
   ordinary withdrawal rules without an involuntary asset swap.
 - Each accepted asset has an explicit valuation, haircut, concentration limit,
@@ -166,6 +191,51 @@ For a multi-asset activation formula, test:
 - Queued withdrawals and assets already committed to covering losses.
 - Consistent results between pool status and reward-zone eligibility.
 
+## Pool status
+
+The v3 tests must verify:
+
+- Status codes preserve v2 meanings: Admin Active `0`, Active `1`, Admin
+  On-Ice `2`, On-Ice `3`, Admin Frozen `4`, Frozen `5`, and Setup `6`.
+- Q4W percentage is the ceiling of queued verified USDC value divided by total
+  in-custody verified USDC value at seven-decimal precision.
+- Multi-asset Q4W calculation combines all configured tiers in verified USDC
+  value without applying take-rate weights or mixing raw share units.
+- With no pool-local override, Q4W immediately below 30% remains Active,
+  exactly 30% becomes On-Ice, immediately below 60% remains On-Ice, and
+  exactly 60% becomes Frozen.
+- Admin Active remains active immediately below 50% Q4W and becomes On-Ice
+  exactly at 50%.
+- Admin On-Ice remains On-Ice immediately below 75% Q4W and becomes Frozen
+  exactly at 75%.
+- Falling below the 10,000-USDC maintenance threshold moves an active pool
+  On-Ice independently of Q4W.
+- An inactive pool in the hysteresis band cannot reactivate until it reaches
+  the 12,500-USDC entry threshold.
+- Permissionless refresh rejects Setup and Admin Frozen.
+- The immutable pool-local operator can select statuses 0, 2, and 4, or
+  relinquish an override into ordinary On-Ice status 3. Admin Active requires
+  the applicable activation threshold and Q4W below 50%; Admin On-Ice and
+  ordinary On-Ice require Q4W below 75%; Admin Frozen is always selectable.
+- At or above 30% but below 50% Q4W, an otherwise qualified pool is ordinarily
+  On-Ice, but the operator can select Admin Active and re-enable borrowing.
+  Tests must treat this as an explicit bounded risk-on override rather than
+  risk-off or permissionless behavior.
+- A compromised operator can always select Admin Frozen. Permissionless refresh
+  cannot release that status, no alternate principal can change it, and an
+  unavailable immutable operator leaves the pool Admin Frozen indefinitely.
+- The pool-local operator cannot change thresholds, valuation, asset or
+  backstop configuration, withdrawal safety, loss ordering, WASM, migration,
+  or protocol-wide policy.
+- On-Ice blocks borrowing and auction cancellation. Frozen additionally blocks
+  both supply and collateral supply, exactly matching the v2 action matrix.
+  Repayment, withdrawals, auction fills, and other actions not prohibited by
+  that matrix remain subject to their ordinary safety checks.
+- Queueing alone does not mutate stored status; permissionless refresh applies
+  the transition using canonical checkpointed inputs.
+- Pool-status enforcement and BLND reward eligibility use the same canonical
+  result.
+
 ## Loss waterfall
 
 The v3 tests must verify:
@@ -184,6 +254,11 @@ The v3 tests must verify:
   suppliers.
 - Capital committed to an existing loss or auction is not counted or consumed
   twice.
+- A loss occurring after shares enter Q4W reduces the queued and active
+  positions' redemption value proportionally. It does not charge active shares
+  first or preserve the queued position's pre-loss value.
+- A queued withdrawal remains blocked while the loss is committed or
+  unresolved and, once permitted, redeems at the post-loss exchange rate.
 - An unavailable oracle or disposal path follows the explicitly selected
   failure policy and does not silently skip a tier.
 - Activation value remains independent of loss priority.
@@ -205,6 +280,11 @@ The v3 tests must verify:
   retroactively changing already accrued allocations.
 - Within a tier, depositors receive allocations proportional to their
   reward-eligible shares.
+- Reward-eligible take-rate shares include active and queued shares exactly
+  once while they remain in custody.
+- Queueing, queue expiry, and dequeueing do not change take-rate eligibility;
+  actual withdrawal checkpoints accrued value and removes only the withdrawn
+  shares prospectively.
 - Take-rate allocation does not change activation value, loss priority, or BLND
   emissions.
 - Every distributed reserve asset is conserved, with integer remainder carried
@@ -236,8 +316,12 @@ The v3 tests must verify:
   forward only within the same allocation scope.
 - Balance, LP-rate, and activation changes do not retroactively alter accrued
   emissions.
-- Queued withdrawals and capital committed to losses receive the explicitly
-  selected eligibility treatment.
+- Queueing checkpoints emissions through the queue timestamp, after which the
+  queued shares receive zero ongoing BLND emissions.
+- Dequeueing restores ongoing-emission eligibility prospectively without
+  awarding emissions for the queued interval.
+- Capital committed to losses receives the explicitly selected eligibility
+  treatment.
 - Underlying BLND values reject stale, caller-supplied, and same-transaction
   manipulated LP data.
 - Accrual and claims use bounded accumulator/checkpoint accounting.

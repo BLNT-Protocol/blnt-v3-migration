@@ -147,17 +147,41 @@ fn v3_wasm_exposes_asset_neutral_activation_hysteresis_quote() {
     let values = v3_backstop::ActivationValues {
         blnd_usdc: 3_000 * SCALAR_7,
         blnd_xlm: 4_000 * SCALAR_7,
+        custom_a: 1_000 * SCALAR_7,
+        custom_b: 1_000 * SCALAR_7,
         usdc: 3_000 * SCALAR_7,
     };
     let inactive_quote = fixture.candidate.quote_activation(&values, &false);
-    assert_eq!(inactive_quote.eligible_value, maintenance_threshold);
+    assert_eq!(inactive_quote.eligible_value, 12_000 * SCALAR_7);
     assert_eq!(inactive_quote.required_value, entry_threshold);
     assert!(!inactive_quote.meets_threshold);
 
     let active_quote = fixture.candidate.quote_activation(&values, &true);
-    assert_eq!(active_quote.eligible_value, maintenance_threshold);
+    assert_eq!(active_quote.eligible_value, 12_000 * SCALAR_7);
     assert_eq!(active_quote.required_value, maintenance_threshold);
     assert!(active_quote.meets_threshold);
+}
+
+#[test]
+fn v3_wasm_exposes_weighted_take_rate_quote() {
+    let fixture = Fixture::create();
+    let quote = fixture.candidate.quote_take_rate(
+        &200,
+        &v3_backstop::TakeRateValues {
+            blnd_usdc: SCALAR_7,
+            blnd_xlm: SCALAR_7,
+            custom_a: SCALAR_7,
+            custom_b: SCALAR_7,
+            usdc: SCALAR_7,
+        },
+    );
+
+    assert_eq!(quote.blnd_usdc, 50);
+    assert_eq!(quote.blnd_xlm, 50);
+    assert_eq!(quote.usdc, 40);
+    assert_eq!(quote.custom_a, 40);
+    assert_eq!(quote.custom_b, 20);
+    assert_eq!(quote.remainder, 0);
 }
 
 #[test]

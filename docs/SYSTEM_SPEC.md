@@ -284,11 +284,17 @@ or by reference:
 - Deposit and withdrawal status.
 - Liquidation or disposal path.
 
-The approved activation assets are:
+The three required activation assets are:
 
 - BLND:USDC 80:20 LP.
 - BLND:XLM 80:20 LP.
 - Plain USDC.
+
+The candidate MAY additionally configure up to two optional custom assets,
+identified as Custom A and Custom B. An unconfigured custom tier has zero
+balance, zero activation value, zero loss capacity, and zero take-rate
+allocation. A custom asset MUST satisfy every configuration and safety
+requirement in this section before any of those roles become available.
 
 Approval for activation does not by itself make a position eligible. Capital
 MUST also be allocated to the evaluated pool, committed to the defined loss
@@ -356,10 +362,16 @@ The activation policy is independent of the emitter's designated-token
 comparison.
 
 A pool's activation score is the sum of the eligible values of its three
-approved assets, denominated in 7-decimal USDC units:
+required and up to two configured custom assets, denominated in 7-decimal USDC
+units:
 
 \[
-E_p = V_{p,\mathrm{BLND:XLM}} + V_{p,\mathrm{BLND:USDC}} + V_{p,\mathrm{USDC}}
+E_p =
+V_{p,\mathrm{BLND:XLM}} +
+V_{p,\mathrm{BLND:USDC}} +
+V_{p,\mathrm{USDC}} +
+V_{p,\mathrm{CustomA}} +
+V_{p,\mathrm{CustomB}}
 \]
 
 where:
@@ -371,7 +383,8 @@ where:
 Every eligible USDC of value has equal activation weight. The calculation has
 no asset-specific activation haircut, concentration cap, or minimum
 BLND-bearing allocation. A pool therefore MAY satisfy the threshold with any
-combination of the three approved assets, including plain USDC alone.
+combination of the required and configured optional assets, including one
+eligible asset alone.
 
 The entry threshold for an inactive pool is:
 
@@ -418,8 +431,26 @@ governance specification explicitly defines another safe mechanism.
 
 ## 9. Loss waterfall
 
-The candidate MAY support one or more tiers. Multiple assets MAY share a tier,
-including a co-junior tier.
+The candidate uses the following strict first-loss order:
+
+1. BLND:USDC LP.
+2. BLND:XLM LP.
+3. Plain USDC.
+4. Optional Custom A.
+5. Optional Custom B.
+6. Pool suppliers for any residual loss after all eligible backstop capital is
+   exhausted.
+
+Each backstop asset occupies its own tier. A loss MUST exhaust the eligible,
+uncommitted capital in a tier before consuming capital from the next tier.
+Activation weighting is independent of this ordering: one USDC of verified
+eligible value continues to contribute one USDC to the activation score
+regardless of tier. An unconfigured optional tier contributes zero.
+
+Losses and tier capacity MUST be compared in the same verified USDC unit used
+by the activation policy. Rounding MUST NOT understate the loss passed to a
+later tier. Capital already committed to an outstanding loss or auction MUST
+NOT be counted again.
 
 For every tier, the implementation MUST define:
 
@@ -431,11 +462,61 @@ For every tier, the implementation MUST define:
 - Behavior when an oracle or market is unavailable.
 - When supplier balances absorb losses after backstop exhaustion.
 
-Emission weights do not need to match loss weights. Any difference MUST be
+The auction, transfer, or disposal mechanism used to realize each tier's value
+remains an open implementation decision. A failed or unavailable disposal path
+MUST NOT silently skip a tier or charge a later tier without behavior
+explicitly defined and tested.
+
+Emission weights do not need to follow loss priority. Any difference MUST be
 explicit and tested.
 
 No asset may count toward loss capacity unless the protocol can actually seize
 or dispose of it under the specified loss process.
+
+### 9.1 Take-rate allocation
+
+The five backstop tiers have fixed take-rate weights in waterfall order:
+
+| Tier | Asset | Weight |
+| ---: | --- | ---: |
+| 1 | BLND:USDC LP | 2.5 |
+| 2 | BLND:XLM LP | 2.5 |
+| 3 | Plain USDC | 2 |
+| 4 | Optional Custom A | 2 |
+| 5 | Optional Custom B | 1 |
+
+The contract represents this exact relative ratio as the integers
+`5:5:4:4:2`; no floating-point arithmetic is used.
+
+For a pool-level take-rate distribution \(D\), tier \(i\)'s allocation is
+proportional to both its reward-eligible verified USDC value \(R_i\) and its
+fixed weight \(w_i\):
+
+\[
+D_i =
+\left\lfloor
+D
+\frac{w_i R_i}{\sum_j w_j R_j}
+\right\rfloor
+\]
+
+An unconfigured optional tier or a tier with zero reward-eligible value
+contributes zero to the numerator and denominator. The formula therefore
+renormalizes across only populated, reward-eligible tiers. Within each tier,
+allocation MUST be proportional to reward-eligible depositor shares.
+
+The fixed weights compensate earlier-loss capital more per USDC of eligible
+value without changing activation weighting. Take-rate weighting is separate
+from BLND-emission allocation and does not determine the loss amount charged to
+a tier.
+
+The implementation MUST use accumulator/checkpoint accounting rather than
+iterate across depositors. If \(D\) is denominated in a supplied reserve asset,
+each tier accrues that asset directly; the calculation MUST NOT assume an
+immediate conversion to a backstop asset. Integer remainder MUST remain in a
+carry accumulator keyed by both pool and distributed reserve asset for a future
+distribution of that same asset. Remainders from different reserve assets MUST
+NOT be combined, converted, or silently assigned to a favored tier.
 
 ## 10. BLND emissions and backfill
 
@@ -604,10 +685,12 @@ The detailed test matrix is maintained in `docs/MIGRATION_TEST_PLAN.md`.
 The following require explicit resolution before their associated behavior is
 implemented:
 
-- Number and priority of loss tiers.
-- Co-tier loss allocation method.
+- Per-tier auction, transfer, and disposal mechanisms.
+- Behavior when a tier's oracle or disposal market is unavailable.
 - Production LP price sources, averaging, staleness, and failure policy.
 - Treatment of queued capital for activation and emissions.
+- Treatment of queued capital for take-rate allocation.
+- Exact take-rate accrual integration and distribution cadence.
 - Post-migration designated token.
 - Ongoing BLND-emission allocation.
 - Legacy-position withdrawal and optional conversion interface.

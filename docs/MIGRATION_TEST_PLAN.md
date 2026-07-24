@@ -97,7 +97,8 @@ The v3 tests must verify:
 
 For a multi-asset activation formula, test:
 
-- BLND:XLM LP, BLND:USDC LP, and plain USDC independently.
+- BLND:XLM LP, BLND:USDC LP, plain USDC, Custom A, and Custom B independently.
+- Unconfigured optional custom tiers contribute zero activation value.
 - Combined verified values immediately below, exactly at, and immediately above
   the 12,500-USDC entry threshold.
 - Active-pool values immediately below and exactly at the 10,000-USDC
@@ -113,6 +114,55 @@ For a multi-asset activation formula, test:
 - Oracle staleness and unavailable-market behavior.
 - Queued withdrawals and assets already committed to covering losses.
 - Consistent results between pool status and reward-zone eligibility.
+
+## Loss waterfall
+
+The v3 tests must verify:
+
+- BLND:USDC LP absorbs losses before BLND:XLM LP.
+- BLND:XLM LP absorbs losses only after eligible BLND:USDC LP is exhausted.
+- Plain USDC absorbs losses only after both LP tiers are exhausted.
+- Optional Custom A absorbs losses only after plain USDC is exhausted.
+- Optional Custom B absorbs losses only after Custom A is exhausted.
+- Supplier balances absorb only the residual loss after all five backstop
+  tiers are exhausted, ignoring unconfigured optional tiers.
+- A partial loss contained by one tier does not modify later tiers.
+- Losses crossing one, multiple, and all four backstop-tier boundaries are
+  conserved exactly, subject to explicitly documented rounding.
+- A loss that exhausts all five tiers passes only the remaining residual to
+  suppliers.
+- Capital committed to an existing loss or auction is not counted or consumed
+  twice.
+- An unavailable oracle or disposal path follows the explicitly selected
+  failure policy and does not silently skip a tier.
+- Activation value remains independent of loss priority.
+
+## Take-rate allocation
+
+The v3 tests must verify:
+
+- Tier weights are `2.5,2.5,2,2,1` for BLND:USDC LP, BLND:XLM LP, USDC,
+  Custom A, and Custom B respectively, represented exactly on-chain as
+  `5:5:4:4:2`.
+- Each tier receives take-rate assets in proportion to its verified
+  reward-eligible USDC value multiplied by its weight.
+- Equal-value tier positions receive relative allocations matching their
+  weights, subject only to documented integer rounding.
+- Empty and unconfigured optional tiers contribute zero and are omitted from
+  the effective denominator.
+- Adding or removing a reward-eligible position updates the denominator without
+  retroactively changing already accrued allocations.
+- Within a tier, depositors receive allocations proportional to their
+  reward-eligible shares.
+- Take-rate allocation does not change activation value, loss priority, or BLND
+  emissions.
+- Every distributed reserve asset is conserved, with integer remainder carried
+  forward in an accumulator keyed by pool and distributed reserve asset rather
+  than assigned to a tier.
+- Remainders belonging to different pools or reserve assets remain isolated
+  and can be applied only to a later distribution of the same reserve asset for
+  the same pool.
+- Accrual and claims use bounded accumulator/checkpoint accounting.
 
 ## Execution environments
 

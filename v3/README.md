@@ -29,14 +29,24 @@ after activation; they do not yet count toward activation, losses, backfill,
 or emissions.
 
 The backstop exposes the canonical Milestone-5 activation arithmetic for
-verified, pool-specific values of BLND:XLM LP, BLND:USDC LP, and plain USDC.
-Each USDC of eligible value counts equally. An inactive pool qualifies at or
-above 12,500 USDC, while an active pool remains qualified at or above 10,000
-USDC. The public entry point returns a non-authoritative quote. This arithmetic
-is not yet wired to pool status: a production valuation adapter and
-loss-eligible position accounting are still required, and untrusted caller
-inputs or instantaneous Comet reserve ratios must not be used as authoritative
-values.
+verified, pool-specific values of BLND:XLM LP, BLND:USDC LP, plain USDC, and up
+to two optional custom assets. Each USDC of eligible value counts equally. An
+inactive pool qualifies at or above 12,500 USDC, while an active pool remains
+qualified at or above 10,000 USDC. The public entry point returns a
+non-authoritative quote. This arithmetic is not yet wired to pool status: a
+production valuation adapter and loss-eligible position accounting are still
+required, and untrusted caller inputs or instantaneous Comet reserve ratios
+must not be used as authoritative values.
+
+The specified, but not yet implemented, loss waterfall consumes BLND:USDC LP,
+BLND:XLM LP, plain USDC, optional Custom A, and optional Custom B in that order.
+Pool suppliers absorb only a remaining shortfall after all configured,
+eligible backstop tiers are exhausted. The five tiers have take-rate weights
+`2.5,2.5,2,2,1`, represented exactly on-chain as `5:5:4:4:2`; each tier's
+allocation is proportional to its reward-eligible USDC value multiplied by its
+weight. This priority and weighting do not change equal-USDC activation
+accounting. Per-tier auction, take-rate accrual, and disposal mechanics remain
+implementation work.
 
 The contract extends its code and instance TTL to 90 days at construction and
 renews it whenever fewer than 89 days remain. This does not change the

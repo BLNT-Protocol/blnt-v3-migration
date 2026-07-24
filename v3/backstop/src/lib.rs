@@ -27,6 +27,7 @@ enum DataKey {
     Emitter,
     LegacyBackstopToken,
     NextBackstopToken,
+    PrefundToken,
     PrefundingStart,
     AbsoluteMigrationDeadline,
     MigrationEpochStart,
@@ -39,12 +40,15 @@ enum DataKey {
     TotalMigrationTimeBasis,
     TotalMigrationWeight,
     ScheduledBackfill,
+    TotalPrefundShares,
 }
 
 #[derive(Clone)]
 #[contracttype]
 enum PersistentKey {
     MigrationPosition(Address, Address),
+    PrefundShares(Address, Address),
+    PoolPrefundShares(Address),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -80,6 +84,7 @@ pub enum BackstopError {
     PrefundingWindowExceeded = 1217,
     MigrationEpochNotOpen = 1218,
     MigrationEpochAlreadyOpen = 1219,
+    AssetConfigurationCollision = 1220,
 }
 
 #[derive(Clone)]
@@ -121,6 +126,23 @@ pub struct MigrationActivated {
     pub backfill_end: u64,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrefundDeposited {
+    pub depositor: Address,
+    pub pool: Address,
+    pub shares: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrefundWithdrawn {
+    pub depositor: Address,
+    pub pool: Address,
+    pub shares: i128,
+    pub to: Address,
+}
+
 #[contract]
 pub struct BackstopContract;
 
@@ -131,7 +153,11 @@ impl BackstopContract {
         emitter: Address,
         legacy_backstop_token: Address,
         next_backstop_token: Address,
+        prefund_token: Address,
     ) {
+        if legacy_backstop_token == prefund_token {
+            panic_with_error!(&env, BackstopError::AssetConfigurationCollision);
+        }
         extend_instance_ttl(&env);
         let prefunding_start = env.ledger().timestamp();
         let absolute_migration_deadline =
@@ -150,6 +176,9 @@ impl BackstopContract {
         env.storage()
             .instance()
             .set(&DataKey::NextBackstopToken, &next_backstop_token);
+        env.storage()
+            .instance()
+            .set(&DataKey::PrefundToken, &prefund_token);
     }
 
     /// Return the legacy token held directly by this contract for migration.
@@ -175,6 +204,103 @@ impl BackstopContract {
             .instance()
             .get(&DataKey::NextBackstopToken)
             .unwrap()
+    }
+
+    /// Return the independently configured post-migration prefunding asset.
+    pub fn prefund_token(env: Env) -> Address {
+        extend_instance_ttl(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::PrefundToken)
+            .unwrap()
+    }
+
+    /// Deposit the configured post-migration asset as one-to-one prefund shares.
+    ///
+    /// Prefund shares do not count toward legacy emitter qualification,
+    /// migration backfill, activation, losses, or ongoing emissions.
+    pub fn deposit_prefund(env: Env, from: Address, pool: Address, shares: i128) {
+        extend_instance_ttl(&env);
+        require_positive(&env, shares);
+        from.require_auth();
+
+        let user_shares = get_prefund_shares(&env, &from, &pool);
+        set_prefund_shares(
+            &env,
+            &from,
+            &pool,
+            checked_add_i128(&env, user_shares, shares),
+        );
+        let pool_shares = get_pool_prefund_shares(&env, &pool);
+        set_pool_prefund_shares(&env, &pool, checked_add_i128(&env, pool_shares, shares));
+        add_to_instance_total(&env, DataKey::TotalPrefundShares, shares);
+
+        TokenClient::new(&env, &prefund_token(&env)).transfer(
+            &from,
+            &env.current_contract_address(),
+            &shares,
+        );
+        PrefundDeposited {
+            depositor: from,
+            pool,
+            shares,
+        }
+        .publish(&env);
+    }
+
+    /// Withdraw one-to-one prefund shares.
+    ///
+    /// Immediate withdrawal is permitted while prefunding remains ineligible
+    /// for activation and is not committed to a loss process.
+    pub fn withdraw_prefund(env: Env, from: Address, pool: Address, shares: i128, to: Address) {
+        extend_instance_ttl(&env);
+        require_positive(&env, shares);
+        from.require_auth();
+
+        let user_shares = get_prefund_shares(&env, &from, &pool);
+        if shares > user_shares {
+            panic_with_error!(&env, BackstopError::InsufficientBalance);
+        }
+        set_prefund_shares(
+            &env,
+            &from,
+            &pool,
+            checked_sub_i128(&env, user_shares, shares),
+        );
+        let pool_shares = get_pool_prefund_shares(&env, &pool);
+        set_pool_prefund_shares(&env, &pool, checked_sub_i128(&env, pool_shares, shares));
+        add_to_instance_total(&env, DataKey::TotalPrefundShares, -shares);
+
+        TokenClient::new(&env, &prefund_token(&env)).transfer(
+            &env.current_contract_address(),
+            &to,
+            &shares,
+        );
+        PrefundWithdrawn {
+            depositor: from,
+            pool,
+            shares,
+            to,
+        }
+        .publish(&env);
+    }
+
+    pub fn prefund_shares(env: Env, user: Address, pool: Address) -> i128 {
+        extend_instance_ttl(&env);
+        get_prefund_shares(&env, &user, &pool)
+    }
+
+    pub fn pool_prefund_shares(env: Env, pool: Address) -> i128 {
+        extend_instance_ttl(&env);
+        get_pool_prefund_shares(&env, &pool)
+    }
+
+    pub fn total_prefund_shares(env: Env) -> i128 {
+        extend_instance_ttl(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalPrefundShares)
+            .unwrap_or(0)
     }
 
     pub fn migration_status(env: Env) -> MigrationStatus {
@@ -602,6 +728,13 @@ fn legacy_backstop_token(env: &Env) -> Address {
         .unwrap()
 }
 
+fn prefund_token(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::PrefundToken)
+        .unwrap()
+}
+
 fn require_not_active(env: &Env) {
     if env.storage().instance().has(&DataKey::ActivatedAt) {
         panic_with_error!(env, BackstopError::AlreadyFinalized);
@@ -804,6 +937,44 @@ fn get_position(env: &Env, user: &Address, pool: &Address) -> MigrationPosition 
     position
 }
 
+fn get_prefund_shares(env: &Env, user: &Address, pool: &Address) -> i128 {
+    let key = PersistentKey::PrefundShares(user.clone(), pool.clone());
+    let shares = env.storage().persistent().get(&key).unwrap_or(0);
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
+    }
+    shares
+}
+
+fn set_prefund_shares(env: &Env, user: &Address, pool: &Address, shares: i128) {
+    let key = PersistentKey::PrefundShares(user.clone(), pool.clone());
+    env.storage().persistent().set(&key, &shares);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
+}
+
+fn get_pool_prefund_shares(env: &Env, pool: &Address) -> i128 {
+    let key = PersistentKey::PoolPrefundShares(pool.clone());
+    let shares = env.storage().persistent().get(&key).unwrap_or(0);
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
+    }
+    shares
+}
+
+fn set_pool_prefund_shares(env: &Env, pool: &Address, shares: i128) {
+    let key = PersistentKey::PoolPrefundShares(pool.clone());
+    env.storage().persistent().set(&key, &shares);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
+}
+
 fn set_position(env: &Env, user: &Address, pool: &Address, position: &MigrationPosition) {
     let key = PersistentKey::MigrationPosition(user.clone(), pool.clone());
     env.storage().persistent().set(&key, position);
@@ -872,8 +1043,9 @@ mod tests {
 
     use super::*;
     use soroban_sdk::{
-        testutils::{storage::Instance, Address as _, Ledger},
-        Address,
+        testutils::{storage::Instance, Address as _, Ledger, MockAuth, MockAuthInvoke},
+        token::StellarAssetClient,
+        Address, IntoVal,
     };
 
     #[contract]
@@ -961,17 +1133,19 @@ mod tests {
         let incumbent = Address::generate(&env);
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
+        let prefund_token = Address::generate(&env);
         let candidate_id = Address::generate(&env);
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
         env.register_at(
             &candidate_id,
             BackstopContract,
-            (&emitter_id, &legacy_token, &next_token),
+            (&emitter_id, &legacy_token, &next_token, &prefund_token),
         );
         let candidate = BackstopContractClient::new(&env, &candidate_id);
 
         assert_eq!(candidate.backstop_token(), legacy_token);
         assert_eq!(candidate.next_backstop_token(), next_token);
+        assert_eq!(candidate.prefund_token(), prefund_token);
         assert_eq!(candidate.migration_status(), MigrationStatus::Pending);
         assert_eq!(candidate.original_unlock(), None);
         assert_eq!(candidate.backfill_end(), None);
@@ -1012,12 +1186,13 @@ mod tests {
         let incumbent = Address::generate(&env);
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
+        let prefund_token = Address::generate(&env);
         let candidate_id = Address::generate(&env);
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
         env.register_at(
             &candidate_id,
             BackstopContract,
-            (&emitter_id, &legacy_token, &next_token),
+            (&emitter_id, &legacy_token, &next_token, &prefund_token),
         );
 
         let candidate = BackstopContractClient::new(&env, &candidate_id);
@@ -1041,12 +1216,13 @@ mod tests {
         let incumbent = Address::generate(&env);
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
+        let prefund_token = Address::generate(&env);
         let candidate_id = Address::generate(&env);
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
         env.register_at(
             &candidate_id,
             BackstopContract,
-            (&emitter_id, &legacy_token, &next_token),
+            (&emitter_id, &legacy_token, &next_token, &prefund_token),
         );
         let user = Address::generate(&env);
         let pool = Address::generate(&env);
@@ -1054,6 +1230,97 @@ mod tests {
         assert!(BackstopContractClient::new(&env, &candidate_id)
             .try_deposit_migration(&user, &pool, &1)
             .is_err());
+    }
+
+    #[test]
+    fn prefund_deposit_and_withdraw_require_owner_authorization() {
+        let env = Env::default();
+        let incumbent = Address::generate(&env);
+        let legacy_token = Address::generate(&env);
+        let next_token = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let prefund_token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
+        let candidate_id = Address::generate(&env);
+        let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
+        env.register_at(
+            &candidate_id,
+            BackstopContract,
+            (&emitter_id, &legacy_token, &next_token, &prefund_token),
+        );
+        let candidate = BackstopContractClient::new(&env, &candidate_id);
+        let token = StellarAssetClient::new(&env, &prefund_token);
+        let user = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let pool = Address::generate(&env);
+        let amount = 100;
+        token.mock_all_auths().mint(&user, &amount);
+
+        assert!(candidate
+            .try_deposit_prefund(&user, &pool, &amount)
+            .is_err());
+        assert_eq!(candidate.prefund_shares(&user, &pool), 0);
+        assert_eq!(candidate.total_prefund_shares(), 0);
+        assert_eq!(token.balance(&user), amount);
+
+        candidate
+            .mock_auths(&[MockAuth {
+                address: &user,
+                invoke: &MockAuthInvoke {
+                    contract: &candidate_id,
+                    fn_name: "deposit_prefund",
+                    args: (&user, &pool, amount).into_val(&env),
+                    sub_invokes: &[MockAuthInvoke {
+                        contract: &prefund_token,
+                        fn_name: "transfer",
+                        args: (&user, &candidate_id, amount).into_val(&env),
+                        sub_invokes: &[],
+                    }],
+                },
+            }])
+            .deposit_prefund(&user, &pool, &amount);
+        assert_eq!(candidate.prefund_shares(&user, &pool), amount);
+        assert_eq!(candidate.total_prefund_shares(), amount);
+        assert_eq!(token.balance(&candidate_id), amount);
+
+        assert!(candidate
+            .try_withdraw_prefund(&user, &pool, &amount, &recipient)
+            .is_err());
+        assert_eq!(candidate.prefund_shares(&user, &pool), amount);
+        assert_eq!(token.balance(&candidate_id), amount);
+
+        candidate
+            .mock_auths(&[MockAuth {
+                address: &user,
+                invoke: &MockAuthInvoke {
+                    contract: &candidate_id,
+                    fn_name: "withdraw_prefund",
+                    args: (&user, &pool, amount, &recipient).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .withdraw_prefund(&user, &pool, &amount, &recipient);
+        assert_eq!(candidate.prefund_shares(&user, &pool), 0);
+        assert_eq!(candidate.total_prefund_shares(), 0);
+        assert_eq!(token.balance(&candidate_id), 0);
+        assert_eq!(token.balance(&recipient), amount);
+    }
+
+    #[test]
+    #[should_panic]
+    fn constructor_rejects_colliding_migration_and_prefund_assets() {
+        let env = Env::default();
+        let emitter = Address::generate(&env);
+        let token = Address::generate(&env);
+        let next_token = Address::generate(&env);
+        let candidate = Address::generate(&env);
+
+        env.register_at(
+            &candidate,
+            BackstopContract,
+            (&emitter, &token, &next_token, &token),
+        );
     }
 
     #[test]

@@ -47,6 +47,7 @@ struct Fixture {
     blnd: TokenClient<'static>,
     legacy_token: StellarAssetClient<'static>,
     next_token: Address,
+    prefund_token: Address,
 }
 
 impl Fixture {
@@ -63,6 +64,9 @@ impl Fixture {
             .register_stellar_asset_contract_v2(token_admin.clone())
             .address();
         let next_token_id = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let prefund_token_id = env
             .register_stellar_asset_contract_v2(token_admin)
             .address();
 
@@ -74,7 +78,12 @@ impl Fixture {
 
         let candidate_id = env.register(
             v3_backstop::WASM,
-            (&emitter_id, &legacy_token_id, &next_token_id),
+            (
+                &emitter_id,
+                &legacy_token_id,
+                &next_token_id,
+                &prefund_token_id,
+            ),
         );
         let candidate = v3_backstop::Client::new(&env, &candidate_id);
         let blnd = TokenClient::new(&env, &blnd_id);
@@ -88,6 +97,7 @@ impl Fixture {
             blnd,
             legacy_token,
             next_token: next_token_id,
+            prefund_token: prefund_token_id,
         }
     }
 
@@ -127,6 +137,8 @@ fn legacy_emitter_finalizes_migration_to_v3_wasm() {
         fixture.legacy_token.address
     );
     assert_eq!(fixture.candidate.next_backstop_token(), fixture.next_token);
+    assert_eq!(fixture.candidate.prefund_token(), fixture.prefund_token);
+    assert_ne!(fixture.candidate.prefund_token(), fixture.next_token);
     assert_eq!(fixture.candidate.emitter(), fixture.emitter.address);
     assert_eq!(
         fixture.candidate.absolute_migration_deadline(),
@@ -668,4 +680,85 @@ fn withdrawn_shares_forfeit_weight_to_time_weighted_survivors() {
         fixture.candidate.quote_backfill(&bob, &pool),
         backfill * bob_weight / (alice_weight + bob_weight)
     );
+}
+
+#[test]
+fn post_migration_prefunding_is_conserved_and_isolated_from_migration() {
+    let fixture = Fixture::create();
+    let pool = Address::generate(&fixture.env);
+    let depositor = Address::generate(&fixture.env);
+    let recipient = Address::generate(&fixture.env);
+    let post_activation_depositor = Address::generate(&fixture.env);
+    let prefund_token = StellarAssetClient::new(&fixture.env, &fixture.prefund_token);
+    prefund_token.mint(&depositor, &(300 * SCALAR_7));
+
+    fixture
+        .candidate
+        .deposit_prefund(&depositor, &pool, &(300 * SCALAR_7));
+
+    assert_eq!(
+        fixture.candidate.prefund_shares(&depositor, &pool),
+        300 * SCALAR_7
+    );
+    assert_eq!(fixture.candidate.pool_prefund_shares(&pool), 300 * SCALAR_7);
+    assert_eq!(fixture.candidate.total_prefund_shares(), 300 * SCALAR_7);
+    assert_eq!(
+        TokenClient::new(&fixture.env, &fixture.prefund_token).balance(&fixture.candidate.address),
+        300 * SCALAR_7
+    );
+    prefund_token.mint(&fixture.candidate.address, &(7 * SCALAR_7));
+    assert_eq!(fixture.candidate.total_prefund_shares(), 300 * SCALAR_7);
+    assert_eq!(
+        TokenClient::new(&fixture.env, &fixture.prefund_token).balance(&fixture.candidate.address),
+        307 * SCALAR_7
+    );
+    assert_eq!(fixture.legacy_token.balance(&fixture.candidate.address), 0);
+    assert_eq!(
+        fixture
+            .candidate
+            .migration_position(&depositor, &pool)
+            .amount,
+        0
+    );
+    assert_eq!(
+        fixture.candidate.migration_status(),
+        v3_backstop::MigrationStatus::Pending
+    );
+    assert!(fixture.candidate.try_begin_migration().is_err());
+
+    fixture.fund_qualifying_balances();
+    fixture.queue();
+    fixture.enter_preparation_window();
+    fixture.candidate.prepare_migration();
+    fixture.unlock();
+    fixture.candidate.finalize_migration();
+
+    assert_eq!(
+        fixture.candidate.scheduled_backfill(),
+        QUEUE_SECONDS as i128 * SCALAR_7
+    );
+    assert_eq!(fixture.candidate.total_prefund_shares(), 300 * SCALAR_7);
+
+    fixture
+        .candidate
+        .withdraw_prefund(&depositor, &pool, &(100 * SCALAR_7), &recipient);
+    assert_eq!(
+        fixture.candidate.prefund_shares(&depositor, &pool),
+        200 * SCALAR_7
+    );
+    assert_eq!(
+        TokenClient::new(&fixture.env, &fixture.prefund_token).balance(&recipient),
+        100 * SCALAR_7
+    );
+
+    prefund_token.mint(&post_activation_depositor, &(50 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_prefund(&post_activation_depositor, &pool, &(50 * SCALAR_7));
+    assert_eq!(fixture.candidate.pool_prefund_shares(&pool), 250 * SCALAR_7);
+    assert_eq!(fixture.candidate.total_prefund_shares(), 250 * SCALAR_7);
+    assert!(fixture
+        .candidate
+        .try_withdraw_prefund(&depositor, &pool, &(200 * SCALAR_7 + 1), &recipient,)
+        .is_err());
 }

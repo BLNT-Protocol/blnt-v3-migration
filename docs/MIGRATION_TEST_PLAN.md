@@ -76,6 +76,15 @@ The v3 tests must verify:
 
 - BLND:USDC migration deposits are accounted for independently from any
   post-migration backstop asset.
+- The prefunding token is configured independently from both the legacy
+  migration token and the emitter's next designated token.
+- Prefund deposits mint one share per token base unit and conserve exact user,
+  pool, and global totals through withdrawal.
+- Prefund shares can be deposited before and after migration and remain
+  immediately withdrawable while they have no activation or loss role.
+- Prefund balances do not qualify the legacy emitter, earn migration backfill,
+  or change scheduled backfill.
+- A direct transfer of the prefunding token does not create accounted shares.
 - Depositors cannot be double-counted across migration, activation, emissions,
   or loss tiers.
 - Queued withdrawals receive the intended activation and emission treatment.

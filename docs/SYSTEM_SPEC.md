@@ -303,6 +303,34 @@ Share conversion MUST specify rounding direction for every operation. A user
 MUST NOT receive more assets than the position owns, and dust MUST have a
 documented destination.
 
+### 7.2.1 Initial single-asset prefunding lane
+
+Before activation policy or loss handling is implemented, the candidate MAY
+configure one post-migration prefunding token independently from both the
+legacy migration token and the emitter's next designated token. The configured
+prefunding token MUST differ from the legacy migration token so the same direct
+balance cannot be counted as both legacy migration capital and post-migration
+prefunding. It MAY equal the next designated token only through explicit
+constructor configuration.
+
+This initial prefunding lane MUST:
+
+- Issue exactly one prefund share for each token base unit transferred through
+  the deposit entry point, with no conversion rounding or dust.
+- Attribute shares to depositor, pool, and the immutable configured token.
+- Maintain checked user, pool, and global share totals.
+- Remain separate from legacy emitter qualification, migration positions,
+  backfill weights, activation, loss capacity, and ongoing emissions.
+- Permit deposits before and after migration activation.
+- Permit immediate withdrawal while the shares remain ineligible for
+  activation and are not committed to losses.
+- Preserve exact token conservation across deposits and withdrawals.
+
+Direct token transfers that do not use the deposit entry point MUST NOT create
+shares or count toward any protocol calculation. This prefunding mechanism does
+not approve the configured token for activation or loss absorption; the full
+asset configuration in Section 7.1 remains required before either use.
+
 ### 7.3 Withdrawals
 
 Withdrawal rules MUST:
@@ -559,15 +587,17 @@ implemented:
 1. Preserve the v2 incumbent and migration harness.
 2. Add an isolated v3 backstop crate with emitter-compatible entry points.
 3. Implement legacy BLND:USDC migration deposits and checkpoints.
-4. Add one prefundable post-migration backstop asset.
+4. Add one independently configured, prefundable post-migration backstop
+   asset without activation, loss, backfill, or emission eligibility.
 5. Implement a canonical, testable activation-policy interface.
 6. Implement legacy withdrawal without forced conversion.
 7. Complete native, WASM, local-network, and testnet migration exercises.
 
-Milestones 1 through 3 are represented by the frozen v2 baseline, isolated
+Milestones 1 through 4 are represented by the frozen v2 baseline, isolated
 Protocol-27 backstop crate, cross-version legacy-emitter migration harness, and
-the candidate's pool-attributed legacy migration deposits and time-weighted
-checkpoints. BLND funding and claims remain intentionally unimplemented.
+the candidate's pool-attributed legacy migration deposits, time-weighted
+checkpoints, and isolated single-asset prefunding lane. BLND funding and claims
+remain intentionally unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

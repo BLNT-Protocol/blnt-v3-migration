@@ -22,7 +22,10 @@ withdrawals, deterministic 1-BLND-per-second backfill scheduling from the
 original queue start, a bounded 31-day prefunding campaign, and time-weighted
 survivor-allocation quotes. It intentionally does not yet implement BLND
 funding or claims, activation policy, loss tiers, or ongoing-emission
-allocation.
+allocation. It also provides one independently configured SEP-41 prefunding
+lane with exact one-token/one-share accounting. Prefund shares are isolated
+from migration and may be deposited or withdrawn before or after activation;
+they do not yet count toward activation, losses, backfill, or emissions.
 
 The contract extends its code and instance TTL to 90 days at construction and
 renews it whenever fewer than 89 days remain. This does not change the

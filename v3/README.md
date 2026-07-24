@@ -23,12 +23,26 @@ from the original queue start, a bounded 31-day prefunding campaign, and
 time-weighted survivor-allocation quotes. The same accounted BLND:USDC shares
 exist before and after migration; migration freezes only their temporary
 backfill weight, and later deposits receive no retroactive backfill. It
+stores one immutable v3 pool-factory address, validates the factory interface
+during construction, and accepts BLND:USDC deposits only for
+factory-registered pools that expose the required loss-state callback.
+Validation occurs before token custody or share accounting. The callback is a
+permanent compatibility boundary that factory-approved pool upgrades must
+preserve. It
 intentionally does not yet implement BLND funding or claims, authoritative
-pool-status activation, loss execution, withdrawal queues, or ongoing-emission
-accrual. It also provides one independently configured SEP-41 prefunding lane
-with exact one-token/one-share accounting. Prefund shares are isolated from
-migration and may be deposited or withdrawn before or after activation; they
-do not yet count toward activation, losses, backfill, or emissions.
+pool-status activation, loss execution, canonical pool loss-state computation,
+or ongoing-emission accrual. BLND:USDC withdrawals use a bounded 17-day queue
+with at most 20 entries per user and pool, FIFO withdrawal, and LIFO dequeue.
+Withdrawal also requires an affirmative, read-only response from the attributed
+pool's `backstop_withdrawal_allowed` interface; missing, failed, and false
+responses block the transfer. Queued shares remain in custody and retain
+migration-backfill eligibility until actual withdrawal. Active-share queries
+exclude them for use by the future canonical activation, take-rate, and
+ongoing-emission integrations. The workspace also provides one independently
+configured SEP-41 prefunding lane with exact one-token/one-share accounting.
+Prefund shares are isolated from migration and may be deposited or withdrawn
+before or after activation; they do not yet count toward activation, losses,
+backfill, or emissions.
 
 The backstop exposes the canonical Milestone-5 activation arithmetic for
 verified, pool-specific values of BLND:XLM LP, BLND:USDC LP, plain USDC, and up

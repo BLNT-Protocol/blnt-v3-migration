@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contractclient, contracterror, contractevent, contractimpl, contracttype,
-    panic_with_error, token::TokenClient, Address, Env, I256,
+    panic_with_error, token::TokenClient, Address, Env, Vec, I256,
 };
 
 const DAY_IN_LEDGERS: u32 = 17_280;
@@ -16,6 +16,8 @@ const RETRY_PERIOD_SECONDS: u64 = QUEUE_SECONDS + SYNC_GRACE_SECONDS;
 const MAX_RETRY_QUEUES: u32 = 2;
 const RECOVERY_HORIZON_SECONDS: u64 = MAX_RETRY_QUEUES as u64 * RETRY_PERIOD_SECONDS;
 const MAX_MIGRATION_LIFETIME_SECONDS: u64 = 2 * QUEUE_SECONDS + RECOVERY_HORIZON_SECONDS;
+const Q4W_LOCK_SECONDS: u64 = 17 * DAY_IN_SECONDS;
+const MAX_Q4W_ENTRIES: u32 = 20;
 const SCALAR_7: i128 = 10_000_000;
 const BLND_SCALAR: i128 = SCALAR_7;
 const MAX_BACKFILL_BLND: i128 = 10_000_000 * BLND_SCALAR;
@@ -34,6 +36,7 @@ const POSITION_TTL_BUMP: u32 = 180 * DAY_IN_LEDGERS;
 #[contracttype]
 enum DataKey {
     Emitter,
+    PoolFactory,
     LegacyBackstopToken,
     NextBackstopToken,
     PrefundToken,
@@ -50,6 +53,7 @@ enum DataKey {
     TotalMigrationWeight,
     ScheduledBackfill,
     TotalBlndUsdcShares,
+    TotalBlndUsdcQueuedShares,
     TotalPrefundShares,
 }
 
@@ -57,7 +61,9 @@ enum DataKey {
 #[contracttype]
 enum PersistentKey {
     MigrationPosition(Address, Address),
+    BlndUsdcQ4W(Address, Address),
     PoolBlndUsdcShares(Address),
+    PoolBlndUsdcQueuedShares(Address),
     PrefundShares(Address, Address),
     PoolPrefundShares(Address),
 }
@@ -99,6 +105,11 @@ pub enum BackstopError {
     InvalidActivationValue = 1221,
     InvalidTakeRateValue = 1222,
     InvalidEmissionValue = 1223,
+    TooManyQ4WEntries = 1224,
+    InsufficientQueuedShares = 1225,
+    WithdrawalNotExpired = 1226,
+    PoolWithdrawalBlocked = 1227,
+    InvalidPool = 1228,
 }
 
 #[derive(Clone)]
@@ -116,6 +127,14 @@ pub struct MigrationPosition {
     pub amount: i128,
     pub frozen_weight: Option<i128>,
     pub time_basis: i128,
+}
+
+/// One bounded BLND:USDC withdrawal-queue entry.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct Q4WEntry {
+    pub amount: i128,
+    pub expires_at: u64,
 }
 
 /// Verified, pool-specific asset values denominated in 7-decimal USDC units.
@@ -188,6 +207,20 @@ pub trait Emitter {
     fn swap_backstop(env: Env);
 }
 
+/// Minimal fail-closed loss-state interface required from an attributed pool.
+#[contractclient(name = "PoolLossClient")]
+pub trait PoolLoss {
+    /// Return true only when this backstop has no committed or unresolved loss
+    /// for the pool and its expired queued shares may leave custody.
+    fn backstop_withdrawal_allowed(env: Env, backstop: Address) -> bool;
+}
+
+/// Immutable registry of pools accepted by this backstop.
+#[contractclient(name = "PoolFactoryClient")]
+pub trait PoolFactory {
+    fn is_pool(env: Env, pool: Address) -> bool;
+}
+
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MigrationPrepared {
@@ -220,6 +253,32 @@ pub struct PrefundWithdrawn {
     pub to: Address,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlndUsdcWithdrawalQueued {
+    pub amount: i128,
+    pub depositor: Address,
+    pub expires_at: u64,
+    pub pool: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlndUsdcWithdrawalDequeued {
+    pub amount: i128,
+    pub depositor: Address,
+    pub pool: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlndUsdcWithdrawn {
+    pub amount: i128,
+    pub depositor: Address,
+    pub pool: Address,
+    pub to: Address,
+}
+
 #[contract]
 pub struct BackstopContract;
 
@@ -228,6 +287,7 @@ impl BackstopContract {
     pub fn __constructor(
         env: Env,
         emitter: Address,
+        pool_factory: Address,
         legacy_backstop_token: Address,
         next_backstop_token: Address,
         prefund_token: Address,
@@ -235,6 +295,8 @@ impl BackstopContract {
         if legacy_backstop_token == prefund_token {
             panic_with_error!(&env, BackstopError::AssetConfigurationCollision);
         }
+        let candidate = env.current_contract_address();
+        let _ = PoolFactoryClient::new(&env, &pool_factory).is_pool(&candidate);
         extend_instance_ttl(&env);
         let prefunding_start = env.ledger().timestamp();
         let absolute_migration_deadline =
@@ -247,6 +309,9 @@ impl BackstopContract {
             &absolute_migration_deadline,
         );
         env.storage().instance().set(&DataKey::Emitter, &emitter);
+        env.storage()
+            .instance()
+            .set(&DataKey::PoolFactory, &pool_factory);
         env.storage()
             .instance()
             .set(&DataKey::LegacyBackstopToken, &legacy_backstop_token);
@@ -272,6 +337,12 @@ impl BackstopContract {
     pub fn emitter(env: Env) -> Address {
         extend_instance_ttl(&env);
         env.storage().instance().get(&DataKey::Emitter).unwrap()
+    }
+
+    /// Return the immutable registry used to validate attributed pools.
+    pub fn pool_factory(env: Env) -> Address {
+        extend_instance_ttl(&env);
+        env.storage().instance().get(&DataKey::PoolFactory).unwrap()
     }
 
     /// Return the token the emitter will use to qualify the next migration.
@@ -391,10 +462,49 @@ impl BackstopContract {
         get_position(&env, &user, &pool).amount
     }
 
+    /// Return one user's shares that are not queued for withdrawal.
+    pub fn blnd_usdc_active_shares(env: Env, user: Address, pool: Address) -> i128 {
+        extend_instance_ttl(&env);
+        let total = get_position(&env, &user, &pool).amount;
+        checked_nonnegative_sub_i128(
+            &env,
+            total,
+            queued_shares(&env, &get_blnd_usdc_q4w(&env, &user, &pool)),
+        )
+    }
+
+    /// Return one user's total queued BLND:USDC shares.
+    pub fn blnd_usdc_queued_shares(env: Env, user: Address, pool: Address) -> i128 {
+        extend_instance_ttl(&env);
+        queued_shares(&env, &get_blnd_usdc_q4w(&env, &user, &pool))
+    }
+
+    /// Return one user's bounded FIFO withdrawal queue.
+    pub fn blnd_usdc_withdrawal_queue(env: Env, user: Address, pool: Address) -> Vec<Q4WEntry> {
+        extend_instance_ttl(&env);
+        get_blnd_usdc_q4w(&env, &user, &pool)
+    }
+
     /// Return the accounted BLND:USDC tier shares allocated to one pool.
     pub fn pool_blnd_usdc_shares(env: Env, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         get_pool_blnd_usdc_shares(&env, &pool)
+    }
+
+    /// Return one pool's queued BLND:USDC shares.
+    pub fn pool_blnd_usdc_queued_shares(env: Env, pool: Address) -> i128 {
+        extend_instance_ttl(&env);
+        get_pool_blnd_usdc_queued_shares(&env, &pool)
+    }
+
+    /// Return one pool's BLND:USDC shares eligible for active calculations.
+    pub fn pool_blnd_usdc_active_shares(env: Env, pool: Address) -> i128 {
+        extend_instance_ttl(&env);
+        checked_nonnegative_sub_i128(
+            &env,
+            get_pool_blnd_usdc_shares(&env, &pool),
+            get_pool_blnd_usdc_queued_shares(&env, &pool),
+        )
     }
 
     /// Return all accounted BLND:USDC tier shares.
@@ -406,6 +516,37 @@ impl BackstopContract {
             .instance()
             .get(&DataKey::TotalBlndUsdcShares)
             .unwrap_or(0)
+    }
+
+    /// Return all queued BLND:USDC tier shares.
+    pub fn total_blnd_usdc_queued_shares(env: Env) -> i128 {
+        extend_instance_ttl(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalBlndUsdcQueuedShares)
+            .unwrap_or(0)
+    }
+
+    /// Return all BLND:USDC shares eligible for active calculations.
+    pub fn total_blnd_usdc_active_shares(env: Env) -> i128 {
+        extend_instance_ttl(&env);
+        let total: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalBlndUsdcShares)
+            .unwrap_or(0);
+        let queued: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalBlndUsdcQueuedShares)
+            .unwrap_or(0);
+        checked_nonnegative_sub_i128(&env, total, queued)
+    }
+
+    /// Return the inherited withdrawal-queue lock duration.
+    pub fn q4w_lock_seconds(env: Env) -> u64 {
+        extend_instance_ttl(&env);
+        Q4W_LOCK_SECONDS
     }
 
     /// Return the threshold an inactive pool must meet to activate.
@@ -563,18 +704,35 @@ impl BackstopContract {
         deposit_blnd_usdc_position(&env, from, pool, amount);
     }
 
-    /// Withdraw BLND:USDC tier shares.
+    /// Queue active BLND:USDC shares for withdrawal after the 17-day lock.
+    pub fn queue_blnd_usdc_withdrawal(
+        env: Env,
+        from: Address,
+        pool: Address,
+        amount: i128,
+    ) -> Q4WEntry {
+        extend_instance_ttl(&env);
+        queue_blnd_usdc_withdrawal(&env, from, pool, amount)
+    }
+
+    /// Return queued BLND:USDC shares to active status, newest entries first.
+    pub fn dequeue_blnd_usdc_withdrawal(env: Env, from: Address, pool: Address, amount: i128) {
+        extend_instance_ttl(&env);
+        dequeue_blnd_usdc_withdrawal(&env, from, pool, amount);
+    }
+
+    /// Withdraw expired queued BLND:USDC tier shares, oldest entries first.
     ///
     /// Before emitter migration succeeds, withdrawn shares forfeit their
-    /// proportional accumulated backfill weight. The current immediate
-    /// withdrawal is temporary until the specified loss locks and withdrawal
-    /// queue are implemented.
+    /// proportional accumulated backfill weight. The attributed pool must
+    /// affirm that this backstop has no committed or unresolved loss; a failed,
+    /// missing, or false pool response blocks withdrawal.
     pub fn withdraw_blnd_usdc(env: Env, from: Address, pool: Address, amount: i128, to: Address) {
         extend_instance_ttl(&env);
         withdraw_blnd_usdc_position(&env, from, pool, amount, to);
     }
 
-    /// Compatibility alias for `withdraw_blnd_usdc`.
+    /// Compatibility alias for the queued `withdraw_blnd_usdc` operation.
     pub fn withdraw_migration(env: Env, from: Address, pool: Address, amount: i128, to: Address) {
         extend_instance_ttl(&env);
         withdraw_blnd_usdc_position(&env, from, pool, amount, to);
@@ -1048,7 +1206,10 @@ fn eligibility_timestamp(env: &Env, timestamp: u64) -> u64 {
 fn deposit_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: i128) {
     require_positive(env, amount);
     from.require_auth();
+    require_compatible_pool(env, &pool);
 
+    // Keep companion withdrawal state live whenever the position is touched.
+    get_blnd_usdc_q4w(env, &from, &pool);
     let backfill_end = env
         .storage()
         .instance()
@@ -1080,10 +1241,94 @@ fn deposit_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: i
     );
 }
 
+fn require_compatible_pool(env: &Env, pool: &Address) {
+    let factory: Address = env.storage().instance().get(&DataKey::PoolFactory).unwrap();
+    if !PoolFactoryClient::new(env, &factory).is_pool(pool) {
+        panic_with_error!(env, BackstopError::InvalidPool);
+    }
+
+    // Probe interface availability before accepting custody. Either boolean is
+    // valid here: an existing loss may block withdrawal without blocking new
+    // capital. A missing or failed callback aborts the deposit atomically.
+    let backstop = env.current_contract_address();
+    let _ = PoolLossClient::new(env, pool).backstop_withdrawal_allowed(&backstop);
+}
+
+fn queue_blnd_usdc_withdrawal(env: &Env, from: Address, pool: Address, amount: i128) -> Q4WEntry {
+    require_positive(env, amount);
+    from.require_auth();
+
+    let position = get_position(env, &from, &pool);
+    let mut queue = get_blnd_usdc_q4w(env, &from, &pool);
+    let already_queued = queued_shares(env, &queue);
+    let active_shares = checked_nonnegative_sub_i128(env, position.amount, already_queued);
+    if amount > active_shares {
+        panic_with_error!(env, BackstopError::InsufficientBalance);
+    }
+    if queue.len() >= MAX_Q4W_ENTRIES {
+        panic_with_error!(env, BackstopError::TooManyQ4WEntries);
+    }
+
+    let expires_at = env
+        .ledger()
+        .timestamp()
+        .checked_add(Q4W_LOCK_SECONDS)
+        .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError));
+    let entry = Q4WEntry { amount, expires_at };
+    queue.push_back(entry.clone());
+    set_blnd_usdc_q4w(env, &from, &pool, &queue);
+    add_pool_blnd_usdc_queued_shares(env, &pool, amount);
+    add_to_instance_total(env, DataKey::TotalBlndUsdcQueuedShares, amount);
+
+    BlndUsdcWithdrawalQueued {
+        amount,
+        depositor: from,
+        expires_at,
+        pool,
+    }
+    .publish(env);
+    entry
+}
+
+fn dequeue_blnd_usdc_withdrawal(env: &Env, from: Address, pool: Address, amount: i128) {
+    require_positive(env, amount);
+    from.require_auth();
+
+    let mut queue = get_blnd_usdc_q4w(env, &from, &pool);
+    let mut remaining = amount;
+    while remaining > 0 {
+        let mut entry = queue
+            .pop_back()
+            .unwrap_or_else(|| panic_with_error!(env, BackstopError::InsufficientQueuedShares));
+        if entry.amount > remaining {
+            entry.amount = checked_sub_i128(env, entry.amount, remaining);
+            queue.push_back(entry);
+            remaining = 0;
+        } else {
+            remaining = checked_sub_i128(env, remaining, entry.amount);
+        }
+    }
+    set_blnd_usdc_q4w(env, &from, &pool, &queue);
+    add_pool_blnd_usdc_queued_shares(env, &pool, -amount);
+    add_to_instance_total(env, DataKey::TotalBlndUsdcQueuedShares, -amount);
+
+    BlndUsdcWithdrawalDequeued {
+        amount,
+        depositor: from,
+        pool,
+    }
+    .publish(env);
+}
+
 fn withdraw_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: i128, to: Address) {
     require_positive(env, amount);
     from.require_auth();
 
+    let backstop = env.current_contract_address();
+    if !PoolLossClient::new(env, &pool).backstop_withdrawal_allowed(&backstop) {
+        panic_with_error!(env, BackstopError::PoolWithdrawalBlocked);
+    }
+    consume_expired_blnd_usdc_q4w(env, &from, &pool, amount);
     let mut position = get_position(env, &from, &pool);
     if amount > position.amount {
         panic_with_error!(env, BackstopError::InsufficientBalance);
@@ -1111,17 +1356,49 @@ fn withdraw_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: 
         panic_with_error!(env, BackstopError::ArithmeticError);
     }
     set_pool_blnd_usdc_shares(env, &pool, checked_sub_i128(env, pool_shares, amount));
+    add_pool_blnd_usdc_queued_shares(env, &pool, -amount);
     add_to_instance_total(env, DataKey::TotalBlndUsdcShares, -amount);
+    add_to_instance_total(env, DataKey::TotalBlndUsdcQueuedShares, -amount);
 
     TokenClient::new(env, &legacy_backstop_token(env)).transfer(
         &env.current_contract_address(),
         &to,
         &amount,
     );
+    BlndUsdcWithdrawn {
+        amount,
+        depositor: from,
+        pool,
+        to,
+    }
+    .publish(env);
+}
+
+fn consume_expired_blnd_usdc_q4w(env: &Env, user: &Address, pool: &Address, amount: i128) {
+    let mut queue = get_blnd_usdc_q4w(env, user, pool);
+    let mut remaining = amount;
+    let timestamp = env.ledger().timestamp();
+    while remaining > 0 {
+        let mut entry = queue
+            .pop_front()
+            .unwrap_or_else(|| panic_with_error!(env, BackstopError::InsufficientQueuedShares));
+        if entry.expires_at > timestamp {
+            panic_with_error!(env, BackstopError::WithdrawalNotExpired);
+        }
+        if entry.amount > remaining {
+            entry.amount = checked_sub_i128(env, entry.amount, remaining);
+            queue.push_front(entry);
+            remaining = 0;
+        } else {
+            remaining = checked_sub_i128(env, remaining, entry.amount);
+        }
+    }
+    set_blnd_usdc_q4w(env, user, pool, &queue);
 }
 
 fn get_position(env: &Env, user: &Address, pool: &Address) -> MigrationPosition {
     let key = PersistentKey::MigrationPosition(user.clone(), pool.clone());
+    let q4w_key = PersistentKey::BlndUsdcQ4W(user.clone(), pool.clone());
     let position = env
         .storage()
         .persistent()
@@ -1131,23 +1408,69 @@ fn get_position(env: &Env, user: &Address, pool: &Address) -> MigrationPosition 
             frozen_weight: None,
             time_basis: 0,
         });
-    if env.storage().persistent().has(&key) {
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
-    }
+    extend_persistent_ttl_if_present(env, &key);
+    extend_persistent_ttl_if_present(env, &q4w_key);
     position
+}
+
+fn get_blnd_usdc_q4w(env: &Env, user: &Address, pool: &Address) -> Vec<Q4WEntry> {
+    let key = PersistentKey::BlndUsdcQ4W(user.clone(), pool.clone());
+    let position_key = PersistentKey::MigrationPosition(user.clone(), pool.clone());
+    let queue = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    extend_persistent_ttl_if_present(env, &key);
+    extend_persistent_ttl_if_present(env, &position_key);
+    queue
+}
+
+fn set_blnd_usdc_q4w(env: &Env, user: &Address, pool: &Address, queue: &Vec<Q4WEntry>) {
+    let key = PersistentKey::BlndUsdcQ4W(user.clone(), pool.clone());
+    env.storage().persistent().set(&key, queue);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
+}
+
+fn queued_shares(env: &Env, queue: &Vec<Q4WEntry>) -> i128 {
+    let mut total = 0;
+    for entry in queue.iter() {
+        total = checked_add_i128(env, total, entry.amount);
+    }
+    total
 }
 
 fn get_pool_blnd_usdc_shares(env: &Env, pool: &Address) -> i128 {
     let key = PersistentKey::PoolBlndUsdcShares(pool.clone());
+    let queued_key = PersistentKey::PoolBlndUsdcQueuedShares(pool.clone());
     let shares = env.storage().persistent().get(&key).unwrap_or(0);
-    if env.storage().persistent().has(&key) {
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
-    }
+    extend_persistent_ttl_if_present(env, &key);
+    extend_persistent_ttl_if_present(env, &queued_key);
     shares
+}
+
+fn get_pool_blnd_usdc_queued_shares(env: &Env, pool: &Address) -> i128 {
+    let key = PersistentKey::PoolBlndUsdcQueuedShares(pool.clone());
+    let shares_key = PersistentKey::PoolBlndUsdcShares(pool.clone());
+    let shares = env.storage().persistent().get(&key).unwrap_or(0);
+    extend_persistent_ttl_if_present(env, &key);
+    extend_persistent_ttl_if_present(env, &shares_key);
+    shares
+}
+
+fn add_pool_blnd_usdc_queued_shares(env: &Env, pool: &Address, delta: i128) {
+    let key = PersistentKey::PoolBlndUsdcQueuedShares(pool.clone());
+    let current = get_pool_blnd_usdc_queued_shares(env, pool);
+    let next = checked_add_i128(env, current, delta);
+    if next < 0 {
+        panic_with_error!(env, BackstopError::ArithmeticError);
+    }
+    env.storage().persistent().set(&key, &next);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
 }
 
 fn set_pool_blnd_usdc_shares(env: &Env, pool: &Address, shares: i128) {
@@ -1415,9 +1738,25 @@ fn checked_sub_i128(env: &Env, left: i128, right: i128) -> i128 {
         .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError))
 }
 
+fn checked_nonnegative_sub_i128(env: &Env, left: i128, right: i128) -> i128 {
+    let difference = checked_sub_i128(env, left, right);
+    if difference < 0 {
+        panic_with_error!(env, BackstopError::ArithmeticError);
+    }
+    difference
+}
+
 fn checked_mul_i128(env: &Env, left: i128, right: i128) -> i128 {
     left.checked_mul(right)
         .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError))
+}
+
+fn extend_persistent_ttl_if_present(env: &Env, key: &PersistentKey) {
+    if env.storage().persistent().has(key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
+    }
 }
 
 fn extend_instance_ttl(env: &Env) {
@@ -1436,6 +1775,16 @@ mod tests {
         token::StellarAssetClient,
         Address, IntoVal,
     };
+
+    #[contract]
+    struct MockPoolFactory;
+
+    #[contractimpl]
+    impl MockPoolFactory {
+        pub fn is_pool(_env: Env, _pool: Address) -> bool {
+            false
+        }
+    }
 
     #[contract]
     struct MockEmitter;
@@ -1523,16 +1872,24 @@ mod tests {
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
         let prefund_token = Address::generate(&env);
+        let pool_factory = env.register(MockPoolFactory, ());
         let candidate_id = Address::generate(&env);
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
         env.register_at(
             &candidate_id,
             BackstopContract,
-            (&emitter_id, &legacy_token, &next_token, &prefund_token),
+            (
+                &emitter_id,
+                &pool_factory,
+                &legacy_token,
+                &next_token,
+                &prefund_token,
+            ),
         );
         let candidate = BackstopContractClient::new(&env, &candidate_id);
 
         assert_eq!(candidate.backstop_token(), legacy_token);
+        assert_eq!(candidate.pool_factory(), pool_factory);
         assert_eq!(candidate.next_backstop_token(), next_token);
         assert_eq!(candidate.prefund_token(), prefund_token);
         assert_eq!(candidate.migration_status(), MigrationStatus::Pending);
@@ -1576,12 +1933,19 @@ mod tests {
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
         let prefund_token = Address::generate(&env);
+        let pool_factory = env.register(MockPoolFactory, ());
         let candidate_id = Address::generate(&env);
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
         env.register_at(
             &candidate_id,
             BackstopContract,
-            (&emitter_id, &legacy_token, &next_token, &prefund_token),
+            (
+                &emitter_id,
+                &pool_factory,
+                &legacy_token,
+                &next_token,
+                &prefund_token,
+            ),
         );
 
         let candidate = BackstopContractClient::new(&env, &candidate_id);
@@ -1606,18 +1970,62 @@ mod tests {
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
         let prefund_token = Address::generate(&env);
+        let pool_factory = env.register(MockPoolFactory, ());
         let candidate_id = Address::generate(&env);
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
         env.register_at(
             &candidate_id,
             BackstopContract,
-            (&emitter_id, &legacy_token, &next_token, &prefund_token),
+            (
+                &emitter_id,
+                &pool_factory,
+                &legacy_token,
+                &next_token,
+                &prefund_token,
+            ),
         );
         let user = Address::generate(&env);
         let pool = Address::generate(&env);
 
         assert!(BackstopContractClient::new(&env, &candidate_id)
             .try_deposit_migration(&user, &pool, &1)
+            .is_err());
+    }
+
+    #[test]
+    fn blnd_usdc_q4w_operations_require_user_authorization() {
+        let env = Env::default();
+        let incumbent = Address::generate(&env);
+        let legacy_token = Address::generate(&env);
+        let next_token = Address::generate(&env);
+        let prefund_token = Address::generate(&env);
+        let pool_factory = env.register(MockPoolFactory, ());
+        let candidate_id = Address::generate(&env);
+        let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
+        env.register_at(
+            &candidate_id,
+            BackstopContract,
+            (
+                &emitter_id,
+                &pool_factory,
+                &legacy_token,
+                &next_token,
+                &prefund_token,
+            ),
+        );
+        let candidate = BackstopContractClient::new(&env, &candidate_id);
+        let user = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let pool = Address::generate(&env);
+
+        assert!(candidate
+            .try_queue_blnd_usdc_withdrawal(&user, &pool, &1)
+            .is_err());
+        assert!(candidate
+            .try_dequeue_blnd_usdc_withdrawal(&user, &pool, &1)
+            .is_err());
+        assert!(candidate
+            .try_withdraw_blnd_usdc(&user, &pool, &1, &recipient)
             .is_err());
     }
 
@@ -1631,12 +2039,19 @@ mod tests {
         let prefund_token = env
             .register_stellar_asset_contract_v2(token_admin)
             .address();
+        let pool_factory = env.register(MockPoolFactory, ());
         let candidate_id = Address::generate(&env);
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
         env.register_at(
             &candidate_id,
             BackstopContract,
-            (&emitter_id, &legacy_token, &next_token, &prefund_token),
+            (
+                &emitter_id,
+                &pool_factory,
+                &legacy_token,
+                &next_token,
+                &prefund_token,
+            ),
         );
         let candidate = BackstopContractClient::new(&env, &candidate_id);
         let token = StellarAssetClient::new(&env, &prefund_token);
@@ -1703,12 +2118,37 @@ mod tests {
         let emitter = Address::generate(&env);
         let token = Address::generate(&env);
         let next_token = Address::generate(&env);
+        let pool_factory = Address::generate(&env);
         let candidate = Address::generate(&env);
 
         env.register_at(
             &candidate,
             BackstopContract,
-            (&emitter, &token, &next_token, &token),
+            (&emitter, &pool_factory, &token, &next_token, &token),
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn constructor_rejects_incompatible_pool_factory() {
+        let env = Env::default();
+        let emitter = Address::generate(&env);
+        let pool_factory = Address::generate(&env);
+        let legacy_token = Address::generate(&env);
+        let next_token = Address::generate(&env);
+        let prefund_token = Address::generate(&env);
+        let candidate = Address::generate(&env);
+
+        env.register_at(
+            &candidate,
+            BackstopContract,
+            (
+                &emitter,
+                &pool_factory,
+                &legacy_token,
+                &next_token,
+                &prefund_token,
+            ),
         );
     }
 

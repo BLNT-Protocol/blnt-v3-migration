@@ -2,7 +2,7 @@
 // SHA-256 438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89.
 use blend_contract_sdk::emitter::WASM as LEGACY_EMITTER_WASM;
 use soroban_sdk::{
-    contractclient, contracttype,
+    contract, contractclient, contractimpl, contracttype,
     testutils::{Address as _, Ledger},
     token::{StellarAssetClient, TokenClient},
     Address, Env,
@@ -33,6 +33,75 @@ trait LegacyEmitter {
     fn swap_backstop(env: Env);
 }
 
+#[contract]
+struct MockPoolFactory;
+
+#[derive(Clone)]
+#[contracttype]
+enum MockPoolFactoryKey {
+    Pool(Address),
+}
+
+#[contractimpl]
+impl MockPoolFactory {
+    pub fn is_pool(env: Env, pool: Address) -> bool {
+        env.storage()
+            .instance()
+            .get(&MockPoolFactoryKey::Pool(pool))
+            .unwrap_or(false)
+    }
+
+    pub fn set_pool(env: Env, pool: Address) {
+        env.storage()
+            .instance()
+            .set(&MockPoolFactoryKey::Pool(pool), &true);
+    }
+}
+
+#[contract]
+struct MockLossAwarePool;
+
+#[derive(Clone)]
+#[contracttype]
+enum MockLossAwarePoolKey {
+    Backstop,
+    WithdrawalAllowed,
+}
+
+#[contractimpl]
+impl MockLossAwarePool {
+    pub fn __constructor(env: Env, backstop: Address, withdrawal_allowed: bool) {
+        env.storage()
+            .instance()
+            .set(&MockLossAwarePoolKey::Backstop, &backstop);
+        env.storage().instance().set(
+            &MockLossAwarePoolKey::WithdrawalAllowed,
+            &withdrawal_allowed,
+        );
+    }
+
+    pub fn backstop_withdrawal_allowed(env: Env, backstop: Address) -> bool {
+        let expected_backstop: Address = env
+            .storage()
+            .instance()
+            .get(&MockLossAwarePoolKey::Backstop)
+            .unwrap();
+        backstop == expected_backstop
+            && env
+                .storage()
+                .instance()
+                .get(&MockLossAwarePoolKey::WithdrawalAllowed)
+                .unwrap_or(false)
+    }
+
+    pub fn set_withdrawal_allowed(env: Env, withdrawal_allowed: bool) {
+        env.storage().instance().set(
+            &MockLossAwarePoolKey::WithdrawalAllowed,
+            &withdrawal_allowed,
+        );
+    }
+}
+
 const SCALAR_7: i128 = 10_000_000;
 const QUEUE_SECONDS: u64 = 31 * 24 * 60 * 60;
 const PREPARATION_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
@@ -44,6 +113,7 @@ struct Fixture {
     incumbent: Address,
     candidate: v3_backstop::Client<'static>,
     emitter: LegacyEmitterClient<'static>,
+    pool_factory: MockPoolFactoryClient<'static>,
     blnd: TokenClient<'static>,
     legacy_token: StellarAssetClient<'static>,
     next_token: Address,
@@ -75,17 +145,20 @@ impl Fixture {
         StellarAssetClient::new(&env, &blnd_id).set_admin(&emitter_id);
         let emitter = LegacyEmitterClient::new(&env, &emitter_id);
         emitter.initialize(&blnd_id, &incumbent, &legacy_token_id);
+        let pool_factory_id = env.register(MockPoolFactory, ());
 
         let candidate_id = env.register(
             v3_backstop::WASM,
             (
                 &emitter_id,
+                &pool_factory_id,
                 &legacy_token_id,
                 &next_token_id,
                 &prefund_token_id,
             ),
         );
         let candidate = v3_backstop::Client::new(&env, &candidate_id);
+        let pool_factory = MockPoolFactoryClient::new(&env, &pool_factory_id);
         let blnd = TokenClient::new(&env, &blnd_id);
         let legacy_token = StellarAssetClient::new(&env, &legacy_token_id);
 
@@ -94,6 +167,7 @@ impl Fixture {
             incumbent,
             candidate,
             emitter,
+            pool_factory,
             blnd,
             legacy_token,
             next_token: next_token_id,
@@ -127,6 +201,15 @@ impl Fixture {
         let unlock_time = self.emitter.get_queued_swap().unwrap().unlock_time;
         self.env.ledger().set_timestamp(unlock_time);
     }
+
+    fn loss_aware_pool(&self, withdrawal_allowed: bool) -> MockLossAwarePoolClient<'static> {
+        let pool_id = self.env.register(
+            MockLossAwarePool,
+            (&self.candidate.address, withdrawal_allowed),
+        );
+        self.pool_factory.set_pool(&pool_id);
+        MockLossAwarePoolClient::new(&self.env, &pool_id)
+    }
 }
 
 #[test]
@@ -142,6 +225,10 @@ fn v3_wasm_exposes_asset_neutral_activation_hysteresis_quote() {
     assert_eq!(
         fixture.candidate.activation_maintenance_threshold(),
         maintenance_threshold
+    );
+    assert_eq!(
+        fixture.candidate.pool_factory(),
+        fixture.pool_factory.address
     );
 
     let values = v3_backstop::ActivationValues {
@@ -228,6 +315,222 @@ fn direct_legacy_token_transfers_do_not_create_blnd_usdc_tier_shares() {
         fixture.legacy_token.balance(&fixture.candidate.address),
         100 * SCALAR_7
     );
+}
+
+#[test]
+fn blnd_usdc_q4w_is_bounded_and_uses_fifo_withdrawal_and_lifo_dequeue() {
+    let fixture = Fixture::create();
+    let pool_client = fixture.loss_aware_pool(true);
+    let pool = pool_client.address.clone();
+    let user = Address::generate(&fixture.env);
+    fixture.legacy_token.mint(&user, &(100 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_blnd_usdc(&user, &pool, &(100 * SCALAR_7));
+
+    let first = fixture
+        .candidate
+        .queue_blnd_usdc_withdrawal(&user, &pool, &(30 * SCALAR_7));
+    assert_eq!(
+        first.expires_at,
+        fixture.env.ledger().timestamp() + 17 * 24 * 60 * 60
+    );
+    fixture
+        .env
+        .ledger()
+        .set_timestamp(fixture.env.ledger().timestamp() + 1);
+    fixture
+        .candidate
+        .queue_blnd_usdc_withdrawal(&user, &pool, &(20 * SCALAR_7));
+    assert_eq!(
+        fixture.candidate.blnd_usdc_active_shares(&user, &pool),
+        50 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.blnd_usdc_queued_shares(&user, &pool),
+        50 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.pool_blnd_usdc_queued_shares(&pool),
+        50 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_blnd_usdc_queued_shares(),
+        50 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.pool_blnd_usdc_active_shares(&pool),
+        50 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_blnd_usdc_active_shares(),
+        50 * SCALAR_7
+    );
+
+    fixture
+        .candidate
+        .dequeue_blnd_usdc_withdrawal(&user, &pool, &(15 * SCALAR_7));
+    let queue = fixture.candidate.blnd_usdc_withdrawal_queue(&user, &pool);
+    assert_eq!(queue.len(), 2);
+    assert_eq!(queue.get(0).unwrap().amount, 30 * SCALAR_7);
+    assert_eq!(queue.get(1).unwrap().amount, 5 * SCALAR_7);
+    let second_expiry = queue.get(1).unwrap().expires_at;
+    assert_eq!(
+        fixture.candidate.pool_blnd_usdc_queued_shares(&pool),
+        35 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_blnd_usdc_queued_shares(),
+        35 * SCALAR_7
+    );
+    assert!(fixture
+        .candidate
+        .try_withdraw_blnd_usdc(&user, &pool, &(10 * SCALAR_7), &user)
+        .is_err());
+
+    fixture.env.ledger().set_timestamp(first.expires_at);
+    pool_client.set_withdrawal_allowed(&false);
+    assert!(fixture
+        .candidate
+        .try_withdraw_blnd_usdc(&user, &pool, &(10 * SCALAR_7), &user)
+        .is_err());
+    assert_eq!(
+        fixture.candidate.blnd_usdc_queued_shares(&user, &pool),
+        35 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.blnd_usdc_shares(&user, &pool),
+        100 * SCALAR_7
+    );
+    assert_eq!(fixture.legacy_token.balance(&user), 0);
+    pool_client.set_withdrawal_allowed(&true);
+    assert!(fixture
+        .candidate
+        .try_withdraw_blnd_usdc(&user, &pool, &(31 * SCALAR_7), &user)
+        .is_err());
+    fixture
+        .candidate
+        .withdraw_blnd_usdc(&user, &pool, &(10 * SCALAR_7), &user);
+    assert_eq!(
+        fixture.candidate.blnd_usdc_shares(&user, &pool),
+        90 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.blnd_usdc_queued_shares(&user, &pool),
+        25 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.pool_blnd_usdc_queued_shares(&pool),
+        25 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_blnd_usdc_queued_shares(),
+        25 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_blnd_usdc_active_shares(),
+        65 * SCALAR_7
+    );
+    assert_eq!(fixture.legacy_token.balance(&user), 10 * SCALAR_7);
+
+    fixture.env.ledger().set_timestamp(second_expiry);
+    fixture
+        .candidate
+        .withdraw_blnd_usdc(&user, &pool, &(25 * SCALAR_7), &user);
+    assert_eq!(
+        fixture
+            .candidate
+            .blnd_usdc_withdrawal_queue(&user, &pool)
+            .len(),
+        0
+    );
+    assert_eq!(
+        fixture.candidate.blnd_usdc_shares(&user, &pool),
+        65 * SCALAR_7
+    );
+    assert_eq!(fixture.candidate.total_blnd_usdc_queued_shares(), 0);
+    assert_eq!(
+        fixture.candidate.total_blnd_usdc_active_shares(),
+        65 * SCALAR_7
+    );
+    assert_eq!(fixture.legacy_token.balance(&user), 35 * SCALAR_7);
+}
+
+#[test]
+fn blnd_usdc_deposit_rejects_unregistered_pool() {
+    let fixture = Fixture::create();
+    let pool = Address::generate(&fixture.env);
+    let user = Address::generate(&fixture.env);
+    fixture.legacy_token.mint(&user, &SCALAR_7);
+
+    assert!(fixture
+        .candidate
+        .try_deposit_blnd_usdc(&user, &pool, &SCALAR_7)
+        .is_err());
+    assert_eq!(fixture.candidate.blnd_usdc_shares(&user, &pool), 0);
+    assert_eq!(fixture.legacy_token.balance(&user), SCALAR_7);
+    assert_eq!(fixture.legacy_token.balance(&fixture.candidate.address), 0);
+}
+
+#[test]
+fn blnd_usdc_deposit_rejects_registered_pool_without_loss_api() {
+    let fixture = Fixture::create();
+    let pool = Address::generate(&fixture.env);
+    fixture.pool_factory.set_pool(&pool);
+    let user = Address::generate(&fixture.env);
+    fixture.legacy_token.mint(&user, &SCALAR_7);
+
+    assert!(fixture
+        .candidate
+        .try_deposit_blnd_usdc(&user, &pool, &SCALAR_7)
+        .is_err());
+    assert_eq!(fixture.candidate.blnd_usdc_shares(&user, &pool), 0);
+    assert_eq!(fixture.legacy_token.balance(&user), SCALAR_7);
+    assert_eq!(fixture.legacy_token.balance(&fixture.candidate.address), 0);
+}
+
+#[test]
+fn blnd_usdc_deposit_accepts_registered_pool_while_withdrawal_is_blocked() {
+    let fixture = Fixture::create();
+    let pool = fixture.loss_aware_pool(false).address.clone();
+    let user = Address::generate(&fixture.env);
+    fixture.legacy_token.mint(&user, &SCALAR_7);
+
+    fixture.candidate.deposit_blnd_usdc(&user, &pool, &SCALAR_7);
+    assert_eq!(fixture.candidate.blnd_usdc_shares(&user, &pool), SCALAR_7);
+    assert_eq!(fixture.legacy_token.balance(&user), 0);
+
+    let entry = fixture
+        .candidate
+        .queue_blnd_usdc_withdrawal(&user, &pool, &SCALAR_7);
+    fixture.env.ledger().set_timestamp(entry.expires_at);
+    assert!(fixture
+        .candidate
+        .try_withdraw_blnd_usdc(&user, &pool, &SCALAR_7, &user)
+        .is_err());
+    assert_eq!(fixture.candidate.blnd_usdc_shares(&user, &pool), SCALAR_7);
+    assert_eq!(fixture.legacy_token.balance(&user), 0);
+}
+
+#[test]
+fn blnd_usdc_q4w_rejects_more_than_twenty_entries() {
+    let fixture = Fixture::create();
+    let pool = fixture.loss_aware_pool(true).address.clone();
+    let user = Address::generate(&fixture.env);
+    fixture.legacy_token.mint(&user, &(21 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_blnd_usdc(&user, &pool, &(21 * SCALAR_7));
+
+    for _ in 0..20 {
+        fixture
+            .candidate
+            .queue_blnd_usdc_withdrawal(&user, &pool, &SCALAR_7);
+    }
+    assert!(fixture
+        .candidate
+        .try_queue_blnd_usdc_withdrawal(&user, &pool, &SCALAR_7)
+        .is_err());
 }
 
 #[test]
@@ -712,7 +1015,7 @@ fn canonical_finalization_rejects_after_the_absolute_recovery_horizon() {
 #[test]
 fn withdrawn_shares_forfeit_weight_to_time_weighted_survivors() {
     let fixture = Fixture::create();
-    let pool = Address::generate(&fixture.env);
+    let pool = fixture.loss_aware_pool(true).address.clone();
     let alice = Address::generate(&fixture.env);
     let bob = Address::generate(&fixture.env);
     let carol = Address::generate(&fixture.env);
@@ -754,6 +1057,12 @@ fn withdrawn_shares_forfeit_weight_to_time_weighted_survivors() {
         500 * SCALAR_7
     );
     assert_eq!(fixture.candidate.total_blnd_usdc_shares(), 500 * SCALAR_7);
+    fixture
+        .candidate
+        .queue_blnd_usdc_withdrawal(&alice, &pool, &(50 * SCALAR_7));
+    fixture
+        .candidate
+        .queue_blnd_usdc_withdrawal(&carol, &pool, &(100 * SCALAR_7));
 
     fixture.enter_preparation_window();
     fixture.candidate.prepare_migration();
@@ -762,27 +1071,35 @@ fn withdrawn_shares_forfeit_weight_to_time_weighted_survivors() {
         .withdraw_migration(&alice, &pool, &(50 * SCALAR_7), &alice);
     fixture
         .candidate
-        .withdraw_migration(&carol, &pool, &(100 * SCALAR_7), &carol);
+        .withdraw_migration(&carol, &pool, &(50 * SCALAR_7), &carol);
     assert_eq!(
         fixture.candidate.pool_blnd_usdc_shares(&pool),
-        350 * SCALAR_7
+        400 * SCALAR_7
     );
-    assert_eq!(fixture.candidate.total_blnd_usdc_shares(), 350 * SCALAR_7);
+    assert_eq!(fixture.candidate.total_blnd_usdc_shares(), 400 * SCALAR_7);
+    assert_eq!(
+        fixture.candidate.blnd_usdc_queued_shares(&carol, &pool),
+        50 * SCALAR_7
+    );
     fixture.unlock();
     let migration_time = fixture.env.ledger().timestamp();
     fixture.candidate.finalize_migration();
 
     let alice_weight = (150 * SCALAR_7) * (migration_time - alice_start) as i128;
     let bob_weight = (200 * SCALAR_7) * (migration_time - bob_start) as i128;
+    let carol_weight = (50 * SCALAR_7) * (migration_time - alice_start) as i128;
     assert_eq!(
         fixture.candidate.migration_weight(&alice, &pool),
         alice_weight
     );
     assert_eq!(fixture.candidate.migration_weight(&bob, &pool), bob_weight);
-    assert_eq!(fixture.candidate.migration_weight(&carol, &pool), 0);
+    assert_eq!(
+        fixture.candidate.migration_weight(&carol, &pool),
+        carol_weight
+    );
     assert_eq!(
         fixture.candidate.total_migration_weight(),
-        alice_weight + bob_weight
+        alice_weight + bob_weight + carol_weight
     );
 
     let dave = Address::generate(&fixture.env);
@@ -796,14 +1113,25 @@ fn withdrawn_shares_forfeit_weight_to_time_weighted_survivors() {
     );
     assert_eq!(
         fixture.candidate.pool_blnd_usdc_shares(&pool),
-        400 * SCALAR_7
+        450 * SCALAR_7
     );
-    assert_eq!(fixture.candidate.total_blnd_usdc_shares(), 400 * SCALAR_7);
+    assert_eq!(fixture.candidate.total_blnd_usdc_shares(), 450 * SCALAR_7);
     assert_eq!(fixture.candidate.migration_weight(&dave, &pool), 0);
     assert_eq!(
         fixture.candidate.total_migration_weight(),
-        alice_weight + bob_weight
+        alice_weight + bob_weight + carol_weight
     );
+    fixture
+        .candidate
+        .queue_blnd_usdc_withdrawal(&dave, &pool, &(20 * SCALAR_7));
+    assert!(fixture
+        .candidate
+        .try_withdraw_blnd_usdc(&dave, &pool, &(20 * SCALAR_7), &dave)
+        .is_err());
+    fixture
+        .env
+        .ledger()
+        .set_timestamp(fixture.env.ledger().timestamp() + 17 * 24 * 60 * 60);
     fixture
         .candidate
         .withdraw_blnd_usdc(&dave, &pool, &(20 * SCALAR_7), &dave);
@@ -813,20 +1141,25 @@ fn withdrawn_shares_forfeit_weight_to_time_weighted_survivors() {
     );
     assert_eq!(
         fixture.candidate.pool_blnd_usdc_shares(&pool),
-        380 * SCALAR_7
+        430 * SCALAR_7
     );
-    assert_eq!(fixture.candidate.total_blnd_usdc_shares(), 380 * SCALAR_7);
+    assert_eq!(fixture.candidate.total_blnd_usdc_shares(), 430 * SCALAR_7);
     assert_eq!(fixture.candidate.migration_weight(&dave, &pool), 0);
 
     let backfill = fixture.candidate.scheduled_backfill();
     assert_eq!(backfill, QUEUE_SECONDS as i128 * SCALAR_7);
+    let eligible_weight = alice_weight + bob_weight + carol_weight;
     assert_eq!(
         fixture.candidate.quote_backfill(&alice, &pool),
-        backfill * alice_weight / (alice_weight + bob_weight)
+        backfill * alice_weight / eligible_weight
     );
     assert_eq!(
         fixture.candidate.quote_backfill(&bob, &pool),
-        backfill * bob_weight / (alice_weight + bob_weight)
+        backfill * bob_weight / eligible_weight
+    );
+    assert_eq!(
+        fixture.candidate.quote_backfill(&carol, &pool),
+        backfill * carol_weight / eligible_weight
     );
 }
 

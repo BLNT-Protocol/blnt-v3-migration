@@ -310,6 +310,20 @@ waterfall, and subject to the applicable withdrawal rules.
 
 ### 7.2 Position accounting
 
+The backstop MUST store one immutable v3 pool-factory address and MUST verify
+the factory's `is_pool` interface during construction. Before accepting an
+accounted BLND:USDC deposit, it MUST verify that the attributed pool is
+registered by that factory and that the pool exposes the fail-closed withdrawal
+callback. Registration or interface failure MUST abort before custody or
+accounting changes. The callback's current boolean result does not gate a
+deposit: a pool with an existing loss MAY accept new loss-absorbing capital,
+while later withdrawal remains blocked until the pool reports it safe.
+
+`backstop_withdrawal_allowed(backstop)` is a permanent compatibility boundary.
+Every factory-approved pool MUST preserve its signature and fail-closed
+semantics across any WASM upgrade. A pool upgrade MUST be rejected unless the
+replacement implementation retains this interface.
+
 Positions MUST be attributable to:
 
 - Pool.
@@ -387,15 +401,40 @@ asset configuration in Section 7.1 remains required before either use.
 
 ### 7.3 Withdrawals
 
-Withdrawal rules MUST:
+The continuous BLND:USDC tier inherits the v2 queue-for-withdrawal shape:
+
+- Queuing creates a position with an expiry exactly 17 days after the queue
+  transaction.
+- A user may have at most 20 queue entries for a pool.
+- Expired withdrawals consume entries oldest-first.
+- Dequeue operations restore active shares newest-first and MAY occur before or
+  after expiry.
+- Queued shares remain in contract custody and continue contributing to the
+  legacy emitter's raw balance comparison until the tokens are withdrawn.
+- Queuing alone does not forfeit migration-backfill weight. If the tokens are
+  actually withdrawn before emitter migration succeeds, the withdrawn shares
+  forfeit their proportional accumulated backfill weight.
+- Queued shares are excluded from activation value, take-rate allocation, and
+  ongoing BLND-emission weight immediately upon queueing.
+- User, pool, and global total shares are reduced only when an expired
+  withdrawal transfers the tokens out of the contract.
+- Every withdrawal calls the attributed pool's read-only
+  `backstop_withdrawal_allowed(backstop)` interface. The pool MUST return true
+  only when the backstop has no capital committed to a loss and no unresolved
+  bad debt. A missing interface, failed call, or false result blocks withdrawal.
+
+The withdrawal implementation MUST:
 
 - Preserve a queue or delay sufficient to prevent capital from escaping known
   losses.
-- Define whether and how queued capital earns emissions.
-- Define whether and how queued capital counts toward activation.
 - Prevent withdrawal of capital committed to an outstanding loss process.
 - Remain executable without iterating over an unbounded number of users or
   assets.
+
+The bounded Q4W accounting includes the fail-closed pool callback, but the
+authoritative pool loss engine remains unimplemented. Until that engine derives
+the callback result from canonical loss and bad-debt state, these positions
+MUST NOT be treated as authoritative executable loss capacity.
 
 ## 8. Pool activation
 
@@ -789,14 +828,12 @@ implemented:
 - Per-tier auction, transfer, and disposal mechanisms.
 - Behavior when a tier's oracle or disposal market is unavailable.
 - Production LP price sources, averaging, staleness, and failure policy.
-- Treatment of queued capital for activation and emissions.
-- Treatment of queued capital for take-rate allocation.
+- Canonical pool loss-state implementation behind the fail-closed withdrawal
+  callback.
 - Exact take-rate accrual integration and distribution cadence.
 - Post-migration designated token.
 - Top-level BLND split between backstop depositors and pool supply/borrow
   positions.
-- Production withdrawal queue and loss-lock interface for continuous
-  BLND:USDC positions.
 - Initial BLND drop recipient policy and lockups.
 - Protocol-fee existence and incidence.
 - Administrative, pause, and WASM-upgrade authority.
@@ -812,16 +849,19 @@ implemented:
 4. Add one independently configured, prefundable post-migration backstop
    asset without activation, loss, backfill, or emission eligibility.
 5. Implement a canonical, testable activation-policy interface.
-6. Implement the production BLND:USDC withdrawal queue and loss locks without
-   forced conversion.
+6. Implement the bounded BLND:USDC withdrawal queue and its fail-closed pool
+   callback, then connect that callback to canonical loss state without forced
+   conversion.
 7. Complete native, WASM, local-network, and testnet migration exercises.
 
-Milestones 1 through 5 are represented by the frozen v2 baseline, isolated
-Protocol-27 backstop crate, cross-version legacy-emitter migration harness, and
-the candidate's pool-attributed continuous BLND:USDC shares, time-weighted
-migration checkpoints, isolated single-asset prefunding lane, and canonical
-asset-neutral 12,500-USDC entry and 10,000-USDC maintenance activation-policy
-arithmetic. The production withdrawal queue, loss locks, valuation adapter,
+Milestones 1 through 5 and the bounded-Q4W portion of milestone 6 are
+represented by the frozen v2 baseline, isolated Protocol-27 backstop crate,
+cross-version legacy-emitter migration harness, the candidate's
+pool-attributed continuous BLND:USDC shares, time-weighted migration
+checkpoints, isolated single-asset prefunding lane, canonical asset-neutral
+12,500-USDC entry and 10,000-USDC maintenance activation-policy arithmetic, and
+the 17-day bounded withdrawal queue and fail-closed pool callback. Canonical
+pool loss state, the valuation adapter,
 pool-status integration, and BLND funding and claims remain intentionally
 unimplemented.
 

@@ -173,8 +173,7 @@ The v3 tests must verify:
 
 For a multi-asset activation formula, test:
 
-- BLND:XLM LP, BLND:USDC LP, plain USDC, Custom A, and Custom B independently.
-- Unconfigured optional custom tiers contribute zero activation value.
+- BLND:XLM LP, BLND:USDC LP, and plain USDC independently.
 - Combined verified values immediately below, exactly at, and immediately above
   the 12,500-USDC entry threshold.
 - Active-pool values immediately below and exactly at the 10,000-USDC
@@ -243,14 +242,12 @@ The v3 tests must verify:
 - BLND:USDC LP absorbs losses before BLND:XLM LP.
 - BLND:XLM LP absorbs losses only after eligible BLND:USDC LP is exhausted.
 - Plain USDC absorbs losses only after both LP tiers are exhausted.
-- Optional Custom A absorbs losses only after plain USDC is exhausted.
-- Optional Custom B absorbs losses only after Custom A is exhausted.
-- Supplier balances absorb only the residual loss after all five backstop
-  tiers are exhausted, ignoring unconfigured optional tiers.
+- Supplier balances absorb only the residual loss after all three backstop
+  tiers are exhausted.
 - A partial loss contained by one tier does not modify later tiers.
-- Losses crossing one, multiple, and all four backstop-tier boundaries are
-  conserved exactly, subject to explicitly documented rounding.
-- A loss that exhausts all five tiers passes only the remaining residual to
+- Losses crossing one or both backstop-tier boundaries are conserved exactly,
+  subject to explicitly documented rounding.
+- A loss that exhausts all three tiers passes only the remaining residual to
   suppliers.
 - Capital committed to an existing loss or auction is not counted or consumed
   twice.
@@ -267,15 +264,13 @@ The v3 tests must verify:
 
 The v3 tests must verify:
 
-- Tier weights are `2.5,2.5,2,2,1` for BLND:USDC LP, BLND:XLM LP, USDC,
-  Custom A, and Custom B respectively, represented exactly on-chain as
-  `5:5:4:4:2`.
+- Tier weights are `2.5,2.5,2` for BLND:USDC LP, BLND:XLM LP, and USDC
+  respectively, represented exactly on-chain as `5:5:4`.
 - Each tier receives take-rate assets in proportion to its verified
   reward-eligible USDC value multiplied by its weight.
 - Equal-value tier positions receive relative allocations matching their
   weights, subject only to documented integer rounding.
-- Empty and unconfigured optional tiers contribute zero and are omitted from
-  the effective denominator.
+- Empty tiers contribute zero and are omitted from the effective denominator.
 - Adding or removing a reward-eligible position updates the denominator without
   retroactively changing already accrued allocations.
 - Within a tier, depositors receive allocations proportional to their
@@ -304,7 +299,7 @@ The v3 tests must verify:
   BLND:USDC and BLND:XLM backstop positions.
 - BLND held through either eligible tier has equal emission weight per
   underlying BLND.
-- Plain USDC, Custom A, and Custom B contribute zero BLND-emission weight.
+- Plain USDC contributes zero BLND-emission weight.
 - Within a pool, each user's allocation is proportional to the user's eligible
   underlying BLND across both eligible tiers.
 - A pool or user with zero eligible underlying BLND receives zero.

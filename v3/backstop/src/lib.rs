@@ -34,12 +34,10 @@ const Q4W_ON_ICE_THRESHOLD: i128 = 3_000_000;
 const Q4W_ADMIN_ACTIVE_LIMIT: i128 = 5_000_000;
 const Q4W_FROZEN_THRESHOLD: i128 = 6_000_000;
 const Q4W_ADMIN_ON_ICE_LIMIT: i128 = 7_500_000;
-// Exact integer representation of the relative weights 2.5:2.5:2:2:1.
+// Exact integer representation of the relative weights 2.5:2.5:2.
 const TAKE_RATE_WEIGHT_BLND_USDC: i128 = 5;
 const TAKE_RATE_WEIGHT_BLND_XLM: i128 = 5;
 const TAKE_RATE_WEIGHT_USDC: i128 = 4;
-const TAKE_RATE_WEIGHT_CUSTOM_A: i128 = 4;
-const TAKE_RATE_WEIGHT_CUSTOM_B: i128 = 2;
 const POSITION_TTL_THRESHOLD: u32 = 179 * DAY_IN_LEDGERS;
 const POSITION_TTL_BUMP: u32 = 180 * DAY_IN_LEDGERS;
 
@@ -159,8 +157,6 @@ pub struct Q4WEntry {
 pub struct ActivationValues {
     pub blnd_usdc: i128,
     pub blnd_xlm: i128,
-    pub custom_a: i128,
-    pub custom_b: i128,
     pub usdc: i128,
 }
 
@@ -190,19 +186,15 @@ pub struct PoolStatusQuote {
 pub struct TakeRateValues {
     pub blnd_usdc: i128,
     pub blnd_xlm: i128,
-    pub custom_a: i128,
-    pub custom_b: i128,
     pub usdc: i128,
 }
 
-/// Allocation of one take-rate asset across the five backstop tiers.
+/// Allocation of one take-rate asset across the three backstop tiers.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct TakeRateQuote {
     pub blnd_usdc: i128,
     pub blnd_xlm: i128,
-    pub custom_a: i128,
-    pub custom_b: i128,
     pub remainder: i128,
     pub usdc: i128,
 }
@@ -659,7 +651,7 @@ impl BackstopContract {
         )
     }
 
-    /// Quote one take-rate asset across the five weighted tiers.
+    /// Quote one take-rate asset across the three weighted tiers.
     ///
     /// The result is arithmetic only. Values MUST come from the canonical
     /// reward-eligibility layer before the quote is used for accrual.
@@ -1664,26 +1656,13 @@ fn quote_activation_values(
 }
 
 fn sum_activation_values(env: &Env, values: &ActivationValues) -> i128 {
-    if values.blnd_xlm < 0
-        || values.blnd_usdc < 0
-        || values.usdc < 0
-        || values.custom_a < 0
-        || values.custom_b < 0
-    {
+    if values.blnd_xlm < 0 || values.blnd_usdc < 0 || values.usdc < 0 {
         panic_with_error!(env, BackstopError::InvalidActivationValue);
     }
     checked_add_i128(
         env,
-        checked_add_i128(
-            env,
-            checked_add_i128(
-                env,
-                checked_add_i128(env, values.blnd_xlm, values.blnd_usdc),
-                values.usdc,
-            ),
-            values.custom_a,
-        ),
-        values.custom_b,
+        checked_add_i128(env, values.blnd_xlm, values.blnd_usdc),
+        values.usdc,
     )
 }
 
@@ -1799,41 +1778,23 @@ fn require_valid_pool_status(env: &Env, status: u32) {
 }
 
 fn quote_take_rate_values(env: &Env, distribution: i128, values: &TakeRateValues) -> TakeRateQuote {
-    if distribution < 0
-        || values.blnd_usdc < 0
-        || values.blnd_xlm < 0
-        || values.usdc < 0
-        || values.custom_a < 0
-        || values.custom_b < 0
-    {
+    if distribution < 0 || values.blnd_usdc < 0 || values.blnd_xlm < 0 || values.usdc < 0 {
         panic_with_error!(env, BackstopError::InvalidTakeRateValue);
     }
 
     let blnd_usdc_weighted = checked_mul_i128(env, values.blnd_usdc, TAKE_RATE_WEIGHT_BLND_USDC);
     let blnd_xlm_weighted = checked_mul_i128(env, values.blnd_xlm, TAKE_RATE_WEIGHT_BLND_XLM);
     let usdc_weighted = checked_mul_i128(env, values.usdc, TAKE_RATE_WEIGHT_USDC);
-    let custom_a_weighted = checked_mul_i128(env, values.custom_a, TAKE_RATE_WEIGHT_CUSTOM_A);
-    let custom_b_weighted = checked_mul_i128(env, values.custom_b, TAKE_RATE_WEIGHT_CUSTOM_B);
     let denominator = checked_add_i128(
         env,
-        checked_add_i128(
-            env,
-            checked_add_i128(
-                env,
-                checked_add_i128(env, blnd_usdc_weighted, blnd_xlm_weighted),
-                usdc_weighted,
-            ),
-            custom_a_weighted,
-        ),
-        custom_b_weighted,
+        checked_add_i128(env, blnd_usdc_weighted, blnd_xlm_weighted),
+        usdc_weighted,
     );
 
     if denominator == 0 {
         return TakeRateQuote {
             blnd_usdc: 0,
             blnd_xlm: 0,
-            custom_a: 0,
-            custom_b: 0,
             remainder: distribution,
             usdc: 0,
         };
@@ -1842,23 +1803,11 @@ fn quote_take_rate_values(env: &Env, distribution: i128, values: &TakeRateValues
     let blnd_usdc = proportional_floor(env, distribution, blnd_usdc_weighted, denominator);
     let blnd_xlm = proportional_floor(env, distribution, blnd_xlm_weighted, denominator);
     let usdc = proportional_floor(env, distribution, usdc_weighted, denominator);
-    let custom_a = proportional_floor(env, distribution, custom_a_weighted, denominator);
-    let custom_b = proportional_floor(env, distribution, custom_b_weighted, denominator);
-    let allocated = checked_add_i128(
-        env,
-        checked_add_i128(
-            env,
-            checked_add_i128(env, checked_add_i128(env, blnd_usdc, blnd_xlm), usdc),
-            custom_a,
-        ),
-        custom_b,
-    );
+    let allocated = checked_add_i128(env, checked_add_i128(env, blnd_usdc, blnd_xlm), usdc);
 
     TakeRateQuote {
         blnd_usdc,
         blnd_xlm,
-        custom_a,
-        custom_b,
         remainder: checked_sub_i128(env, distribution, allocated),
         usdc,
     }
@@ -2408,14 +2357,12 @@ mod tests {
     }
 
     #[test]
-    fn activation_policy_counts_five_assets_equally() {
+    fn activation_policy_counts_three_assets_equally() {
         let env = Env::default();
         let mixed = ActivationValues {
-            blnd_xlm: 3_000 * SCALAR_7,
-            blnd_usdc: 3_000 * SCALAR_7,
-            usdc: 2_500 * SCALAR_7,
-            custom_a: 2_000 * SCALAR_7,
-            custom_b: 2_000 * SCALAR_7,
+            blnd_xlm: 4_000 * SCALAR_7,
+            blnd_usdc: 4_000 * SCALAR_7,
+            usdc: 4_500 * SCALAR_7,
         };
         let entry = quote_activation_values(&env, &mixed, false);
         assert_eq!(entry.eligible_value, ACTIVATION_ENTRY_THRESHOLD_USDC);
@@ -2427,8 +2374,6 @@ mod tests {
             &ActivationValues {
                 blnd_xlm: 0,
                 blnd_usdc: 0,
-                custom_a: 0,
-                custom_b: 0,
                 usdc: ACTIVATION_ENTRY_THRESHOLD_USDC,
             },
             false,
@@ -2440,8 +2385,6 @@ mod tests {
             &ActivationValues {
                 blnd_xlm: ACTIVATION_ENTRY_THRESHOLD_USDC,
                 blnd_usdc: 0,
-                custom_a: 0,
-                custom_b: 0,
                 usdc: 0,
             },
             false,
@@ -2453,39 +2396,11 @@ mod tests {
             &ActivationValues {
                 blnd_xlm: 0,
                 blnd_usdc: ACTIVATION_ENTRY_THRESHOLD_USDC,
-                custom_a: 0,
-                custom_b: 0,
                 usdc: 0,
             },
             false,
         );
         assert!(blnd_usdc_only.meets_threshold);
-
-        let custom_a_only = quote_activation_values(
-            &env,
-            &ActivationValues {
-                blnd_xlm: 0,
-                blnd_usdc: 0,
-                custom_a: ACTIVATION_ENTRY_THRESHOLD_USDC,
-                custom_b: 0,
-                usdc: 0,
-            },
-            false,
-        );
-        assert!(custom_a_only.meets_threshold);
-
-        let custom_b_only = quote_activation_values(
-            &env,
-            &ActivationValues {
-                blnd_xlm: 0,
-                blnd_usdc: 0,
-                custom_a: 0,
-                custom_b: ACTIVATION_ENTRY_THRESHOLD_USDC,
-                usdc: 0,
-            },
-            false,
-        );
-        assert!(custom_b_only.meets_threshold);
     }
 
     #[test]
@@ -2494,8 +2409,6 @@ mod tests {
         let value = |amount| ActivationValues {
             blnd_xlm: amount,
             blnd_usdc: 0,
-            custom_a: 0,
-            custom_b: 0,
             usdc: 0,
         };
 
@@ -2540,8 +2453,6 @@ mod tests {
                 &ActivationValues {
                     blnd_xlm: -1,
                     blnd_usdc: 0,
-                    custom_a: 0,
-                    custom_b: 0,
                     usdc: 0,
                 },
                 false,
@@ -2555,8 +2466,6 @@ mod tests {
                 &ActivationValues {
                     blnd_xlm: i128::MAX,
                     blnd_usdc: 1,
-                    custom_a: 0,
-                    custom_b: 0,
                     usdc: 0,
                 },
                 false,
@@ -2571,8 +2480,6 @@ mod tests {
         let values = |amount| ActivationValues {
             blnd_xlm: amount,
             blnd_usdc: 0,
-            custom_a: 0,
-            custom_b: 0,
             usdc: 0,
         };
         let total = 20_000 * SCALAR_7;
@@ -2629,8 +2536,6 @@ mod tests {
         let values = |amount| ActivationValues {
             blnd_xlm: 0,
             blnd_usdc: amount,
-            custom_a: 0,
-            custom_b: 0,
             usdc: 0,
         };
         let zero = values(0);
@@ -2682,8 +2587,6 @@ mod tests {
         let values = |amount| ActivationValues {
             blnd_xlm: 0,
             blnd_usdc: 0,
-            custom_a: 0,
-            custom_b: 0,
             usdc: amount,
         };
         let total = 20_000 * SCALAR_7;
@@ -2737,16 +2640,12 @@ mod tests {
         let active = ActivationValues {
             blnd_xlm: 1,
             blnd_usdc: 1,
-            custom_a: 0,
-            custom_b: 0,
             usdc: 0,
         };
         let queued = ActivationValues {
             blnd_xlm: 0,
             blnd_usdc: 0,
-            custom_a: 0,
-            custom_b: 1,
-            usdc: 0,
+            usdc: 1,
         };
         let quote = quote_update_pool_status_values(&env, STATUS_ACTIVE, &active, &queued);
         assert_eq!(quote.q4w_percentage, 3_333_334);
@@ -2761,21 +2660,17 @@ mod tests {
     }
 
     #[test]
-    fn take_rate_policy_applies_2_5_2_5_2_2_1_weights_and_conserves_assets() {
+    fn take_rate_policy_applies_2_5_2_5_2_weights_and_conserves_assets() {
         let env = Env::default();
         let equal_values = TakeRateValues {
             blnd_usdc: SCALAR_7,
             blnd_xlm: SCALAR_7,
-            custom_a: SCALAR_7,
-            custom_b: SCALAR_7,
             usdc: SCALAR_7,
         };
-        let quote = quote_take_rate_values(&env, 200, &equal_values);
+        let quote = quote_take_rate_values(&env, 140, &equal_values);
         assert_eq!(quote.blnd_usdc, 50);
         assert_eq!(quote.blnd_xlm, 50);
         assert_eq!(quote.usdc, 40);
-        assert_eq!(quote.custom_a, 40);
-        assert_eq!(quote.custom_b, 20);
         assert_eq!(quote.remainder, 0);
 
         let rounding_quote = quote_take_rate_values(&env, 101, &equal_values);
@@ -2783,8 +2678,6 @@ mod tests {
             rounding_quote.blnd_usdc
                 + rounding_quote.blnd_xlm
                 + rounding_quote.usdc
-                + rounding_quote.custom_a
-                + rounding_quote.custom_b
                 + rounding_quote.remainder,
             101
         );
@@ -2793,34 +2686,26 @@ mod tests {
         let unequal_values = TakeRateValues {
             blnd_usdc: 2 * SCALAR_7,
             blnd_xlm: SCALAR_7,
-            custom_a: SCALAR_7,
-            custom_b: SCALAR_7,
             usdc: SCALAR_7,
         };
-        let unequal_quote = quote_take_rate_values(&env, 250, &unequal_values);
+        let unequal_quote = quote_take_rate_values(&env, 190, &unequal_values);
         assert_eq!(unequal_quote.blnd_usdc, 100);
         assert_eq!(unequal_quote.blnd_xlm, 50);
         assert_eq!(unequal_quote.usdc, 40);
-        assert_eq!(unequal_quote.custom_a, 40);
-        assert_eq!(unequal_quote.custom_b, 20);
         assert_eq!(unequal_quote.remainder, 0);
     }
 
     #[test]
-    fn take_rate_policy_omits_empty_optional_tiers_and_carries_empty_distribution() {
+    fn take_rate_policy_carries_empty_distribution() {
         let env = Env::default();
         let required_only = TakeRateValues {
             blnd_usdc: SCALAR_7,
             blnd_xlm: SCALAR_7,
-            custom_a: 0,
-            custom_b: 0,
             usdc: 0,
         };
         let quote = quote_take_rate_values(&env, 10, &required_only);
         assert_eq!(quote.blnd_usdc, 5);
         assert_eq!(quote.blnd_xlm, 5);
-        assert_eq!(quote.custom_a, 0);
-        assert_eq!(quote.custom_b, 0);
         assert_eq!(quote.remainder, 0);
 
         let empty = quote_take_rate_values(
@@ -2829,8 +2714,6 @@ mod tests {
             &TakeRateValues {
                 blnd_usdc: 0,
                 blnd_xlm: 0,
-                custom_a: 0,
-                custom_b: 0,
                 usdc: 0,
             },
         );
@@ -2847,9 +2730,7 @@ mod tests {
                 &TakeRateValues {
                     blnd_usdc: 0,
                     blnd_xlm: 0,
-                    custom_a: 0,
-                    custom_b: -1,
-                    usdc: 0,
+                    usdc: -1,
                 },
             )
         }));
@@ -2862,8 +2743,6 @@ mod tests {
                 &TakeRateValues {
                     blnd_usdc: 0,
                     blnd_xlm: 0,
-                    custom_a: 0,
-                    custom_b: 0,
                     usdc: 0,
                 },
             )
@@ -2877,8 +2756,6 @@ mod tests {
                 &TakeRateValues {
                     blnd_usdc: i128::MAX,
                     blnd_xlm: 0,
-                    custom_a: 0,
-                    custom_b: 0,
                     usdc: 0,
                 },
             )

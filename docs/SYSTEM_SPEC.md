@@ -310,11 +310,9 @@ The three required activation assets are:
 - BLND:XLM 80:20 LP.
 - Plain USDC.
 
-The candidate MAY additionally configure up to two optional custom assets,
-identified as Custom A and Custom B. An unconfigured custom tier has zero
-balance, zero activation value, zero loss capacity, and zero take-rate
-allocation. A custom asset MUST satisfy every configuration and safety
-requirement in this section before any of those roles become available.
+The candidate supports no optional custom backstop tiers. Adding another
+backstop asset requires a new protocol candidate and the legacy-emitter
+replacement process.
 
 Approval for activation does not by itself make a position eligible. Capital
 MUST also be allocated to the evaluated pool, committed to the defined loss
@@ -495,16 +493,13 @@ The activation policy is independent of the emitter's designated-token
 comparison.
 
 A pool's activation score is the sum of the eligible values of its three
-required and up to two configured custom assets, denominated in 7-decimal USDC
-units:
+required assets, denominated in 7-decimal USDC units:
 
 \[
 E_p =
 V_{p,\mathrm{BLND:XLM}} +
 V_{p,\mathrm{BLND:USDC}} +
-V_{p,\mathrm{USDC}} +
-V_{p,\mathrm{CustomA}} +
-V_{p,\mathrm{CustomB}}
+V_{p,\mathrm{USDC}}
 \]
 
 where:
@@ -516,8 +511,7 @@ where:
 Every eligible USDC of value has equal activation weight. The calculation has
 no asset-specific activation haircut, concentration cap, or minimum
 BLND-bearing allocation. A pool therefore MAY satisfy the threshold with any
-combination of the required and configured optional assets, including one
-eligible asset alone.
+combination of the three required assets, including one eligible asset alone.
 
 The entry threshold for an inactive pool is:
 
@@ -660,16 +654,14 @@ The candidate uses the following strict first-loss order:
 1. BLND:USDC LP.
 2. BLND:XLM LP.
 3. Plain USDC.
-4. Optional Custom A.
-5. Optional Custom B.
-6. Pool suppliers for any residual loss after all eligible backstop capital is
+4. Pool suppliers for any residual loss after all eligible backstop capital is
    exhausted.
 
 Each backstop asset occupies its own tier. A loss MUST exhaust the eligible,
 uncommitted capital in a tier before consuming capital from the next tier.
 Activation weighting is independent of this ordering: one USDC of verified
 eligible value continues to contribute one USDC to the activation score
-regardless of tier. An unconfigured optional tier contributes zero.
+regardless of tier.
 
 Capital queued for withdrawal is excluded from activation but remains
 loss-bearing capital while it is still in custody. Within a tier, a loss MUST
@@ -706,18 +698,16 @@ or dispose of it under the specified loss process.
 
 ### 9.1 Take-rate allocation
 
-The five backstop tiers have fixed take-rate weights in waterfall order:
+The three backstop tiers have fixed take-rate weights in waterfall order:
 
 | Tier | Asset | Weight |
 | ---: | --- | ---: |
 | 1 | BLND:USDC LP | 2.5 |
 | 2 | BLND:XLM LP | 2.5 |
 | 3 | Plain USDC | 2 |
-| 4 | Optional Custom A | 2 |
-| 5 | Optional Custom B | 1 |
 
 The contract represents this exact relative ratio as the integers
-`5:5:4:4:2`; no floating-point arithmetic is used.
+`5:5:4`; no floating-point arithmetic is used.
 
 For a pool-level take-rate distribution \(D\), tier \(i\)'s allocation is
 proportional to both its reward-eligible verified USDC value \(R_i\) and its
@@ -731,10 +721,10 @@ D
 \right\rfloor
 \]
 
-An unconfigured optional tier or a tier with zero reward-eligible value
-contributes zero to the numerator and denominator. The formula therefore
-renormalizes across only populated, reward-eligible tiers. Within each tier,
-allocation MUST be proportional to reward-eligible depositor shares.
+A tier with zero reward-eligible value contributes zero to the numerator and
+denominator. The formula therefore renormalizes across only populated,
+reward-eligible tiers. Within each tier, allocation MUST be proportional to
+reward-eligible depositor shares.
 
 For take-rate purposes, reward-eligible value and shares include every
 accounted position still held in contract custody, whether active or queued
@@ -867,8 +857,7 @@ B_{p,\mathrm{BLND:USDC}} +
 B_{p,\mathrm{BLND:XLM}}
 \]
 
-Plain USDC, Custom A, and Custom B contribute zero BLND-emission weight. The
-pool allocation is:
+Plain USDC contributes zero BLND-emission weight. The pool allocation is:
 
 \[
 E_p =

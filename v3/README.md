@@ -80,8 +80,8 @@ candidate-address deployment order needed to configure the factory before the
 candidate constructor validates it.
 
 The backstop exposes the canonical Milestone-5 activation arithmetic for
-verified, pool-specific values of BLND:XLM LP, BLND:USDC LP, plain USDC, and up
-to two optional custom assets. Each USDC of eligible value counts equally. An
+verified, pool-specific values of BLND:XLM LP, BLND:USDC LP, and plain USDC.
+Each USDC of eligible value counts equally. An
 inactive pool qualifies at or above 12,500 USDC, while an active pool remains
 qualified at or above 10,000 USDC. The public entry point returns a
 non-authoritative quote. This arithmetic is not yet wired to pool status: a
@@ -114,23 +114,21 @@ withdrawals, and auction fills remain available under the v2 Frozen action
 matrix.
 
 The specified, but not yet implemented, loss waterfall consumes BLND:USDC LP,
-BLND:XLM LP, plain USDC, optional Custom A, and optional Custom B in that order.
-Pool suppliers absorb only a remaining shortfall after all configured,
-eligible backstop tiers are exhausted. The five tiers have take-rate weights
-`2.5,2.5,2,2,1`, represented exactly on-chain as `5:5:4:4:2`; each tier's
-allocation is proportional to its reward-eligible USDC value multiplied by its
-weight. This priority and weighting do not change equal-USDC activation
-accounting. Per-tier auction, take-rate accrual, and disposal mechanics remain
-implementation work.
+BLND:XLM LP, and plain USDC in that order. Pool suppliers absorb only a
+remaining shortfall after all three backstop tiers are exhausted. The tiers
+have take-rate weights `2.5,2.5,2`, represented exactly on-chain as `5:5:4`;
+each tier's allocation is proportional to its reward-eligible USDC value
+multiplied by its weight. This priority and weighting do not change equal-USDC
+activation accounting. Per-tier auction, take-rate accrual, and disposal
+mechanics remain implementation work.
 
 The backstop also exposes arithmetic-only ongoing BLND-emission quotes for the
 backstop-depositor tranche. Active pools are weighted by eligible underlying
 BLND across BLND:USDC and BLND:XLM positions, and users within each pool are
-weighted by their underlying BLND across those same tiers. Plain USDC and the
-custom tiers receive no BLND-emission weight. Production LP accounting,
-activation integration, accumulators, and claims remain implementation work;
-the top-level split between backstop and supply/borrow emissions remains an
-open economic decision.
+weighted by their underlying BLND across those same tiers. Plain USDC receives
+no BLND-emission weight. Production LP accounting, activation integration,
+accumulators, and claims remain implementation work; the top-level split
+between backstop and supply/borrow emissions remains an open economic decision.
 
 The contract extends its code and instance TTL to 90 days at construction and
 renews it whenever fewer than 89 days remain. This does not change the

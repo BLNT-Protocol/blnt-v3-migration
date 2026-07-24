@@ -257,11 +257,9 @@ fn v3_wasm_exposes_asset_neutral_activation_hysteresis_quote() {
     );
 
     let values = v3_backstop::ActivationValues {
-        blnd_usdc: 3_000 * SCALAR_7,
+        blnd_usdc: 4_000 * SCALAR_7,
         blnd_xlm: 4_000 * SCALAR_7,
-        custom_a: 1_000 * SCALAR_7,
-        custom_b: 1_000 * SCALAR_7,
-        usdc: 3_000 * SCALAR_7,
+        usdc: 4_000 * SCALAR_7,
     };
     let inactive_quote = fixture.candidate.quote_activation(&values, &false);
     assert_eq!(inactive_quote.eligible_value, 12_000 * SCALAR_7);
@@ -280,8 +278,6 @@ fn v3_wasm_exposes_v2_compatible_pool_status_quotes() {
     let values = |amount| v3_backstop::ActivationValues {
         blnd_usdc: amount,
         blnd_xlm: 0,
-        custom_a: 0,
-        custom_b: 0,
         usdc: 0,
     };
     let total = 20_000 * SCALAR_7;
@@ -416,12 +412,10 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
 fn v3_wasm_exposes_weighted_take_rate_quote() {
     let fixture = Fixture::create();
     let quote = fixture.candidate.quote_take_rate(
-        &200,
+        &140,
         &v3_backstop::TakeRateValues {
             blnd_usdc: SCALAR_7,
             blnd_xlm: SCALAR_7,
-            custom_a: SCALAR_7,
-            custom_b: SCALAR_7,
             usdc: SCALAR_7,
         },
     );
@@ -429,8 +423,6 @@ fn v3_wasm_exposes_weighted_take_rate_quote() {
     assert_eq!(quote.blnd_usdc, 50);
     assert_eq!(quote.blnd_xlm, 50);
     assert_eq!(quote.usdc, 40);
-    assert_eq!(quote.custom_a, 40);
-    assert_eq!(quote.custom_b, 20);
     assert_eq!(quote.remainder, 0);
 }
 

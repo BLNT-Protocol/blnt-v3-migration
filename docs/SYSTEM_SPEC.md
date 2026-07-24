@@ -284,8 +284,15 @@ or by reference:
 - Deposit and withdrawal status.
 - Liquidation or disposal path.
 
-Examples under consideration include BLND:USDC LP, BLND:XLM LP, and plain
-USDC. Their inclusion is not yet approved by this draft.
+The approved activation assets are:
+
+- BLND:USDC 80:20 LP.
+- BLND:XLM 80:20 LP.
+- Plain USDC.
+
+Approval for activation does not by itself make a position eligible. Capital
+MUST also be allocated to the evaluated pool, committed to the defined loss
+waterfall, and subject to the applicable withdrawal rules.
 
 ### 7.2 Position accounting
 
@@ -348,22 +355,52 @@ Withdrawal rules MUST:
 The activation policy is independent of the emitter's designated-token
 comparison.
 
-A candidate MAY combine eligible value from multiple approved assets. A
-general form is:
+A pool's activation score is the sum of the eligible values of its three
+approved assets, denominated in 7-decimal USDC units:
 
 \[
-E_p = \sum_i h_i \cdot \min(V_{p,i}, C_{p,i})
+E_p = V_{p,\mathrm{BLND:XLM}} + V_{p,\mathrm{BLND:USDC}} + V_{p,\mathrm{USDC}}
 \]
 
 where:
 
 - \(E_p\) is pool \(p\)'s eligible activation value.
-- \(V_{p,i}\) is the eligible value of asset \(i\) allocated to the pool.
-- \(h_i\) is its activation haircut.
-- \(C_{p,i}\) is its concentration cap.
+- \(V_{p,i}\) is the verified USDC value of eligible asset \(i\) allocated to
+  pool \(p\).
 
-This formula is illustrative; the final valuation units, weights, thresholds,
-and minimum junior-capital requirement are open decisions.
+Every eligible USDC of value has equal activation weight. The calculation has
+no asset-specific activation haircut, concentration cap, or minimum
+BLND-bearing allocation. A pool therefore MAY satisfy the threshold with any
+combination of the three approved assets, including plain USDC alone.
+
+The entry threshold for an inactive pool is:
+
+\[
+T_{\mathrm{entry}} = 12{,}500\ \mathrm{USDC}
+\]
+
+The maintenance threshold for an active pool is:
+
+\[
+T_{\mathrm{maintenance}} = 10{,}000\ \mathrm{USDC}
+\]
+
+An inactive pool activates exactly when \(E_p \geq T_{\mathrm{entry}}\). An
+active pool remains active exactly when
+\(E_p \geq T_{\mathrm{maintenance}}\). Equality qualifies at both boundaries.
+If an active pool falls below the maintenance threshold, it becomes inactive
+and MUST meet the entry threshold again before reactivating. This hysteresis
+prevents repeated activation changes near a single boundary.
+
+Asset risk is handled separately through loss priority, withdrawal rules,
+deposit limits, and emissions rather than through the activation score.
+
+Plain USDC is the unit of account and contributes one USDC of activation value
+per eligible token. A production valuation adapter MUST define
+manipulation-resistant BLND:USDC and BLND:XLM LP valuation, oracle staleness,
+and failure behavior before its values can drive pool status. Instantaneous
+Comet reserve ratios and caller-supplied values MUST NOT directly determine
+pool activation.
 
 The implemented activation policy MUST:
 
@@ -567,12 +604,10 @@ The detailed test matrix is maintained in `docs/MIGRATION_TEST_PLAN.md`.
 The following require explicit resolution before their associated behavior is
 implemented:
 
-- Accepted backstop assets at launch.
 - Number and priority of loss tiers.
 - Co-tier loss allocation method.
-- Activation valuation method, thresholds, haircuts, and concentration caps.
+- Production LP price sources, averaging, staleness, and failure policy.
 - Treatment of queued capital for activation and emissions.
-- Minimum junior-capital requirement.
 - Post-migration designated token.
 - Ongoing BLND-emission allocation.
 - Legacy-position withdrawal and optional conversion interface.
@@ -593,11 +628,13 @@ implemented:
 6. Implement legacy withdrawal without forced conversion.
 7. Complete native, WASM, local-network, and testnet migration exercises.
 
-Milestones 1 through 4 are represented by the frozen v2 baseline, isolated
+Milestones 1 through 5 are represented by the frozen v2 baseline, isolated
 Protocol-27 backstop crate, cross-version legacy-emitter migration harness, and
 the candidate's pool-attributed legacy migration deposits, time-weighted
-checkpoints, and isolated single-asset prefunding lane. BLND funding and claims
-remain intentionally unimplemented.
+checkpoints, isolated single-asset prefunding lane, and canonical asset-neutral
+12,500-USDC entry and 10,000-USDC maintenance activation-policy arithmetic. The
+production valuation adapter, pool-status integration, and BLND funding and
+claims remain intentionally unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

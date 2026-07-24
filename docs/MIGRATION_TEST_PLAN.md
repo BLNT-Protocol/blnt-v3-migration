@@ -97,9 +97,18 @@ The v3 tests must verify:
 
 For a multi-asset activation formula, test:
 
-- Each approved backstop asset independently.
-- Combined deposits at, immediately below, and immediately above the threshold.
-- Per-asset haircuts and minimum junior-capital requirements.
+- BLND:XLM LP, BLND:USDC LP, and plain USDC independently.
+- Combined verified values immediately below, exactly at, and immediately above
+  the 12,500-USDC entry threshold.
+- Active-pool values immediately below and exactly at the 10,000-USDC
+  maintenance threshold.
+- An inactive pool in the 10,000-to-12,500-USDC hysteresis band remains
+  inactive and must meet the entry threshold before reactivation.
+- Equal activation weight for every USDC of verified value, without
+  asset-specific haircuts, concentration caps, or minimum BLND allocation.
+- Negative values and checked-arithmetic overflow.
+- Rejection of stale, unavailable, caller-supplied, and same-transaction
+  manipulated valuation inputs by the production valuation adapter.
 - Price, reserve, and LP-supply manipulation.
 - Oracle staleness and unavailable-market behavior.
 - Queued withdrawals and assets already committed to covering losses.

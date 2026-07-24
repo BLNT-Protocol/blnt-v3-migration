@@ -130,6 +130,37 @@ impl Fixture {
 }
 
 #[test]
+fn v3_wasm_exposes_asset_neutral_activation_hysteresis_quote() {
+    let fixture = Fixture::create();
+    let entry_threshold = 12_500 * SCALAR_7;
+    let maintenance_threshold = 10_000 * SCALAR_7;
+
+    assert_eq!(
+        fixture.candidate.activation_entry_threshold(),
+        entry_threshold
+    );
+    assert_eq!(
+        fixture.candidate.activation_maintenance_threshold(),
+        maintenance_threshold
+    );
+
+    let values = v3_backstop::ActivationValues {
+        blnd_usdc: 3_000 * SCALAR_7,
+        blnd_xlm: 4_000 * SCALAR_7,
+        usdc: 3_000 * SCALAR_7,
+    };
+    let inactive_quote = fixture.candidate.quote_activation(&values, &false);
+    assert_eq!(inactive_quote.eligible_value, maintenance_threshold);
+    assert_eq!(inactive_quote.required_value, entry_threshold);
+    assert!(!inactive_quote.meets_threshold);
+
+    let active_quote = fixture.candidate.quote_activation(&values, &true);
+    assert_eq!(active_quote.eligible_value, maintenance_threshold);
+    assert_eq!(active_quote.required_value, maintenance_threshold);
+    assert!(active_quote.meets_threshold);
+}
+
+#[test]
 fn legacy_emitter_finalizes_migration_to_v3_wasm() {
     let fixture = Fixture::create();
     assert_eq!(

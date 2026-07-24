@@ -21,11 +21,22 @@ bounded per-queue direct-swap synchronization, migration deposits and
 withdrawals, deterministic 1-BLND-per-second backfill scheduling from the
 original queue start, a bounded 31-day prefunding campaign, and time-weighted
 survivor-allocation quotes. It intentionally does not yet implement BLND
-funding or claims, activation policy, loss tiers, or ongoing-emission
-allocation. It also provides one independently configured SEP-41 prefunding
-lane with exact one-token/one-share accounting. Prefund shares are isolated
-from migration and may be deposited or withdrawn before or after activation;
-they do not yet count toward activation, losses, backfill, or emissions.
+funding or claims, authoritative pool-status activation, loss tiers, or
+ongoing-emission allocation. It also provides one independently configured
+SEP-41 prefunding lane with exact one-token/one-share accounting. Prefund
+shares are isolated from migration and may be deposited or withdrawn before or
+after activation; they do not yet count toward activation, losses, backfill,
+or emissions.
+
+The backstop exposes the canonical Milestone-5 activation arithmetic for
+verified, pool-specific values of BLND:XLM LP, BLND:USDC LP, and plain USDC.
+Each USDC of eligible value counts equally. An inactive pool qualifies at or
+above 12,500 USDC, while an active pool remains qualified at or above 10,000
+USDC. The public entry point returns a non-authoritative quote. This arithmetic
+is not yet wired to pool status: a production valuation adapter and
+loss-eligible position accounting are still required, and untrusted caller
+inputs or instantaneous Comet reserve ratios must not be used as authoritative
+values.
 
 The contract extends its code and instance TTL to 90 days at construction and
 renews it whenever fewer than 89 days remain. This does not change the

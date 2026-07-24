@@ -16,8 +16,11 @@ const RETRY_PERIOD_SECONDS: u64 = QUEUE_SECONDS + SYNC_GRACE_SECONDS;
 const MAX_RETRY_QUEUES: u32 = 2;
 const RECOVERY_HORIZON_SECONDS: u64 = MAX_RETRY_QUEUES as u64 * RETRY_PERIOD_SECONDS;
 const MAX_MIGRATION_LIFETIME_SECONDS: u64 = 2 * QUEUE_SECONDS + RECOVERY_HORIZON_SECONDS;
-const BLND_SCALAR: i128 = 10_000_000;
+const SCALAR_7: i128 = 10_000_000;
+const BLND_SCALAR: i128 = SCALAR_7;
 const MAX_BACKFILL_BLND: i128 = 10_000_000 * BLND_SCALAR;
+const ACTIVATION_ENTRY_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
+const ACTIVATION_MAINTENANCE_THRESHOLD_USDC: i128 = 10_000 * SCALAR_7;
 const POSITION_TTL_THRESHOLD: u32 = 179 * DAY_IN_LEDGERS;
 const POSITION_TTL_BUMP: u32 = 180 * DAY_IN_LEDGERS;
 
@@ -85,6 +88,7 @@ pub enum BackstopError {
     MigrationEpochNotOpen = 1218,
     MigrationEpochAlreadyOpen = 1219,
     AssetConfigurationCollision = 1220,
+    InvalidActivationValue = 1221,
 }
 
 #[derive(Clone)]
@@ -101,6 +105,26 @@ pub struct MigrationPosition {
     pub amount: i128,
     pub frozen_weight: Option<i128>,
     pub time_basis: i128,
+}
+
+/// Verified, pool-specific asset values denominated in 7-decimal USDC units.
+///
+/// Constructing these values from token balances and manipulation-resistant
+/// prices is the responsibility of the canonical valuation layer.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct ActivationValues {
+    pub blnd_usdc: i128,
+    pub blnd_xlm: i128,
+    pub usdc: i128,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct ActivationQuote {
+    pub eligible_value: i128,
+    pub meets_threshold: bool,
+    pub required_value: i128,
 }
 
 #[contractclient(name = "EmitterClient")]
@@ -301,6 +325,33 @@ impl BackstopContract {
             .instance()
             .get(&DataKey::TotalPrefundShares)
             .unwrap_or(0)
+    }
+
+    /// Return the threshold an inactive pool must meet to activate.
+    pub fn activation_entry_threshold(env: Env) -> i128 {
+        extend_instance_ttl(&env);
+        ACTIVATION_ENTRY_THRESHOLD_USDC
+    }
+
+    /// Return the threshold an active pool must maintain to remain active.
+    pub fn activation_maintenance_threshold(env: Env) -> i128 {
+        extend_instance_ttl(&env);
+        ACTIVATION_MAINTENANCE_THRESHOLD_USDC
+    }
+
+    /// Quote verified pool-specific values under the canonical activation
+    /// policy's hysteresis rule.
+    ///
+    /// This function defines policy arithmetic only. Its arguments MUST come
+    /// from the canonical valuation layer before its result is used for pool
+    /// status or reward eligibility.
+    pub fn quote_activation(
+        env: Env,
+        values: ActivationValues,
+        currently_active: bool,
+    ) -> ActivationQuote {
+        extend_instance_ttl(&env);
+        quote_activation_values(&env, &values, currently_active)
     }
 
     pub fn migration_status(env: Env) -> MigrationStatus {
@@ -1016,6 +1067,31 @@ fn proportional_floor(env: &Env, value: i128, numerator: i128, denominator: i128
         .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError))
 }
 
+fn quote_activation_values(
+    env: &Env,
+    values: &ActivationValues,
+    currently_active: bool,
+) -> ActivationQuote {
+    if values.blnd_xlm < 0 || values.blnd_usdc < 0 || values.usdc < 0 {
+        panic_with_error!(env, BackstopError::InvalidActivationValue);
+    }
+    let eligible_value = checked_add_i128(
+        env,
+        checked_add_i128(env, values.blnd_xlm, values.blnd_usdc),
+        values.usdc,
+    );
+    let required_value = if currently_active {
+        ACTIVATION_MAINTENANCE_THRESHOLD_USDC
+    } else {
+        ACTIVATION_ENTRY_THRESHOLD_USDC
+    };
+    ActivationQuote {
+        eligible_value,
+        meets_threshold: eligible_value >= required_value,
+        required_value,
+    }
+}
+
 fn checked_add_i128(env: &Env, left: i128, right: i128) -> i128 {
     left.checked_add(right)
         .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError))
@@ -1334,6 +1410,124 @@ mod tests {
             calculate_scheduled_backfill(&env, epoch_start, backfill_end),
             9_244_800 * BLND_SCALAR
         );
+    }
+
+    #[test]
+    fn activation_policy_counts_three_assets_equally() {
+        let env = Env::default();
+        let mixed = ActivationValues {
+            blnd_xlm: 5_000 * SCALAR_7,
+            blnd_usdc: 4_000 * SCALAR_7,
+            usdc: 3_500 * SCALAR_7,
+        };
+        let entry = quote_activation_values(&env, &mixed, false);
+        assert_eq!(entry.eligible_value, ACTIVATION_ENTRY_THRESHOLD_USDC);
+        assert_eq!(entry.required_value, ACTIVATION_ENTRY_THRESHOLD_USDC);
+        assert!(entry.meets_threshold);
+
+        let usdc_only = quote_activation_values(
+            &env,
+            &ActivationValues {
+                blnd_xlm: 0,
+                blnd_usdc: 0,
+                usdc: ACTIVATION_ENTRY_THRESHOLD_USDC,
+            },
+            false,
+        );
+        assert!(usdc_only.meets_threshold);
+
+        let blnd_xlm_only = quote_activation_values(
+            &env,
+            &ActivationValues {
+                blnd_xlm: ACTIVATION_ENTRY_THRESHOLD_USDC,
+                blnd_usdc: 0,
+                usdc: 0,
+            },
+            false,
+        );
+        assert!(blnd_xlm_only.meets_threshold);
+
+        let blnd_usdc_only = quote_activation_values(
+            &env,
+            &ActivationValues {
+                blnd_xlm: 0,
+                blnd_usdc: ACTIVATION_ENTRY_THRESHOLD_USDC,
+                usdc: 0,
+            },
+            false,
+        );
+        assert!(blnd_usdc_only.meets_threshold);
+    }
+
+    #[test]
+    fn activation_policy_applies_entry_and_maintenance_hysteresis() {
+        let env = Env::default();
+        let value = |amount| ActivationValues {
+            blnd_xlm: amount,
+            blnd_usdc: 0,
+            usdc: 0,
+        };
+
+        let below_entry =
+            quote_activation_values(&env, &value(ACTIVATION_ENTRY_THRESHOLD_USDC - 1), false);
+        assert!(!below_entry.meets_threshold);
+
+        let at_entry =
+            quote_activation_values(&env, &value(ACTIVATION_ENTRY_THRESHOLD_USDC), false);
+        assert!(at_entry.meets_threshold);
+
+        let above_entry =
+            quote_activation_values(&env, &value(ACTIVATION_ENTRY_THRESHOLD_USDC + 1), false);
+        assert!(above_entry.meets_threshold);
+
+        let hysteresis_band =
+            quote_activation_values(&env, &value(ACTIVATION_MAINTENANCE_THRESHOLD_USDC), true);
+        assert_eq!(
+            hysteresis_band.required_value,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC
+        );
+        assert!(hysteresis_band.meets_threshold);
+
+        let below_maintenance = quote_activation_values(
+            &env,
+            &value(ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 1),
+            true,
+        );
+        assert!(!below_maintenance.meets_threshold);
+
+        let inactive_in_band =
+            quote_activation_values(&env, &value(ACTIVATION_MAINTENANCE_THRESHOLD_USDC), false);
+        assert!(!inactive_in_band.meets_threshold);
+    }
+
+    #[test]
+    fn activation_policy_rejects_negative_values_and_overflow() {
+        let env = Env::default();
+        let negative = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            quote_activation_values(
+                &env,
+                &ActivationValues {
+                    blnd_xlm: -1,
+                    blnd_usdc: 0,
+                    usdc: 0,
+                },
+                false,
+            )
+        }));
+        assert!(negative.is_err());
+
+        let overflow = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            quote_activation_values(
+                &env,
+                &ActivationValues {
+                    blnd_xlm: i128::MAX,
+                    blnd_usdc: 1,
+                    usdc: 0,
+                },
+                false,
+            )
+        }));
+        assert!(overflow.is_err());
     }
 
     fn advance_ledger_days(env: &Env, days: u32) {

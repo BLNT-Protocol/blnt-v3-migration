@@ -39,9 +39,13 @@ accepts BLND:USDC deposits only for
 factory-registered pools that expose the required loss-state callback.
 Validation occurs before token custody or share accounting. The callback is a
 permanent compatibility boundary that factory-approved pool upgrades must
-preserve. It
-intentionally does not yet implement BLND funding or claims, authoritative
-pool-status activation, loss execution, or ongoing-emission accrual.
+preserve. After activation, any caller can fund the exact scheduled backfill
+through the published emitter's one-time drop. The immutable BLND token binding
+is used to verify the exact balance delta. Position owners can then direct one
+floor-rounded claim per frozen position without iteration; remaining integer
+dust stays segregated in the backfill reserve. It intentionally does not yet
+implement authoritative pool-status activation, loss execution, or
+ongoing-emission accrual.
 BLND:USDC withdrawals use a bounded 17-day queue
 with at most 20 entries per user and pool, FIFO withdrawal, and LIFO dequeue.
 Withdrawal also requires an affirmative, read-only response from the attributed
@@ -146,8 +150,11 @@ that move that user's assets or shares.
 Successful migration awards zero discretionary BLND. The candidate schedules
 only the time-weighted BLND:USDC backfill, capped at 10 million BLND, and the
 otherwise available allocation of up to 40 million BLND remains undistributed.
-Backfill funding and claims remain implementation work and MUST NOT introduce
-a separate migration award.
+`fund_backfill()` is permissionless after activation but can invoke the
+emitter's initial drop only once, for the exact schedule, and only to the
+candidate. `claim_backfill()` requires the position owner's authorization.
+Funded, claimed, and remaining-reserve totals are public; rounding dust cannot
+be redirected or treated as ongoing emissions.
 
 ## Migration operations
 

@@ -146,6 +146,10 @@ struct Fixture {
 
 impl Fixture {
     fn create() -> Self {
+        Self::create_with_blnd_binding(true)
+    }
+
+    fn create_with_blnd_binding(use_emitter_blnd: bool) -> Self {
         let env = Env::default();
         env.mock_all_auths();
         env.ledger().set_timestamp(1_000);
@@ -160,9 +164,17 @@ impl Fixture {
         let next_token_id = env
             .register_stellar_asset_contract_v2(token_admin.clone())
             .address();
+        let wrong_blnd_id = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
         let prefund_token_id = env
             .register_stellar_asset_contract_v2(token_admin)
             .address();
+        let configured_blnd_id = if use_emitter_blnd {
+            blnd_id.clone()
+        } else {
+            wrong_blnd_id
+        };
 
         let incumbent = Address::generate(&env);
         let emitter_id = env.register(LEGACY_EMITTER_WASM, ());
@@ -176,6 +188,7 @@ impl Fixture {
             v3_backstop::WASM,
             (
                 &emitter_id,
+                &configured_blnd_id,
                 &pool_factory_id,
                 &legacy_token_id,
                 &next_token_id,
@@ -381,6 +394,7 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
             candidate_hash,
             (
                 &emitter_id,
+                &blnd_id,
                 &factory_id,
                 &legacy_token_id,
                 &next_token_id,
@@ -1168,6 +1182,30 @@ fn canonical_finalization_rejects_after_the_absolute_recovery_horizon() {
 }
 
 #[test]
+fn unexpected_blnd_balance_delta_rolls_back_backfill_funding() {
+    let fixture = Fixture::create_with_blnd_binding(false);
+    let pool = fixture.loss_aware_pool(true).address.clone();
+    let depositor = Address::generate(&fixture.env);
+    fixture
+        .legacy_token
+        .mint(&fixture.incumbent, &(100 * SCALAR_7));
+    fixture.legacy_token.mint(&depositor, &(100 * SCALAR_7 + 1));
+    fixture
+        .candidate
+        .deposit_blnd_usdc(&depositor, &pool, &(100 * SCALAR_7 + 1));
+    fixture.queue();
+    fixture.enter_preparation_window();
+    fixture.candidate.prepare_migration();
+    fixture.unlock();
+    fixture.candidate.finalize_migration();
+
+    assert!(fixture.candidate.try_fund_backfill().is_err());
+    assert_eq!(fixture.candidate.funded_backfill(), None);
+    assert_eq!(fixture.candidate.total_backfill_claimed(), 0);
+    assert_eq!(fixture.blnd.balance(&fixture.candidate.address), 0);
+}
+
+#[test]
 fn withdrawn_shares_forfeit_weight_to_time_weighted_survivors() {
     let fixture = Fixture::create();
     let pool = fixture.loss_aware_pool(true).address.clone();
@@ -1316,6 +1354,55 @@ fn withdrawn_shares_forfeit_weight_to_time_weighted_survivors() {
         fixture.candidate.quote_backfill(&carol, &pool),
         backfill * carol_weight / eligible_weight
     );
+
+    assert_eq!(fixture.candidate.funded_backfill(), None);
+    let candidate_blnd_before = fixture.blnd.balance(&fixture.candidate.address);
+    assert_eq!(fixture.candidate.fund_backfill(), backfill);
+    assert_eq!(fixture.candidate.funded_backfill(), Some(backfill));
+    assert_eq!(fixture.candidate.total_backfill_claimed(), 0);
+    assert_eq!(
+        fixture.blnd.balance(&fixture.candidate.address),
+        candidate_blnd_before + backfill
+    );
+    assert!(fixture.candidate.try_fund_backfill().is_err());
+
+    let alice_recipient = Address::generate(&fixture.env);
+    let alice_claim = fixture
+        .candidate
+        .claim_backfill(&alice, &pool, &alice_recipient);
+    let bob_claim = fixture.candidate.claim_backfill(&bob, &pool, &bob);
+    let carol_claim = fixture.candidate.claim_backfill(&carol, &pool, &carol);
+    let total_claimed = alice_claim + bob_claim + carol_claim;
+
+    assert_eq!(alice_claim, backfill * alice_weight / eligible_weight);
+    assert_eq!(bob_claim, backfill * bob_weight / eligible_weight);
+    assert_eq!(carol_claim, backfill * carol_weight / eligible_weight);
+    assert_eq!(fixture.blnd.balance(&alice_recipient), alice_claim);
+    assert_eq!(fixture.blnd.balance(&bob), bob_claim);
+    assert_eq!(fixture.blnd.balance(&carol), carol_claim);
+    assert_eq!(fixture.candidate.total_backfill_claimed(), total_claimed);
+    assert_eq!(
+        fixture.candidate.remaining_backfill(),
+        backfill - total_claimed
+    );
+    assert_eq!(
+        fixture.blnd.balance(&fixture.candidate.address),
+        candidate_blnd_before + backfill - total_claimed
+    );
+    assert!(fixture
+        .candidate
+        .try_claim_backfill(&alice, &pool, &alice)
+        .is_err());
+    assert!(fixture
+        .candidate
+        .try_claim_backfill(&dave, &pool, &dave)
+        .is_err());
+    assert!(
+        fixture
+            .candidate
+            .migration_position(&alice, &pool)
+            .backfill_claimed
+    );
 }
 
 #[test]
@@ -1373,6 +1460,7 @@ fn post_migration_prefunding_is_conserved_and_isolated_from_migration() {
         fixture.candidate.scheduled_backfill(),
         QUEUE_SECONDS as i128 * SCALAR_7
     );
+    assert!(fixture.candidate.try_fund_backfill().is_err());
     assert_eq!(fixture.candidate.total_prefund_shares(), 300 * SCALAR_7);
 
     fixture

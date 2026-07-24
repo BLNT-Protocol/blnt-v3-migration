@@ -45,6 +45,7 @@ const POSITION_TTL_BUMP: u32 = 180 * DAY_IN_LEDGERS;
 #[contracttype]
 enum DataKey {
     Emitter,
+    BlndToken,
     PoolFactory,
     LegacyBackstopToken,
     NextBackstopToken,
@@ -61,6 +62,8 @@ enum DataKey {
     TotalMigrationTimeBasis,
     TotalMigrationWeight,
     ScheduledBackfill,
+    BackfillFundedAmount,
+    TotalBackfillClaimed,
     TotalBlndUsdcShares,
     TotalBlndUsdcQueuedShares,
     TotalPrefundShares,
@@ -121,6 +124,10 @@ pub enum BackstopError {
     InvalidPool = 1228,
     InvalidPoolFactoryBinding = 1229,
     InvalidPoolStatus = 1230,
+    BackfillAlreadyFunded = 1231,
+    BackfillNotFunded = 1232,
+    BackfillAlreadyClaimed = 1233,
+    InvalidBackfillFunding = 1234,
 }
 
 #[derive(Clone)]
@@ -136,6 +143,7 @@ pub struct EmitterSwap {
 /// One continuous BLND:USDC tier position plus temporary backfill metadata.
 pub struct MigrationPosition {
     pub amount: i128,
+    pub backfill_claimed: bool,
     pub frozen_weight: Option<i128>,
     pub time_basis: i128,
 }
@@ -218,6 +226,7 @@ pub struct BlndEmissionQuote {
 
 #[contractclient(name = "EmitterClient")]
 pub trait Emitter {
+    fn drop(env: Env, list: Vec<(Address, i128)>);
     fn get_backstop(env: Env) -> Address;
     fn get_queued_swap(env: Env) -> Option<EmitterSwap>;
     fn queue_swap_backstop(env: Env, new_backstop: Address, new_backstop_token: Address);
@@ -252,6 +261,21 @@ pub struct MigrationPrepared {
 pub struct MigrationActivated {
     pub activated_at: u64,
     pub backfill_end: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BackfillFunded {
+    pub amount: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BackfillClaimed {
+    pub amount: i128,
+    pub pool: Address,
+    pub recipient: Address,
+    pub user: Address,
 }
 
 #[contractevent]
@@ -305,6 +329,7 @@ impl BackstopContract {
     pub fn __constructor(
         env: Env,
         emitter: Address,
+        blnd_token: Address,
         pool_factory: Address,
         legacy_backstop_token: Address,
         next_backstop_token: Address,
@@ -333,6 +358,9 @@ impl BackstopContract {
         env.storage().instance().set(&DataKey::Emitter, &emitter);
         env.storage()
             .instance()
+            .set(&DataKey::BlndToken, &blnd_token);
+        env.storage()
+            .instance()
             .set(&DataKey::PoolFactory, &pool_factory);
         env.storage()
             .instance()
@@ -359,6 +387,12 @@ impl BackstopContract {
     pub fn emitter(env: Env) -> Address {
         extend_instance_ttl(&env);
         env.storage().instance().get(&DataKey::Emitter).unwrap()
+    }
+
+    /// Return the immutable BLND token used to verify funding and pay claims.
+    pub fn blnd_token(env: Env) -> Address {
+        extend_instance_ttl(&env);
+        env.storage().instance().get(&DataKey::BlndToken).unwrap()
     }
 
     /// Return the immutable registry used to validate attributed pools.
@@ -849,10 +883,160 @@ impl BackstopContract {
             .unwrap_or_else(|| panic_with_error!(&env, BackstopError::MigrationNotActive))
     }
 
+    /// Return the exact scheduled amount received through the emitter's one-time drop.
+    pub fn funded_backfill(env: Env) -> Option<i128> {
+        extend_instance_ttl(&env);
+        env.storage().instance().get(&DataKey::BackfillFundedAmount)
+    }
+
+    /// Return the sum of successful position claims.
+    pub fn total_backfill_claimed(env: Env) -> i128 {
+        extend_instance_ttl(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalBackfillClaimed)
+            .unwrap_or(0)
+    }
+
+    /// Return funded BLND that remains reserved for position claims and rounding dust.
+    pub fn remaining_backfill(env: Env) -> i128 {
+        extend_instance_ttl(&env);
+        let funded: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::BackfillFundedAmount)
+            .unwrap_or_else(|| panic_with_error!(&env, BackstopError::BackfillNotFunded));
+        let claimed: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalBackfillClaimed)
+            .unwrap_or(0);
+        checked_nonnegative_sub_i128(&env, funded, claimed)
+    }
+
+    /// Permissionlessly fund the exact scheduled backfill through the legacy emitter.
+    ///
+    /// The candidate is the sole drop recipient. The call verifies the exact BLND
+    /// balance delta before recording the reserve and can succeed only once.
+    pub fn fund_backfill(env: Env) -> i128 {
+        extend_instance_ttl(&env);
+        if env.storage().instance().has(&DataKey::BackfillFundedAmount) {
+            panic_with_error!(&env, BackstopError::BackfillAlreadyFunded);
+        }
+        let scheduled: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ScheduledBackfill)
+            .unwrap_or_else(|| panic_with_error!(&env, BackstopError::MigrationNotActive));
+        let total_weight: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalMigrationWeight)
+            .unwrap_or_else(|| panic_with_error!(&env, BackstopError::MigrationNotActive));
+        if scheduled <= 0 || scheduled > MAX_BACKFILL_BLND {
+            panic_with_error!(&env, BackstopError::InvalidBackfillFunding);
+        }
+        if total_weight <= 0 {
+            panic_with_error!(&env, BackstopError::NoEligibleWeight);
+        }
+
+        // Record the one-time obligation before either external call. Any
+        // failure below rolls the marker back with the transaction.
+        env.storage()
+            .instance()
+            .set(&DataKey::BackfillFundedAmount, &scheduled);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalBackfillClaimed, &0_i128);
+        let candidate = env.current_contract_address();
+        let token = TokenClient::new(&env, &Self::blnd_token(env.clone()));
+        let balance_before = token.balance(&candidate);
+        let mut recipients = Vec::new(&env);
+        recipients.push_back((candidate.clone(), scheduled));
+        EmitterClient::new(&env, &Self::emitter(env.clone())).drop(&recipients);
+        let received = checked_sub_i128(&env, token.balance(&candidate), balance_before);
+        if received != scheduled {
+            panic_with_error!(&env, BackstopError::InvalidBackfillFunding);
+        }
+
+        BackfillFunded { amount: scheduled }.publish(&env);
+        scheduled
+    }
+
+    /// Claim one position's immutable, time-weighted BLND backfill allocation.
+    ///
+    /// The position owner authorizes the destination. Each surviving position
+    /// can claim once; floor-rounding dust remains in the backfill reserve.
+    pub fn claim_backfill(env: Env, user: Address, pool: Address, recipient: Address) -> i128 {
+        extend_instance_ttl(&env);
+        user.require_auth();
+        let funded: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::BackfillFundedAmount)
+            .unwrap_or_else(|| panic_with_error!(&env, BackstopError::BackfillNotFunded));
+        let total_weight: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalMigrationWeight)
+            .unwrap_or_else(|| panic_with_error!(&env, BackstopError::MigrationNotActive));
+        if total_weight <= 0 {
+            panic_with_error!(&env, BackstopError::NoEligibleWeight);
+        }
+        let backfill_end: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::BackfillEnd)
+            .unwrap_or_else(|| panic_with_error!(&env, BackstopError::MigrationNotActive));
+        let mut position = get_position(&env, &user, &pool);
+        if position.backfill_claimed {
+            panic_with_error!(&env, BackstopError::BackfillAlreadyClaimed);
+        }
+        let weight = position
+            .frozen_weight
+            .unwrap_or_else(|| position_weight(&env, &position, backfill_end));
+        if weight <= 0 {
+            panic_with_error!(&env, BackstopError::NoEligibleWeight);
+        }
+        let amount = proportional_floor(&env, funded, weight, total_weight);
+        if amount <= 0 {
+            panic_with_error!(&env, BackstopError::NoEligibleWeight);
+        }
+        let claimed: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalBackfillClaimed)
+            .unwrap_or(0);
+        let next_claimed = checked_add_i128(&env, claimed, amount);
+        if next_claimed > funded {
+            panic_with_error!(&env, BackstopError::ArithmeticError);
+        }
+
+        position.frozen_weight = Some(weight);
+        position.backfill_claimed = true;
+        set_position(&env, &user, &pool, &position);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalBackfillClaimed, &next_claimed);
+        TokenClient::new(&env, &Self::blnd_token(env.clone())).transfer(
+            &env.current_contract_address(),
+            &recipient,
+            &amount,
+        );
+        BackfillClaimed {
+            amount,
+            pool,
+            recipient,
+            user,
+        }
+        .publish(&env);
+        amount
+    }
+
     /// Quote a position's proportional share of scheduled BLND backpay.
     ///
-    /// This does not transfer BLND; the funding and claim mechanism remains a
-    /// separate milestone and must use the same finalized weights.
+    /// This reports the immutable entitlement and does not transfer BLND or
+    /// subtract an amount that the position has already claimed.
     pub fn quote_backfill(env: Env, user: Address, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         let total_weight: i128 = env
@@ -1480,6 +1664,7 @@ fn get_position(env: &Env, user: &Address, pool: &Address) -> MigrationPosition 
         .get(&key)
         .unwrap_or(MigrationPosition {
             amount: 0,
+            backfill_claimed: false,
             frozen_weight: None,
             time_basis: 0,
         });
@@ -2035,6 +2220,7 @@ mod tests {
     fn prepares_and_finalizes_once() {
         let env = Env::default();
         let incumbent = Address::generate(&env);
+        let blnd_token = Address::generate(&env);
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
         let prefund_token = Address::generate(&env);
@@ -2046,6 +2232,7 @@ mod tests {
             BackstopContract,
             (
                 &emitter_id,
+                &blnd_token,
                 &pool_factory,
                 &legacy_token,
                 &next_token,
@@ -2055,6 +2242,7 @@ mod tests {
         let candidate = BackstopContractClient::new(&env, &candidate_id);
 
         assert_eq!(candidate.backstop_token(), legacy_token);
+        assert_eq!(candidate.blnd_token(), blnd_token);
         assert_eq!(candidate.pool_factory(), pool_factory);
         assert_eq!(candidate.next_backstop_token(), next_token);
         assert_eq!(candidate.prefund_token(), prefund_token);
@@ -2096,6 +2284,7 @@ mod tests {
     fn instance_ttl_covers_and_refreshes_after_two_retry_horizon() {
         let env = Env::default();
         let incumbent = Address::generate(&env);
+        let blnd_token = Address::generate(&env);
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
         let prefund_token = Address::generate(&env);
@@ -2107,6 +2296,7 @@ mod tests {
             BackstopContract,
             (
                 &emitter_id,
+                &blnd_token,
                 &pool_factory,
                 &legacy_token,
                 &next_token,
@@ -2133,6 +2323,7 @@ mod tests {
     fn migration_deposit_requires_user_authorization() {
         let env = Env::default();
         let incumbent = Address::generate(&env);
+        let blnd_token = Address::generate(&env);
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
         let prefund_token = Address::generate(&env);
@@ -2144,6 +2335,7 @@ mod tests {
             BackstopContract,
             (
                 &emitter_id,
+                &blnd_token,
                 &pool_factory,
                 &legacy_token,
                 &next_token,
@@ -2162,6 +2354,7 @@ mod tests {
     fn blnd_usdc_q4w_operations_require_user_authorization() {
         let env = Env::default();
         let incumbent = Address::generate(&env);
+        let blnd_token = Address::generate(&env);
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
         let prefund_token = Address::generate(&env);
@@ -2173,6 +2366,7 @@ mod tests {
             BackstopContract,
             (
                 &emitter_id,
+                &blnd_token,
                 &pool_factory,
                 &legacy_token,
                 &next_token,
@@ -2196,9 +2390,100 @@ mod tests {
     }
 
     #[test]
+    fn backfill_claim_requires_position_owner_authorization() {
+        let env = Env::default();
+        let incumbent = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let blnd_token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
+        let legacy_token = Address::generate(&env);
+        let next_token = Address::generate(&env);
+        let prefund_token = Address::generate(&env);
+        let candidate_id = Address::generate(&env);
+        let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
+        let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
+        env.register_at(
+            &candidate_id,
+            BackstopContract,
+            (
+                &emitter_id,
+                &blnd_token,
+                &pool_factory,
+                &legacy_token,
+                &next_token,
+                &prefund_token,
+            ),
+        );
+        let candidate = BackstopContractClient::new(&env, &candidate_id);
+        let user = Address::generate(&env);
+        let pool = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let amount = 100_i128;
+        StellarAssetClient::new(&env, &blnd_token)
+            .mock_all_auths()
+            .mint(&candidate_id, &amount);
+        env.as_contract(&candidate_id, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::BackfillEnd, &100_u64);
+            env.storage()
+                .instance()
+                .set(&DataKey::BackfillFundedAmount, &amount);
+            env.storage()
+                .instance()
+                .set(&DataKey::TotalBackfillClaimed, &0_i128);
+            env.storage()
+                .instance()
+                .set(&DataKey::TotalMigrationWeight, &10_i128);
+            set_position(
+                &env,
+                &user,
+                &pool,
+                &MigrationPosition {
+                    amount: 10,
+                    backfill_claimed: false,
+                    frozen_weight: Some(10),
+                    time_basis: 0,
+                },
+            );
+        });
+
+        assert!(candidate
+            .try_claim_backfill(&user, &pool, &recipient)
+            .is_err());
+        assert!(!candidate.migration_position(&user, &pool).backfill_claimed);
+        assert_eq!(TokenClient::new(&env, &blnd_token).balance(&recipient), 0);
+
+        assert_eq!(
+            candidate
+                .mock_auths(&[MockAuth {
+                    address: &user,
+                    invoke: &MockAuthInvoke {
+                        contract: &candidate_id,
+                        fn_name: "claim_backfill",
+                        args: (&user, &pool, &recipient).into_val(&env),
+                        sub_invokes: &[],
+                    },
+                }])
+                .claim_backfill(&user, &pool, &recipient),
+            amount
+        );
+        assert_eq!(
+            TokenClient::new(&env, &blnd_token).balance(&recipient),
+            amount
+        );
+        assert!(candidate.migration_position(&user, &pool).backfill_claimed);
+        assert!(candidate
+            .try_claim_backfill(&user, &pool, &recipient)
+            .is_err());
+    }
+
+    #[test]
     fn prefund_deposit_and_withdraw_require_owner_authorization() {
         let env = Env::default();
         let incumbent = Address::generate(&env);
+        let blnd_token = Address::generate(&env);
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
         let token_admin = Address::generate(&env);
@@ -2213,6 +2498,7 @@ mod tests {
             BackstopContract,
             (
                 &emitter_id,
+                &blnd_token,
                 &pool_factory,
                 &legacy_token,
                 &next_token,
@@ -2282,6 +2568,7 @@ mod tests {
     fn constructor_rejects_colliding_migration_and_prefund_assets() {
         let env = Env::default();
         let emitter = Address::generate(&env);
+        let blnd_token = Address::generate(&env);
         let token = Address::generate(&env);
         let next_token = Address::generate(&env);
         let pool_factory = Address::generate(&env);
@@ -2290,7 +2577,14 @@ mod tests {
         env.register_at(
             &candidate,
             BackstopContract,
-            (&emitter, &pool_factory, &token, &next_token, &token),
+            (
+                &emitter,
+                &blnd_token,
+                &pool_factory,
+                &token,
+                &next_token,
+                &token,
+            ),
         );
     }
 
@@ -2299,6 +2593,7 @@ mod tests {
     fn constructor_rejects_incompatible_pool_factory() {
         let env = Env::default();
         let emitter = Address::generate(&env);
+        let blnd_token = Address::generate(&env);
         let pool_factory = Address::generate(&env);
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
@@ -2310,6 +2605,7 @@ mod tests {
             BackstopContract,
             (
                 &emitter,
+                &blnd_token,
                 &pool_factory,
                 &legacy_token,
                 &next_token,
@@ -2323,6 +2619,7 @@ mod tests {
     fn constructor_rejects_pool_factory_bound_to_another_backstop() {
         let env = Env::default();
         let emitter = Address::generate(&env);
+        let blnd_token = Address::generate(&env);
         let candidate = Address::generate(&env);
         let other_backstop = Address::generate(&env);
         let pool_factory = env.register(MockPoolFactory, (&other_backstop,));
@@ -2335,6 +2632,7 @@ mod tests {
             BackstopContract,
             (
                 &emitter,
+                &blnd_token,
                 &pool_factory,
                 &legacy_token,
                 &next_token,

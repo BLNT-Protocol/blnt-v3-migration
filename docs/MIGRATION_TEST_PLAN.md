@@ -87,6 +87,21 @@ The test suite must verify:
   undistributed.
 - No deployer, operator, treasury, or general migration-participant award can
   be funded, and backfill cannot be funded or claimed twice.
+- Backfill funding is permissionless only after activation and invokes the
+  published emitter with one recipient: the candidate itself.
+- Funding records exactly the scheduled amount only when the configured BLND
+  balance increases by that amount; an unexpected delta rolls back the drop and
+  the candidate marker atomically.
+- Funding rejects when no surviving migration weight exists, preventing a
+  scheduled drop from becoming stranded discretionary capital.
+- A claim requires the migration-position owner's authorization, may pay an
+  owner-selected recipient, and uses frozen position and total-weight
+  checkpoints without depositor iteration.
+- Post-migration deposits receive zero backfill, and a position cannot claim
+  its frozen entitlement twice.
+- Funded, aggregate-claimed, and remaining-reserve reads conserve the initial
+  drop exactly. Per-position floor-rounding dust remains reserved in the
+  candidate and cannot become an ongoing emission or discretionary award.
 
 ## Candidate backstop
 

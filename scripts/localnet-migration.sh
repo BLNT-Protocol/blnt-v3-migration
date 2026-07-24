@@ -612,6 +612,7 @@ command_deploy() {
     deployed_candidate_id="$(deploy_wasm \
         "deploy-v3-backstop" "${V3_BACKSTOP_WASM}" "${CANDIDATE_SALT}" \
         --emitter "${emitter_id}" \
+        --blnd_token "${blnd_id}" \
         --pool_factory "${v3_factory_id}" \
         --legacy_backstop_token "${legacy_token_id}" \
         --next_backstop_token "${next_token_id}" \

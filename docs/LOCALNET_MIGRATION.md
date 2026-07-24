@@ -25,11 +25,12 @@ no continuing protocol authority. The exercise uses only the legacy emitter's
 permissionless queue and swap mechanism; it deploys no governance, multisig,
 administrator recovery, or alternate upgrade path.
 
-Successful migration awards zero discretionary BLND. The current runner does
-not invoke the emitter's initial-drop facility. A future backfill-funding path
-may use that facility only for the scheduled, time-weighted BLND:USDC backfill,
-capped at 10 million BLND; it must leave the otherwise available allocation of
-up to 40 million BLND undistributed.
+Successful migration awards zero discretionary BLND. The candidate exposes a
+permissionless post-activation funding path that invokes the emitter's
+initial-drop facility only for the scheduled, time-weighted BLND:USDC backfill,
+capped at 10 million BLND. The current runner does not yet invoke that path, so
+the otherwise available allocation of up to 40 million BLND remains
+undistributed.
 
 ## Prerequisites
 

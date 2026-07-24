@@ -832,13 +832,35 @@ successful migration, apart from deterministic integer-rounding dust.
 Finalization and claims MUST use accumulator/checkpoint accounting and MUST NOT
 iterate over all depositors. The funding transaction MUST reject an amount
 other than the immutable scheduled backfill obligation and MUST NOT create a
-separate migration award. Claim authority and the rounding-dust destination
-remain separate implementation decisions; neither may redirect value to a
-discretionary migration recipient.
+separate migration award.
+
+The candidate MUST store the BLND token address immutably at construction.
+After migration activation, any caller MAY invoke the one-time backfill-funding
+entry point. The candidate MUST call the legacy emitter's initial-drop facility
+with exactly one recipient, the candidate itself, and exactly the scheduled
+amount \(B\). It MUST verify that its configured BLND balance increased by
+exactly \(B\) before committing the funded reserve. A failed emitter call,
+unexpected token-balance delta, missing eligible weight, or repeat funding
+attempt MUST fail atomically.
+
+Claims MUST use the frozen global weight and frozen per-position checkpoint in
+constant time. The position owner MUST authorize the claim and MAY select its
+recipient. Each position MAY claim at most once. A successful claim MUST mark
+the position claimed and update the aggregate claimed amount before transferring
+BLND; failure of any later operation MUST roll back the complete claim.
+
+Each position receives the floor-rounded amount in \(B_i\). The resulting
+integer dust MUST remain in the candidate's segregated backfill reserve. It MUST
+NOT be withdrawn, reassigned, counted as ongoing emissions, or distributed to a
+discretionary recipient. The candidate MUST expose funded, claimed, and
+remaining-reserve totals so this invariant can be audited without iterating over
+positions.
 
 Ongoing accounting MUST be based on BLND actually received after the emitter
 changes recipients. No interval or position may earn under both regimes unless
-the specification explicitly intends and tests that result.
+the specification explicitly intends and tests that result. Ongoing-emission
+accounting MUST exclude the remaining backfill reserve even though both balances
+are held by the top-level candidate.
 
 ### 10.1 Ongoing backstop-depositor emissions
 
@@ -1064,14 +1086,15 @@ cross-version legacy-emitter migration harness, the candidate's
 pool-attributed continuous BLND:USDC shares, time-weighted migration
 checkpoints, isolated single-asset prefunding lane, canonical asset-neutral
 12,500-USDC entry and 10,000-USDC maintenance activation-policy arithmetic, and
-the 17-day bounded withdrawal queue, an immutable Protocol-27 pool factory, and
-a fail-closed pool callback derived directly from three bounded canonical
+the 17-day bounded withdrawal queue, exact one-time backfill funding and
+owner-authorized constant-time claims, an immutable Protocol-27 pool factory,
+and a fail-closed pool callback derived directly from three bounded canonical
 record maps. The local runner deploys independently issued assets, a coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
 local run, the public-testnet exercise, the lending, auction, and waterfall
 entry points that invoke those record transitions, the valuation adapter,
-pool-status integration, and BLND funding and claims remain intentionally
+pool-status integration, and ongoing BLND-emission accrual remain intentionally
 unimplemented.
 
 New economic features should be introduced only after the corresponding open

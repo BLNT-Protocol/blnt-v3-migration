@@ -10,8 +10,9 @@ The runner uses independently issued local assets:
 
 - `BLND`
 - `BLNDUSDC`, representing the legacy BLND:USDC backstop token
-- `BLNDXLM`, representing the candidate's next designated token
-- `USDC`, representing the independently configured prefunding token
+- `BLNDXLM`, representing the candidate's next designated token and second
+  backstop tier
+- `USDC`, representing the plain-USDC third backstop tier
 
 These assets test token custody and migration behavior. They do not attempt to
 reproduce Comet pricing or liquidity behavior.

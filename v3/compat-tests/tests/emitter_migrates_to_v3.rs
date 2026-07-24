@@ -535,6 +535,24 @@ fn blnd_usdc_q4w_is_bounded_and_uses_fifo_withdrawal_and_lifo_dequeue() {
         fixture.candidate.total_blnd_usdc_active_shares(),
         50 * SCALAR_7
     );
+    assert_eq!(
+        fixture
+            .candidate
+            .tier_shares(&v3_backstop::BackstopTier::BlndUsdc, &user, &pool,),
+        100 * SCALAR_7
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .pool_tier_queued_shares(&v3_backstop::BackstopTier::BlndUsdc, &pool,),
+        50 * SCALAR_7
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .total_tier_active_shares(&v3_backstop::BackstopTier::BlndUsdc),
+        50 * SCALAR_7
+    );
 
     fixture
         .candidate
@@ -711,6 +729,7 @@ fn legacy_emitter_finalizes_migration_to_v3_wasm() {
     );
     assert_eq!(fixture.candidate.next_backstop_token(), fixture.next_token);
     assert_eq!(fixture.candidate.prefund_token(), fixture.prefund_token);
+    assert_eq!(fixture.candidate.usdc_token(), fixture.prefund_token);
     assert_ne!(fixture.candidate.prefund_token(), fixture.next_token);
     assert_eq!(fixture.candidate.emitter(), fixture.emitter.address);
     assert_eq!(
@@ -1406,36 +1425,52 @@ fn withdrawn_shares_forfeit_weight_to_time_weighted_survivors() {
 }
 
 #[test]
-fn post_migration_prefunding_is_conserved_and_isolated_from_migration() {
+fn standard_tiers_are_pool_attributed_queued_and_conserved() {
     let fixture = Fixture::create();
-    let pool = Address::generate(&fixture.env);
+    let pool_client = fixture.loss_aware_pool(false);
+    let pool = pool_client.address.clone();
     let depositor = Address::generate(&fixture.env);
     let recipient = Address::generate(&fixture.env);
-    let post_activation_depositor = Address::generate(&fixture.env);
-    let prefund_token = StellarAssetClient::new(&fixture.env, &fixture.prefund_token);
-    prefund_token.mint(&depositor, &(300 * SCALAR_7));
+    let blnd_xlm = StellarAssetClient::new(&fixture.env, &fixture.next_token);
+    let usdc = StellarAssetClient::new(&fixture.env, &fixture.prefund_token);
+    let blnd_xlm_tier = v3_backstop::BackstopTier::BlndXlm;
+    let usdc_tier = v3_backstop::BackstopTier::Usdc;
 
+    blnd_xlm.mint(&depositor, &(100 * SCALAR_7));
+    usdc.mint(&depositor, &(80 * SCALAR_7));
     fixture
         .candidate
-        .deposit_prefund(&depositor, &pool, &(300 * SCALAR_7));
+        .deposit_blnd_xlm(&depositor, &pool, &(100 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_usdc(&depositor, &pool, &(80 * SCALAR_7));
 
     assert_eq!(
-        fixture.candidate.prefund_shares(&depositor, &pool),
-        300 * SCALAR_7
+        fixture
+            .candidate
+            .tier_shares(&blnd_xlm_tier, &depositor, &pool),
+        100 * SCALAR_7
     );
-    assert_eq!(fixture.candidate.pool_prefund_shares(&pool), 300 * SCALAR_7);
-    assert_eq!(fixture.candidate.total_prefund_shares(), 300 * SCALAR_7);
     assert_eq!(
-        TokenClient::new(&fixture.env, &fixture.prefund_token).balance(&fixture.candidate.address),
-        300 * SCALAR_7
+        fixture.candidate.tier_shares(&usdc_tier, &depositor, &pool),
+        80 * SCALAR_7
     );
-    prefund_token.mint(&fixture.candidate.address, &(7 * SCALAR_7));
-    assert_eq!(fixture.candidate.total_prefund_shares(), 300 * SCALAR_7);
     assert_eq!(
-        TokenClient::new(&fixture.env, &fixture.prefund_token).balance(&fixture.candidate.address),
-        307 * SCALAR_7
+        fixture.candidate.pool_tier_shares(&blnd_xlm_tier, &pool),
+        100 * SCALAR_7
     );
-    assert_eq!(fixture.legacy_token.balance(&fixture.candidate.address), 0);
+    assert_eq!(
+        fixture.candidate.pool_tier_shares(&usdc_tier, &pool),
+        80 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_tier_shares(&blnd_xlm_tier),
+        100 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_tier_shares(&usdc_tier),
+        80 * SCALAR_7
+    );
     assert_eq!(
         fixture
             .candidate
@@ -1443,12 +1478,154 @@ fn post_migration_prefunding_is_conserved_and_isolated_from_migration() {
             .amount,
         0
     );
-    assert_eq!(
-        fixture.candidate.migration_status(),
-        v3_backstop::MigrationStatus::Pending
-    );
     assert!(fixture.candidate.try_begin_migration().is_err());
 
+    // Unattributed direct transfers remain in custody but never mint shares.
+    blnd_xlm.mint(&depositor, &(7 * SCALAR_7));
+    usdc.mint(&depositor, &(7 * SCALAR_7));
+    TokenClient::new(&fixture.env, &fixture.next_token).transfer(
+        &depositor,
+        &fixture.candidate.address,
+        &(7 * SCALAR_7),
+    );
+    TokenClient::new(&fixture.env, &fixture.prefund_token).transfer(
+        &depositor,
+        &fixture.candidate.address,
+        &(7 * SCALAR_7),
+    );
+    assert_eq!(
+        fixture.candidate.total_tier_shares(&blnd_xlm_tier),
+        100 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_tier_shares(&usdc_tier),
+        80 * SCALAR_7
+    );
+
+    let blnd_xlm_entry =
+        fixture
+            .candidate
+            .queue_blnd_xlm_withdrawal(&depositor, &pool, &(30 * SCALAR_7));
+    let usdc_entry = fixture
+        .candidate
+        .queue_usdc_withdrawal(&depositor, &pool, &(20 * SCALAR_7));
+    assert_eq!(
+        blnd_xlm_entry.expires_at,
+        fixture.env.ledger().timestamp() + 17 * 24 * 60 * 60
+    );
+    assert_eq!(usdc_entry.expires_at, blnd_xlm_entry.expires_at);
+    fixture
+        .candidate
+        .dequeue_blnd_xlm_withdrawal(&depositor, &pool, &(5 * SCALAR_7));
+    assert_eq!(
+        fixture
+            .candidate
+            .tier_queued_shares(&blnd_xlm_tier, &depositor, &pool),
+        25 * SCALAR_7
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .tier_active_shares(&blnd_xlm_tier, &depositor, &pool),
+        75 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.pool_tier_queued_shares(&usdc_tier, &pool),
+        20 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_tier_active_shares(&usdc_tier),
+        60 * SCALAR_7
+    );
+    assert!(fixture
+        .candidate
+        .try_withdraw_blnd_xlm(&depositor, &pool, &SCALAR_7, &recipient)
+        .is_err());
+
+    fixture
+        .env
+        .ledger()
+        .set_timestamp(blnd_xlm_entry.expires_at.max(usdc_entry.expires_at));
+    pool_client.set_withdrawal_allowed(&false);
+    assert!(fixture
+        .candidate
+        .try_withdraw_usdc(&depositor, &pool, &(20 * SCALAR_7), &recipient)
+        .is_err());
+    pool_client.set_withdrawal_allowed(&true);
+    fixture
+        .candidate
+        .withdraw_blnd_xlm(&depositor, &pool, &(25 * SCALAR_7), &recipient);
+    fixture
+        .candidate
+        .withdraw_usdc(&depositor, &pool, &(20 * SCALAR_7), &recipient);
+
+    assert_eq!(
+        fixture.candidate.total_tier_shares(&blnd_xlm_tier),
+        75 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_tier_shares(&usdc_tier),
+        60 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_tier_queued_shares(&blnd_xlm_tier),
+        0
+    );
+    assert_eq!(fixture.candidate.total_tier_queued_shares(&usdc_tier), 0);
+    assert_eq!(blnd_xlm.balance(&recipient), 25 * SCALAR_7);
+    assert_eq!(usdc.balance(&recipient), 20 * SCALAR_7);
+    assert_eq!(blnd_xlm.balance(&fixture.candidate.address), 82 * SCALAR_7);
+    assert_eq!(usdc.balance(&fixture.candidate.address), 67 * SCALAR_7);
+}
+
+#[test]
+fn standard_tier_deposits_require_a_compatible_registered_pool() {
+    let fixture = Fixture::create();
+    let unregistered_pool = Address::generate(&fixture.env);
+    let incompatible_pool = Address::generate(&fixture.env);
+    fixture.pool_factory.set_pool(&incompatible_pool);
+    let depositor = Address::generate(&fixture.env);
+    let blnd_xlm = StellarAssetClient::new(&fixture.env, &fixture.next_token);
+    let usdc = StellarAssetClient::new(&fixture.env, &fixture.prefund_token);
+    blnd_xlm.mint(&depositor, &(2 * SCALAR_7));
+    usdc.mint(&depositor, &(2 * SCALAR_7));
+
+    assert!(fixture
+        .candidate
+        .try_deposit_blnd_xlm(&depositor, &unregistered_pool, &SCALAR_7)
+        .is_err());
+    assert!(fixture
+        .candidate
+        .try_deposit_usdc(&depositor, &unregistered_pool, &SCALAR_7)
+        .is_err());
+    assert!(fixture
+        .candidate
+        .try_deposit_blnd_xlm(&depositor, &incompatible_pool, &SCALAR_7)
+        .is_err());
+    assert!(fixture
+        .candidate
+        .try_deposit_usdc(&depositor, &incompatible_pool, &SCALAR_7)
+        .is_err());
+    assert_eq!(blnd_xlm.balance(&depositor), 2 * SCALAR_7);
+    assert_eq!(usdc.balance(&depositor), 2 * SCALAR_7);
+    assert_eq!(
+        fixture
+            .candidate
+            .total_tier_shares(&v3_backstop::BackstopTier::BlndXlm),
+        0
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .total_tier_shares(&v3_backstop::BackstopTier::Usdc),
+        0
+    );
+}
+
+#[test]
+fn standard_tier_deposits_remain_available_after_migration() {
+    let fixture = Fixture::create();
+    let pool = fixture.loss_aware_pool(true).address.clone();
     fixture.fund_qualifying_balances();
     fixture.queue();
     fixture.enter_preparation_window();
@@ -1456,33 +1633,55 @@ fn post_migration_prefunding_is_conserved_and_isolated_from_migration() {
     fixture.unlock();
     fixture.candidate.finalize_migration();
 
-    assert_eq!(
-        fixture.candidate.scheduled_backfill(),
-        QUEUE_SECONDS as i128 * SCALAR_7
-    );
-    assert!(fixture.candidate.try_fund_backfill().is_err());
-    assert_eq!(fixture.candidate.total_prefund_shares(), 300 * SCALAR_7);
-
+    let depositor = Address::generate(&fixture.env);
+    let blnd_xlm = StellarAssetClient::new(&fixture.env, &fixture.next_token);
+    let usdc = StellarAssetClient::new(&fixture.env, &fixture.prefund_token);
+    blnd_xlm.mint(&depositor, &SCALAR_7);
+    usdc.mint(&depositor, &SCALAR_7);
     fixture
         .candidate
-        .withdraw_prefund(&depositor, &pool, &(100 * SCALAR_7), &recipient);
-    assert_eq!(
-        fixture.candidate.prefund_shares(&depositor, &pool),
-        200 * SCALAR_7
-    );
-    assert_eq!(
-        TokenClient::new(&fixture.env, &fixture.prefund_token).balance(&recipient),
-        100 * SCALAR_7
-    );
+        .deposit_blnd_xlm(&depositor, &pool, &SCALAR_7);
+    fixture.candidate.deposit_usdc(&depositor, &pool, &SCALAR_7);
 
-    prefund_token.mint(&post_activation_depositor, &(50 * SCALAR_7));
+    assert_eq!(
+        fixture
+            .candidate
+            .tier_shares(&v3_backstop::BackstopTier::BlndXlm, &depositor, &pool,),
+        SCALAR_7
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .tier_shares(&v3_backstop::BackstopTier::Usdc, &depositor, &pool,),
+        SCALAR_7
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .migration_position(&depositor, &pool)
+            .amount,
+        0
+    );
+}
+
+#[test]
+fn standard_tier_q4w_rejects_more_than_twenty_entries() {
+    let fixture = Fixture::create();
+    let pool = fixture.loss_aware_pool(true).address.clone();
+    let depositor = Address::generate(&fixture.env);
+    let usdc = StellarAssetClient::new(&fixture.env, &fixture.prefund_token);
+    usdc.mint(&depositor, &(21 * SCALAR_7));
     fixture
         .candidate
-        .deposit_prefund(&post_activation_depositor, &pool, &(50 * SCALAR_7));
-    assert_eq!(fixture.candidate.pool_prefund_shares(&pool), 250 * SCALAR_7);
-    assert_eq!(fixture.candidate.total_prefund_shares(), 250 * SCALAR_7);
+        .deposit_usdc(&depositor, &pool, &(21 * SCALAR_7));
+
+    for _ in 0..20 {
+        fixture
+            .candidate
+            .queue_usdc_withdrawal(&depositor, &pool, &SCALAR_7);
+    }
     assert!(fixture
         .candidate
-        .try_withdraw_prefund(&depositor, &pool, &(200 * SCALAR_7 + 1), &recipient,)
+        .try_queue_usdc_withdrawal(&depositor, &pool, &SCALAR_7)
         .is_err());
 }

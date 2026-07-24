@@ -35,8 +35,8 @@ exist before and after migration; migration freezes only their temporary
 backfill weight, and later deposits receive no retroactive backfill. It
 stores one immutable v3 pool-factory address, validates both the factory
 interface and its immutable binding to this candidate during construction, and
-accepts BLND:USDC deposits only for
-factory-registered pools that expose the required loss-state callback.
+accepts accounted deposits in all three tiers only for factory-registered
+pools that expose the required loss-state callback.
 Validation occurs before token custody or share accounting. The callback is a
 permanent compatibility boundary that factory-approved pool upgrades must
 preserve. After activation, any caller can fund the exact scheduled backfill
@@ -46,8 +46,8 @@ floor-rounded claim per frozen position without iteration; remaining integer
 dust stays segregated in the backfill reserve. It intentionally does not yet
 implement authoritative pool-status activation, loss execution, or
 ongoing-emission accrual.
-BLND:USDC withdrawals use a bounded 17-day queue
-with at most 20 entries per user and pool, FIFO withdrawal, and LIFO dequeue.
+All three tier withdrawals use independent bounded 17-day queues with at most
+20 entries per user, pool, and tier, FIFO withdrawal, and LIFO dequeue.
 Withdrawal also requires an affirmative, read-only response from the attributed
 pool's `backstop_withdrawal_allowed` interface; missing, failed, and false
 responses block the transfer. Queued shares remain in custody and retain
@@ -57,11 +57,12 @@ integrations. Queued shares remain take-rate eligible until actual withdrawal,
 and remain proportionally exposed to tier losses through the same exchange
 rate as active shares, matching the inherited v2 economics. Total accounted
 in-custody shares are the canonical take-rate and within-tier loss-allocation
-input. The workspace also provides one independently configured SEP-41
-prefunding lane with exact one-token/one-share accounting.
-Prefund shares are isolated from migration and may be deposited or withdrawn
-before or after activation; they do not yet count toward activation, losses,
-backfill, or emissions.
+input. BLND:XLM and plain USDC now have independent user, pool, queued, active,
+and global share accounting. Both may be deposited before or after migration;
+neither qualifies the incumbent emitter or earns migration backfill. Until
+loss execution is implemented, their deposits and withdrawals use exact
+one-token/one-share accounting. A future loss engine must introduce checked
+share-to-asset conversion before it can change redemption value.
 
 The v3 pool stores bounded canonical record maps for backstop liabilities,
 committed losses or auctions, and unresolved bad debt. It derives aggregate

@@ -110,8 +110,9 @@ The v3 tests must verify:
 - The candidate stores one immutable v3 pool-factory address and rejects a
   constructor configuration that does not expose the required `backstop` and
   `is_pool` interfaces or is bound to another backstop.
-- BLND:USDC deposits reject unregistered pools and registered addresses without
-  the required loss-state callback before transferring tokens or minting shares.
+- Deposits into every accounted tier reject unregistered pools and registered
+  addresses without the required loss-state callback before transferring
+  tokens or minting shares.
 - A registered compatible pool may accept new deposits while its callback
   blocks withdrawal.
 - Once pool WASM upgrades are implemented, upgrade tests preserve the
@@ -144,10 +145,10 @@ The v3 tests must verify:
 - A withdrawal updates the same tier totals on either side of migration; a
   pre-migration withdrawal additionally forfeits the withdrawn shares'
   proportional backfill weight.
-- BLND:USDC withdrawals require a 17-day Q4W entry and consume expired entries
+- Every tier requires a 17-day Q4W entry and consumes expired entries
   oldest-first.
-- BLND:USDC dequeue operations restore active shares newest-first.
-- Each user/pool BLND:USDC queue is bounded to 20 entries.
+- Every tier's dequeue operations restore active shares newest-first.
+- Each user/pool/tier queue is bounded to 20 entries.
 - Queued shares remain in custody and in the raw migration balance, retain
   backfill eligibility until actual withdrawal, and are exposed separately
   from active shares so canonical activation and ongoing-emission integrations
@@ -165,15 +166,18 @@ The v3 tests must verify:
   this backstop has no committed or unresolved loss.
 - Direct BLND:USDC transfers can affect the emitter's raw balance comparison
   but do not mint tier shares or receive any other protocol role.
-- The prefunding token is configured independently from both the legacy
-  migration token and the emitter's next designated token.
-- Prefund deposits mint one share per token base unit and conserve exact user,
-  pool, and global totals through withdrawal.
-- Prefund shares can be deposited before and after migration and remain
-  immediately withdrawable while they have no activation or loss role.
-- Prefund balances do not qualify the legacy emitter, earn migration backfill,
-  or change scheduled backfill.
-- A direct transfer of the prefunding token does not create accounted shares.
+- The BLND:USDC, BLND:XLM, and plain-USDC token contracts are distinct.
+- BLND:XLM and USDC deposits mint one share per token base unit while no gain
+  or loss execution exists and conserve exact user, pool, queued, active, and
+  global totals through withdrawal.
+- BLND:XLM and USDC shares can be deposited before and after migration and use
+  the same bounded Q4W and pool loss-safety callback as BLND:USDC.
+- BLND:XLM and USDC balances do not qualify the incumbent emitter, earn
+  migration backfill, or change scheduled backfill.
+- Direct transfers of BLND:XLM or USDC do not create accounted shares.
+- Before loss execution can alter a tier's redemption value, tests MUST cover
+  the checked share-to-asset exchange rate, conservative rounding, dust
+  handling, and proportional loss exposure of active and queued shares.
 - One BLND:USDC position may serve migration, activation, emissions, and loss
   roles, but its shares cannot be duplicated within any calculation.
 - The active-share interface excludes queued withdrawals; future canonical

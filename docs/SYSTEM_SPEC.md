@@ -323,12 +323,13 @@ waterfall, and subject to the applicable withdrawal rules.
 The backstop MUST store one immutable v3 pool-factory address, MUST verify the
 factory's `backstop` and `is_pool` interfaces during construction, and MUST
 reject a factory whose immutable backstop is not the candidate itself. Before
-accepting an accounted BLND:USDC deposit, it MUST verify that the attributed
-pool is registered by that factory and that the pool exposes the fail-closed
-withdrawal callback. Registration or interface failure MUST abort before
-custody or accounting changes. The callback's current boolean result does not
-gate a deposit: a pool with an existing loss MAY accept new loss-absorbing
-capital, while later withdrawal remains blocked until the pool reports it safe.
+accepting an accounted deposit into any tier, it MUST verify that the
+attributed pool is registered by that factory and that the pool exposes the
+fail-closed withdrawal callback. Registration or interface failure MUST abort
+before custody or accounting changes. The callback's current boolean result
+does not gate a deposit: a pool with an existing loss MAY accept new
+loss-absorbing capital, while later withdrawal remains blocked until the pool
+reports it safe.
 
 `backstop_withdrawal_allowed(backstop)` is a permanent compatibility boundary.
 Every factory-approved pool MUST preserve its signature and fail-closed
@@ -388,49 +389,57 @@ Raw BLND:USDC tokens transferred directly to the candidate may affect the
 legacy emitter's balance comparison, but they MUST NOT create tier shares,
 activation value, loss capacity, take-rate eligibility, or emission weight.
 
-### 7.2.2 Initial single-asset prefunding lane
+### 7.2.2 BLND:XLM and plain-USDC tiers
 
-Before activation policy or loss handling is implemented, the candidate MAY
-configure one post-migration prefunding token independently from both the
-legacy migration token and the emitter's next designated token. The configured
-prefunding token MUST differ from the legacy migration token so the same direct
-balance cannot be counted as both legacy migration capital and post-migration
-prefunding. It MAY equal the next designated token only through explicit
-constructor configuration.
+The candidate MUST configure three distinct token contracts: the incumbent
+BLND:USDC token, the emitter's next designated token representing BLND:XLM,
+and plain USDC. The constructor and legacy read interface retain the name
+`prefund_token` for plain USDC for deployment compatibility; `usdc_token`
+provides the canonical read name.
 
-This initial prefunding lane MUST:
+BLND:XLM and USDC MUST:
 
-- Issue exactly one prefund share for each token base unit transferred through
-  the deposit entry point, with no conversion rounding or dust.
-- Attribute shares to depositor, pool, and the immutable configured token.
-- Maintain checked user, pool, and global share totals.
-- Remain separate from legacy emitter qualification, migration positions,
-  backfill weights, activation, loss capacity, and ongoing emissions.
-- Permit deposits before and after migration activation.
-- Permit immediate withdrawal while the shares remain ineligible for
-  activation and are not committed to losses.
-- Preserve exact token conservation across deposits and withdrawals.
+- Accept pool-attributed deposits before and after emitter migration.
+- Maintain independent, checked user, pool, and global total-share and
+  queued-share ledgers.
+- Participate in the same bounded Q4W and fail-closed pool-withdrawal rules as
+  BLND:USDC.
+- Remain separate from the incumbent emitter comparison, migration positions,
+  and migration-backfill weights. BLND:XLM and USDC deposits receive no
+  migration backfill.
+- Supply activation, take-rate, and waterfall inputs through the eligibility
+  rules defined for their respective tiers. BLND:XLM, but not plain USDC, is
+  eligible for ongoing BLND-emission weight.
 
-Direct token transfers that do not use the deposit entry point MUST NOT create
-shares or count toward any protocol calculation. This prefunding mechanism does
-not approve the configured token for activation or loss absorption; the full
-asset configuration in Section 7.1 remains required before either use.
+Until gain and loss execution exists, each token base unit transferred through
+an accounted BLND:XLM or USDC deposit MUST mint exactly one share and each
+withdrawn share MUST redeem exactly one token base unit. Before any operation
+can change a tier's asset-per-share value, the implementation MUST add a
+checked share-to-asset exchange rate and specify conservative conversion
+rounding and dust handling. Active and queued shares MUST use that same
+exchange rate and absorb changes proportionally.
+
+Direct BLND:XLM or USDC transfers that do not use an attributed deposit entry
+point MUST NOT create shares or count toward activation, loss capacity,
+take-rate allocation, backfill, or emissions.
 
 ### 7.3 Withdrawals
 
-The continuous BLND:USDC tier inherits the v2 queue-for-withdrawal shape:
+All three backstop tiers inherit the v2 queue-for-withdrawal shape:
 
 - Queuing creates a position with an expiry exactly 17 days after the queue
   transaction.
-- A user may have at most 20 queue entries for a pool.
+- A user may have at most 20 queue entries for each pool and tier.
 - Expired withdrawals consume entries oldest-first.
 - Dequeue operations restore active shares newest-first and MAY occur before or
   after expiry.
-- Queued shares remain in contract custody and continue contributing to the
-  legacy emitter's raw balance comparison until the tokens are withdrawn.
-- Queuing alone does not forfeit migration-backfill weight. If the tokens are
-  actually withdrawn before emitter migration succeeds, the withdrawn shares
-  forfeit their proportional accumulated backfill weight.
+- Queued BLND:USDC shares remain in contract custody and continue contributing
+  to the legacy emitter's raw balance comparison until the tokens are
+  withdrawn.
+- Queuing BLND:USDC alone does not forfeit migration-backfill weight. If the
+  tokens are actually withdrawn before emitter migration succeeds, the
+  withdrawn shares forfeit their proportional accumulated backfill weight.
+  BLND:XLM and USDC never receive migration-backfill weight.
 - Queued shares are excluded from activation value and ongoing BLND-emission
   weight immediately upon queueing.
 - Queued shares remain eligible for take-rate allocation while they remain in
@@ -1065,12 +1074,12 @@ implemented:
 2. Add an isolated v3 backstop crate with emitter-compatible entry points.
 3. Implement continuous BLND:USDC tier deposits and migration-backfill
    checkpoints.
-4. Add one independently configured, prefundable post-migration backstop
-   asset without activation, loss, backfill, or emission eligibility.
+4. Add independent pool-attributed BLND:XLM and plain-USDC tier ledgers with
+   bounded Q4W accounting; neither tier receives migration backfill.
 5. Implement a canonical, testable activation-policy interface.
-6. Implement the bounded BLND:USDC withdrawal queue and its fail-closed pool
-   callback, then connect that callback to canonical loss state without forced
-   conversion.
+6. Implement bounded withdrawal queues for all three tiers and their
+   fail-closed pool callback, then connect that callback to canonical loss
+   state without forced conversion.
 7. Complete native, WASM, local-network, and testnet migration exercises. The
    local-network lane uses exact production queue constants, so its
    Quickstart runner is resumable across the wall-clock queue rather than
@@ -1084,12 +1093,13 @@ portion of milestone 7 are
 represented by the frozen v2 baseline, isolated Protocol-27 backstop crate,
 cross-version legacy-emitter migration harness, the candidate's
 pool-attributed continuous BLND:USDC shares, time-weighted migration
-checkpoints, isolated single-asset prefunding lane, canonical asset-neutral
-12,500-USDC entry and 10,000-USDC maintenance activation-policy arithmetic, and
-the 17-day bounded withdrawal queue, exact one-time backfill funding and
-owner-authorized constant-time claims, an immutable Protocol-27 pool factory,
-and a fail-closed pool callback derived directly from three bounded canonical
-record maps. The local runner deploys independently issued assets, a coherent
+checkpoints, independent pool-attributed BLND:XLM and plain-USDC share ledgers,
+canonical asset-neutral 12,500-USDC entry and 10,000-USDC maintenance
+activation-policy arithmetic, and 17-day bounded withdrawal queues for all
+three tiers, exact one-time backfill funding and owner-authorized constant-time
+claims, an immutable Protocol-27 pool factory, and a fail-closed pool callback
+derived directly from three bounded canonical record maps. The local runner
+deploys independently issued assets, a coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
 local run, the public-testnet exercise, the lending, auction, and waterfall

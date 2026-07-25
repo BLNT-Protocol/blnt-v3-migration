@@ -321,7 +321,6 @@ pub(crate) fn submit(
         from.require_auth();
     }
 
-    let lending_config = config(env);
     let mut user = positions(env, from);
     let previous_position_count = user.effective_count();
     let mut transfers = Transfers::new(env);
@@ -496,26 +495,14 @@ pub(crate) fn submit(
     if auction::has_user_liquidation(env, from) {
         panic_with_error!(env, PoolError::AuctionInProgress);
     }
-    if user.effective_count() > lending_config.max_positions
-        && user.effective_count() > previous_position_count
-    {
-        panic_with_error!(env, PoolError::TooManyPositions);
-    }
+    require_max_positions(env, &user, previous_position_count);
     for (asset, _) in utilization_checks {
         let reserve = accrue_reserve(env, &asset);
         if utilization(env, &reserve) > i128::from(reserve.config.max_util) {
             panic_with_error!(env, PoolError::InvalidUtilization);
         }
     }
-    if health_check && !user.liabilities.is_empty() {
-        let result = calculate_health_with_prices(env, &user, &mut prices);
-        if !result.healthy {
-            panic_with_error!(env, PoolError::InvalidHealthFactor);
-        }
-        if result.collateral_base < lending_config.min_collateral {
-            panic_with_error!(env, PoolError::MinimumCollateralNotMet);
-        }
-    }
+    require_health_if(env, &user, &mut prices, health_check);
     if from == &get_backstop(env) {
         for (asset, _) in liability_checks {
             let reserve = reserve_config(env, &asset);
@@ -566,6 +553,43 @@ pub(crate) fn submit(
     }
     set_positions(env, from, &user);
     user
+}
+
+pub(crate) fn require_position_limits(
+    env: &Env,
+    positions: &Positions,
+    previous_position_count: u32,
+    prices: &mut Map<Address, PriceQuote>,
+) {
+    require_max_positions(env, positions, previous_position_count);
+    require_health_if(env, positions, prices, true);
+}
+
+fn require_max_positions(env: &Env, positions: &Positions, previous_position_count: u32) {
+    let lending_config = config(env);
+    if positions.effective_count() > lending_config.max_positions
+        && positions.effective_count() > previous_position_count
+    {
+        panic_with_error!(env, PoolError::TooManyPositions);
+    }
+}
+
+fn require_health_if(
+    env: &Env,
+    positions: &Positions,
+    prices: &mut Map<Address, PriceQuote>,
+    health_check: bool,
+) {
+    if health_check && !positions.liabilities.is_empty() {
+        let lending_config = config(env);
+        let result = calculate_health_with_prices(env, positions, prices);
+        if !result.healthy {
+            panic_with_error!(env, PoolError::InvalidHealthFactor);
+        }
+        if result.collateral_base < lending_config.min_collateral {
+            panic_with_error!(env, PoolError::MinimumCollateralNotMet);
+        }
+    }
 }
 
 fn validate_lending_config(env: &Env, config: &LendingConfig) {

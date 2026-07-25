@@ -79,13 +79,16 @@ operator. Its SDK-27 lending core executes the six non-auction v2 request
 types against immutable reserve configuration with checked interest, share,
 health, authorization, and token-transfer accounting. The pool also supports
 permissionless v2-compatible user-liquidation auctions and fails closed before
-any fill that would require bad-debt settlement. It can safely prepare one
-pool-authorized, single-tier, 120%-of-debt backstop lot by selecting the first
-tier with at least $200 of verified value in strict BLND:USDC LP, BLND:XLM LP,
-then plain-USDC order, while leaving bad-debt handoff, auction fills, and loss
-settlement disabled. The three-tier backstop maintains pool-local checked
-asset/share exchange rates so active and queued shares can absorb future losses
-proportionally.
+any user fill that would require an unimplemented bad-debt handoff. It can
+prepare and atomically fill one pool-authorized, single-tier, 120%-of-debt
+backstop auction by selecting the first tier with at least $200 of verified
+value in strict BLND:USDC LP, BLND:XLM LP, then plain-USDC order. An
+authenticated healthy filler assumes the time-scaled dToken bid and receives
+the time-scaled tier token directly. The three-tier backstop impairs its
+pool-local asset/share exchange rate only by the amount actually transferred,
+so active and queued shares absorb the loss proportionally. Automatic
+next-tier continuation, supplier residual settlement, and user-liquidation
+bad-debt handoff remain disabled.
 
 Run both lanes:
 

@@ -204,23 +204,23 @@ pub struct PoolTierState {
     pub shares: i128,
 }
 
-/// Canonical pool-local lot for one future bad-debt auction.
+/// Canonical pool-local lot for one bad-debt auction.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct BadDebtLotQuote {
-    /// USDC value of the selected assets.
+    /// USDC value of the remaining selected assets after any partial fill.
     pub committed_value: i128,
-    /// Oracle-valued bad debt supplied by the registered pool.
+    /// Oracle-valued bad debt supplied at auction creation.
     pub debt_value: i128,
     /// The single waterfall tier selected for this auction.
     pub tier: BackstopTier,
-    /// Token base units selected from the tier.
+    /// Remaining base token units selected from the tier.
     pub lot_amount: i128,
-    /// The 120% target not filled by available backstop capital.
+    /// Creation-time 120% target not filled by available backstop capital.
     pub unfilled_target_value: i128,
-    /// The inherited 120% target lot value.
+    /// Creation-time inherited 120% target lot value.
     pub target_value: i128,
-    /// Earliest expiry of any LP valuation used by the quote.
+    /// Creation-time earliest expiry of any LP valuation used by the quote.
     pub valid_until: u64,
 }
 
@@ -459,6 +459,20 @@ pub struct BadDebtLotCommitted {
 pub struct BadDebtLotReleased {
     pub auction_id: BytesN<32>,
     pub pool: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BadDebtLotSettled {
+    pub auction_id: BytesN<32>,
+    /// Base token amount removed from the auction commitment.
+    pub base_lot_amount: i128,
+    pub complete: bool,
+    /// Time-scaled token amount transferred to the filler.
+    pub lot_amount: i128,
+    pub pool: Address,
+    pub tier: BackstopTier,
+    pub to: Address,
 }
 
 #[contract]
@@ -1041,6 +1055,73 @@ impl BackstopContract {
         }
         remove_bad_debt_commitment(&env, &pool);
         BadDebtLotReleased { auction_id, pool }.publish(&env);
+    }
+
+    /// Settle one partial or complete fill of a committed bad-debt lot.
+    ///
+    /// `base_lot_amount` is removed from the stored auction commitment.
+    /// `lot_amount` is the smaller, time-scaled amount actually transferred
+    /// and therefore the only amount that impairs the tier exchange rate.
+    /// Only the registered pool can authorize this transition.
+    pub fn settle_bad_debt_lot(
+        env: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        base_lot_amount: i128,
+        lot_amount: i128,
+        to: Address,
+    ) -> Option<BadDebtLotQuote> {
+        extend_instance_ttl(&env);
+        pool.require_auth();
+        require_registered_pool(&env, &pool);
+        if base_lot_amount < 0 || lot_amount < 0 || lot_amount > base_lot_amount {
+            panic_with_error!(&env, BackstopError::InvalidAmount);
+        }
+
+        let mut commitment = get_bad_debt_commitment(&env, &pool)
+            .unwrap_or_else(|| panic_with_error!(&env, BackstopError::BadDebtCommitmentNotFound));
+        if commitment.auction_id != auction_id || base_lot_amount > commitment.quote.lot_amount {
+            panic_with_error!(&env, BackstopError::BadDebtCommitmentNotFound);
+        }
+
+        let tier = commitment.quote.tier;
+        let committed_lot_amount = commitment.quote.lot_amount;
+        apply_pool_tier_loss(&env, tier, &pool, lot_amount);
+        if lot_amount > 0 {
+            TokenClient::new(&env, &tier_token(&env, tier)).transfer(
+                &env.current_contract_address(),
+                &to,
+                &lot_amount,
+            );
+        }
+
+        let remaining_lot_amount = checked_sub_i128(&env, committed_lot_amount, base_lot_amount);
+        let remaining = if remaining_lot_amount == 0 {
+            remove_bad_debt_commitment(&env, &pool);
+            None
+        } else {
+            commitment.quote.committed_value = proportional_floor(
+                &env,
+                commitment.quote.committed_value,
+                remaining_lot_amount,
+                committed_lot_amount,
+            );
+            commitment.quote.lot_amount = remaining_lot_amount;
+            set_bad_debt_commitment(&env, &pool, &commitment);
+            Some(commitment.quote)
+        };
+
+        BadDebtLotSettled {
+            auction_id,
+            base_lot_amount,
+            complete: remaining.is_none(),
+            lot_amount,
+            pool,
+            tier,
+            to,
+        }
+        .publish(&env);
+        remaining
     }
 
     /// Quote activation from canonical pool accounting and immutable pricing.
@@ -2587,9 +2668,13 @@ fn assets_from_shares(env: &Env, shares: i128, state: &PoolTierState) -> i128 {
     proportional_floor(env, state.assets, shares, state.shares)
 }
 
-#[cfg(test)]
 fn apply_pool_tier_loss(env: &Env, tier: BackstopTier, pool: &Address, assets: i128) {
-    require_positive(env, assets);
+    if assets < 0 {
+        panic_with_error!(env, BackstopError::InvalidAmount);
+    }
+    if assets == 0 {
+        return;
+    }
     let state = get_pool_tier_state(env, tier, pool);
     if assets > state.assets {
         panic_with_error!(env, BackstopError::InsufficientBalance);
@@ -3332,6 +3417,23 @@ mod tests {
             BackstopContractClient::new(&env, &backstop)
                 .release_bad_debt_lot(&env.current_contract_address(), &auction_id);
         }
+
+        pub fn settle_bad_debt_lot(
+            env: Env,
+            backstop: Address,
+            auction_id: BytesN<32>,
+            base_lot_amount: i128,
+            lot_amount: i128,
+            to: Address,
+        ) -> Option<BadDebtLotQuote> {
+            BackstopContractClient::new(&env, &backstop).settle_bad_debt_lot(
+                &env.current_contract_address(),
+                &auction_id,
+                &base_lot_amount,
+                &lot_amount,
+                &to,
+            )
+        }
     }
 
     #[contract]
@@ -3524,7 +3626,10 @@ mod tests {
         let blnd_token = Address::generate(&env);
         let legacy_token = Address::generate(&env);
         let next_token = Address::generate(&env);
-        let usdc_token = Address::generate(&env);
+        let usdc_admin = Address::generate(&env);
+        let usdc_token = env
+            .register_stellar_asset_contract_v2(usdc_admin.clone())
+            .address();
         let candidate_id = Address::generate(&env);
         let pool_factory_id = env.register(MockPoolFactory, (&candidate_id,));
         let pool_factory = MockPoolFactoryClient::new(&env, &pool_factory_id);
@@ -3552,16 +3657,8 @@ mod tests {
         let candidate = BackstopContractClient::new(&env, &candidate_id);
         env.as_contract(&candidate_id, || {
             for (tier, primary_amount, other_amount) in [
-                (
-                    BackstopTier::BlndUsdc,
-                    50 * SCALAR_7,
-                    200 * SCALAR_7,
-                ),
-                (
-                    BackstopTier::BlndXlm,
-                    100 * SCALAR_7,
-                    300 * SCALAR_7,
-                ),
+                (BackstopTier::BlndUsdc, 50 * SCALAR_7, 200 * SCALAR_7),
+                (BackstopTier::BlndXlm, 100 * SCALAR_7, 300 * SCALAR_7),
                 (BackstopTier::Usdc, 500 * SCALAR_7, 500 * SCALAR_7),
             ] {
                 if tier == BackstopTier::BlndUsdc {
@@ -3590,8 +3687,15 @@ mod tests {
                     &below_minimum_pool,
                     BAD_DEBT_TIER_MINIMUM_VALUE_USDC - 1,
                 );
+                env.storage().instance().set(
+                    &DataKey::TotalTierAssets(tier),
+                    &(primary_amount + other_amount + BAD_DEBT_TIER_MINIMUM_VALUE_USDC - 1),
+                );
             }
         });
+        StellarAssetClient::new(&env, &usdc_token)
+            .mock_all_auths()
+            .mint(&candidate_id, &(179 * SCALAR_7));
 
         let auction_id = BytesN::from_array(&env, &[1; 32]);
         let adapter = MockValuationAdapterClient::new(&env, &valuation_adapter);
@@ -3625,11 +3729,7 @@ mod tests {
 
         let pool_client = MockLossAwarePoolClient::new(&env, &pool);
         assert_eq!(
-            pool_client.commit_bad_debt_lot(
-                &candidate_id,
-                &auction_id,
-                &(200 * SCALAR_7)
-            ),
+            pool_client.commit_bad_debt_lot(&candidate_id, &auction_id, &(200 * SCALAR_7)),
             expected
         );
         assert_eq!(
@@ -3708,8 +3808,7 @@ mod tests {
             candidate.quote_bad_debt_lot(&below_minimum_pool, &SCALAR_7),
             None
         );
-        let below_minimum_pool_client =
-            MockLossAwarePoolClient::new(&env, &below_minimum_pool);
+        let below_minimum_pool_client = MockLossAwarePoolClient::new(&env, &below_minimum_pool);
         assert!(below_minimum_pool_client
             .try_commit_bad_debt_lot(
                 &candidate_id,
@@ -3718,14 +3817,28 @@ mod tests {
             )
             .is_err());
         assert!(pool_client
-            .try_commit_bad_debt_lot(
-                &candidate_id,
-                &auction_id,
-                &(200 * SCALAR_7)
-            )
+            .try_commit_bad_debt_lot(&candidate_id, &auction_id, &(200 * SCALAR_7))
             .is_err());
         assert!(candidate
             .try_release_bad_debt_lot(&pool, &auction_id)
+            .is_err());
+        assert!(candidate
+            .try_settle_bad_debt_lot(
+                &pool,
+                &auction_id,
+                &(120 * SCALAR_7),
+                &(60 * SCALAR_7),
+                &Address::generate(&env)
+            )
+            .is_err());
+        assert!(pool_client
+            .try_settle_bad_debt_lot(
+                &candidate_id,
+                &auction_id,
+                &(120 * SCALAR_7),
+                &(121 * SCALAR_7),
+                &Address::generate(&env)
+            )
             .is_err());
         env.mock_all_auths();
         assert!(candidate
@@ -3737,16 +3850,140 @@ mod tests {
             )
             .is_err());
 
-        pool_client.release_bad_debt_lot(&candidate_id, &auction_id);
-        assert_eq!(candidate.bad_debt_commitment(&pool, &auction_id), None);
-        assert_eq!(candidate.pool_bad_debt_commitment_count(&pool), 0);
+        let recipient = Address::generate(&env);
+        let total_usdc_before = candidate.total_tier_assets(&BackstopTier::Usdc);
+        assert_eq!(
+            pool_client.settle_bad_debt_lot(
+                &candidate_id,
+                &auction_id,
+                &(120 * SCALAR_7),
+                &(60 * SCALAR_7),
+                &recipient
+            ),
+            Some(BadDebtLotQuote {
+                committed_value: 120 * SCALAR_7,
+                debt_value: 200 * SCALAR_7,
+                tier: BackstopTier::Usdc,
+                lot_amount: 120 * SCALAR_7,
+                target_value: 240 * SCALAR_7,
+                unfilled_target_value: 0,
+                valid_until: u64::MAX,
+            })
+        );
+        assert_eq!(
+            TokenClient::new(&env, &usdc_token).balance(&recipient),
+            60 * SCALAR_7
+        );
+        assert_eq!(
+            candidate.pool_tier_state(&BackstopTier::Usdc, &pool),
+            PoolTierState {
+                assets: 440 * SCALAR_7,
+                queued_shares: 0,
+                shares: 500 * SCALAR_7,
+            }
+        );
+        assert_eq!(
+            candidate.pool_tier_committed_assets(&BackstopTier::Usdc, &pool),
+            120 * SCALAR_7
+        );
         assert_eq!(
             candidate.pool_valuation(&pool).active_values,
             ActivationValues {
                 blnd_usdc: 50 * SCALAR_7,
                 blnd_xlm: 100 * SCALAR_7,
-                usdc: 500 * SCALAR_7,
+                usdc: 320 * SCALAR_7,
             }
+        );
+        assert_eq!(
+            candidate.total_tier_assets(&BackstopTier::Usdc),
+            total_usdc_before - 60 * SCALAR_7
+        );
+
+        assert!(pool_client
+            .try_settle_bad_debt_lot(
+                &candidate_id,
+                &auction_id,
+                &(120 * SCALAR_7),
+                &(120 * SCALAR_7),
+                &recipient
+            )
+            .is_err());
+        assert_eq!(
+            candidate.bad_debt_commitment(&pool, &auction_id),
+            Some(BadDebtLotQuote {
+                committed_value: 120 * SCALAR_7,
+                debt_value: 200 * SCALAR_7,
+                tier: BackstopTier::Usdc,
+                lot_amount: 120 * SCALAR_7,
+                target_value: 240 * SCALAR_7,
+                unfilled_target_value: 0,
+                valid_until: u64::MAX,
+            })
+        );
+        assert_eq!(
+            candidate.pool_tier_assets(&BackstopTier::Usdc, &pool),
+            440 * SCALAR_7
+        );
+        assert_eq!(
+            TokenClient::new(&env, &usdc_token).balance(&recipient),
+            60 * SCALAR_7
+        );
+        StellarAssetClient::new(&env, &usdc_token)
+            .mock_all_auths()
+            .mint(&candidate_id, &SCALAR_7);
+
+        assert_eq!(
+            pool_client.settle_bad_debt_lot(
+                &candidate_id,
+                &auction_id,
+                &(120 * SCALAR_7),
+                &(120 * SCALAR_7),
+                &recipient
+            ),
+            None
+        );
+        assert_eq!(candidate.bad_debt_commitment(&pool, &auction_id), None);
+        assert_eq!(candidate.pool_bad_debt_commitment_count(&pool), 0);
+        assert_eq!(
+            TokenClient::new(&env, &usdc_token).balance(&recipient),
+            180 * SCALAR_7
+        );
+        assert_eq!(
+            candidate.pool_tier_state(&BackstopTier::Usdc, &pool),
+            PoolTierState {
+                assets: 320 * SCALAR_7,
+                queued_shares: 0,
+                shares: 500 * SCALAR_7,
+            }
+        );
+        assert_eq!(
+            candidate.pool_valuation(&pool).active_values,
+            ActivationValues {
+                blnd_usdc: 50 * SCALAR_7,
+                blnd_xlm: 100 * SCALAR_7,
+                usdc: 320 * SCALAR_7,
+            }
+        );
+        assert_eq!(
+            candidate.total_tier_assets(&BackstopTier::Usdc),
+            total_usdc_before - 180 * SCALAR_7
+        );
+
+        let release_auction_id = BytesN::from_array(&env, &[2; 32]);
+        assert_eq!(
+            pool_client
+                .commit_bad_debt_lot(&candidate_id, &release_auction_id, &(100 * SCALAR_7))
+                .lot_amount,
+            120 * SCALAR_7
+        );
+        pool_client.release_bad_debt_lot(&candidate_id, &release_auction_id);
+        assert_eq!(
+            candidate.bad_debt_commitment(&pool, &release_auction_id),
+            None
+        );
+        assert_eq!(
+            candidate.pool_tier_assets(&BackstopTier::Usdc, &pool),
+            320 * SCALAR_7
         );
     }
 

@@ -356,9 +356,10 @@ The v3 tests must verify:
   blocked under those statuses.
 - Any caller can delete an auction at, but not before, 500 ledgers after its
   start.
-- Until bad-debt and waterfall execution is implemented, a fill that would
-  worsen the liquidatee's effective health or leave collateral-free liabilities
-  fails atomically and preserves the auction, liquidatee, and filler.
+- Until user-liquidation bad-debt handoff is implemented, a fill that would
+  worsen the liquidatee's effective health or leave collateral-free
+  liabilities fails atomically and preserves the auction, liquidatee, and
+  filler.
 - Native and optimized-WASM tests cover creation, partial or complete fills,
   active-auction blocking, status enforcement, and rollback.
 
@@ -369,8 +370,8 @@ The v3 tests must verify:
 - Bad-debt auction preparation accepts only canonical liabilities already
   assigned to the configured backstop and permits at most one active bad-debt
   auction per pool.
-- Only the registered pool contract can commit or release its bad-debt lot;
-  direct user calls fail authorization.
+- Only the registered pool contract can commit, settle, or release its bad-debt
+  lot; direct user calls fail authorization.
 - The prepared lot targets 120% of the pool's oracle-valued debt, normalized
   to seven-decimal USDC.
 - Each prepared lot contains assets from exactly one tier and selects the first
@@ -386,6 +387,30 @@ The v3 tests must verify:
   is excluded from activation value and subsequent bad-debt quotes.
 - The pool auction and backstop commitment have identical fixed 46-day
   temporary lifetimes, and reads renew neither entry.
+- A bad-debt auction cannot fill before its next-ledger start. Fills use the
+  inherited 400-ledger curve, round the percentage-selected base dToken bid up
+  and base tier-token lot down, and apply the ledger modifiers only to the
+  amounts actually transferred.
+- A filler cannot be the pool or backstop, cannot have an active
+  user-liquidation auction, and must remain within ordinary maximum-position,
+  minimum-collateral, and health limits after assuming the scaled dToken bid.
+- A partial fill removes the percentage-selected base bid and lot from the
+  auction and commitment, transfers only the time-scaled bid and lot, retains
+  the synchronized remainder, and applies the common 45-day renewal threshold
+  and 46-day bump to both temporary entries.
+- Only the tier tokens actually transferred to the filler reduce accounted
+  pool and global tier assets. Shares remain unchanged, so active and queued
+  positions absorb that reduction through the same pool-tier exchange rate.
+  The base-lot discount that is not transferred causes no asset impairment.
+- A complete fill removes both the pool auction and backstop commitment. A
+  time-discounted dToken remainder stays assigned to the backstop, remains in
+  canonical liability state, and continues to block withdrawals.
+- The protocol transfers the selected tier token directly to the filler
+  without a swap. Token-transfer failure rolls back the dToken movement,
+  filler state, canonical liability, auction, commitment, and tier impairment.
+- Native tests and optimized-WASM tests cover authorization, pre-start
+  rejection, unhealthy-filler rollback, partial and full fills, direct token
+  receipt, synchronized commitment state, and exact exchange-rate impairment.
 - Any caller may delete a prepared auction at, but not before, 500 ledgers,
   atomically releasing its backstop lot. The canonical liability remains and
   continues to block withdrawal until the debt is resolved.
@@ -412,8 +437,8 @@ The v3 tests must verify:
 - A queued withdrawal remains blocked while the loss is committed or
   unresolved and, once permitted, redeems at the post-loss exchange rate.
 - An unavailable, invalid, or stale oracle result fails closed and is not
-  treated as a tier below the minimum. An unavailable disposal path follows
-  the explicitly selected failure policy and does not silently skip a tier.
+  treated as a tier below the minimum. A failed tier-token transfer rolls back
+  and does not silently skip a tier.
 - Once a qualifying tier lot is committed, later price movement below the
   minimum does not cancel the commitment.
 - Activation value remains independent of loss priority.

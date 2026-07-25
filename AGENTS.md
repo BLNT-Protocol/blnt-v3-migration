@@ -79,6 +79,13 @@ side effect of work in this repository.
   unavailable valuation is not exhaustion. Supplier loss begins only after all
   three tiers are below that threshold. Once a lot is committed, later price
   movement across the threshold does not cancel it.
+- A bad-debt fill transfers only its time-scaled tier-token lot to the
+  authenticated filler and impairs the pool-tier exchange rate by exactly that
+  transferred amount. The percentage-selected base lot, not the smaller
+  time-scaled transfer, reduces the outstanding commitment. Pool positions,
+  canonical backstop liabilities, the pool auction, the backstop commitment,
+  the token transfer, and the exchange-rate impairment must succeed or roll
+  back atomically.
 - Legacy migration qualification uses the candidate contract's direct balance
   of the incumbent emitter-designated token and requires a strictly greater
   balance.

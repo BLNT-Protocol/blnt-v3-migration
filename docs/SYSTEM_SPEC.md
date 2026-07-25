@@ -539,9 +539,12 @@ The withdrawal implementation MUST:
 The bounded Q4W accounting and Protocol-27 pool implement this fail-closed
 record and state boundary. Ordinary backstop borrow and repay create and
 resolve liability records. Bad-debt auction preparation now creates the
-canonical singleton commitment atomically with the backstop reservation, but
-bad-debt handoff, auction fills, interest auctions, and loss settlement remain
-unimplemented.
+canonical singleton commitment atomically with the backstop reservation.
+Bad-debt fills atomically move scaled dToken liabilities to a healthy filler,
+transfer the scaled tier-token lot, impair the pool-tier exchange rate, and
+update the singleton commitment. Automatic next-tier sequencing, supplier
+residual settlement, user-liquidation bad-debt handoff, and interest auctions
+remain unimplemented.
 
 ## 8. Pool activation
 
@@ -733,8 +736,9 @@ authenticated deployer retains the deterministic salt domain. Permissionless
 refresh and operator requests call the immutable backstop, reject disallowed
 or invalid results, and store the returned status atomically. The pool exposes
 the centralized v2-compatible action predicate enforced by the implemented
-lending and user-liquidation requests and required by future bad-debt and
-interest-auction entry points.
+lending and user-liquidation requests. Bad-debt fills are explicit direct
+entry points that remain available under every status. Future interest-auction
+entry points must apply the corresponding v2-compatible status policy.
 
 ### 8.2 Initial lending core
 
@@ -757,10 +761,12 @@ The initial lending core implements request types 0 through 5:
 | 4 | Borrow |
 | 5 | Repay |
 
-Auction request types remain reserved for the future auction engine. Each
-submitted request MUST enforce the stored v2-compatible status before changing
-accounting. Disabled reserves reject supply, collateral supply, and borrow but
-continue to permit withdrawal and repayment.
+Request types 6 and 9 implement user-liquidation fill and cancellation.
+Remaining auction request types are reserved for future interest-auction and
+bad-debt-handoff integration. Each submitted request MUST enforce the stored
+v2-compatible status before changing accounting. Disabled reserves reject
+supply, collateral supply, and borrow but continue to permit withdrawal and
+repayment.
 
 The request owner is `from`, the account providing incoming tokens is
 `spender`, and outgoing tokens are sent to `to`. `spender` MUST authorize every
@@ -816,8 +822,8 @@ reserves.
 
 ### 8.3 User-liquidation auctions
 
-The initial auction engine implements only v2-compatible user-liquidation
-auctions. Auction creation is permissionless and accepts a liquidatee, unique
+The user-liquidation portion of the auction engine is v2-compatible. Auction
+creation is permissionless and accepts a liquidatee, unique
 reserve-asset lists for the dToken bid and bToken collateral lot, and a
 liquidation percentage from 1 through 100. The liquidatee cannot be the pool or
 its configured backstop and can have at most one active user-liquidation
@@ -864,13 +870,13 @@ Auction entries use temporary storage with a 45-day renewal threshold and a
 46-day bump. Creation and partial-fill writes apply that bounded TTL policy.
 
 V2 transfers collateral-free residual liabilities to its bad-debt engine after
-a full fill. V3 can now prepare one bad-debt auction only for liabilities
-already assigned to its configured backstop, but no fill or liquidation
-handoff uses it yet. Until settlement is complete, any user-liquidation fill
-that would reduce the liquidatee's effective health factor, or remove all
-collateral while leaving a nonzero liability, MUST fail atomically with the
-auction and both accounts unchanged. This prevents the inherited bid-discount
-phase from manufacturing unhandled bad debt.
+a full fill. V3 can prepare and fill a bad-debt auction for liabilities already
+assigned to its configured backstop, but user-liquidation fills do not yet hand
+new residual debt to that path. Until that handoff is implemented, any
+user-liquidation fill that would reduce the liquidatee's effective health
+factor, or remove all collateral while leaving a nonzero liability, MUST fail
+atomically with the auction and both accounts unchanged. This prevents the
+inherited bid-discount phase from manufacturing unhandled bad debt.
 
 ## 9. Loss waterfall
 
@@ -910,7 +916,7 @@ For every tier, the implementation MUST define:
 - Behavior when an oracle or market is unavailable.
 - When supplier balances absorb losses after backstop exhaustion.
 
-The implemented preparation boundary retains v2's
+The implemented auction boundary retains v2's
 one-bad-debt-auction-per-pool shape and 120%-of-debt target, but each auction
 MUST sell assets from only one tier. It examines currently uncommitted capital
 in strict waterfall order and selects the first tier whose available capital
@@ -948,13 +954,50 @@ withdrawals blocked until the underlying debt is resolved. Once a tier lot is
 committed, subsequent price movement below 200 USDC does not cancel or shrink
 that commitment.
 
-Auction fill, tier-token transfer, exchange-rate impairment, supplier residual
-loss, and exact failure behavior for an unavailable disposal market remain
-implementation work. Future settlement MUST complete or otherwise resolve the
-current tier auction before preparing a later tier. Suppliers MUST NOT absorb a
-residual until all three tiers have been successfully valued below 200 USDC or
-have otherwise been exhausted by completed settlement. A failed or unavailable
-path MUST NOT silently skip a tier or charge a later tier.
+After its next-ledger start, any authenticated account other than the pool or
+backstop may fill from 1% through 100% of the current bad-debt auction. The
+filler MUST NOT have an active user-liquidation auction and, after assuming the
+filled dToken shares, MUST satisfy the pool's ordinary maximum-position,
+minimum-collateral, and health requirements. Bad-debt fills remain available
+under On-Ice and Frozen statuses, matching the v2 action matrix.
+
+Bad-debt auctions use the same 400-ledger price curve and asymmetric rounding
+as user-liquidation auctions. The requested percentage first selects a base
+dToken bid with ceiling rounding and a base tier-token lot with floor rounding.
+The current ledger modifier then scales only the dToken shares and tier tokens
+actually transferred. The unselected base bid and lot remain in the auction.
+The selected base amounts are removed from the auction even when the
+time-scaled transfer is smaller.
+
+The filler assumes the time-scaled dToken bid directly from the configured
+backstop and receives the time-scaled selected tier token directly from the
+backstop contract. The protocol performs no token swap and does not depend on
+a disposal market at fill time. The percentage-selected base lot reduces the
+commitment, but only the time-scaled token amount actually transferred reduces
+the pool's and tier's accounted assets. Shares are not burned, so that actual
+asset reduction impairs active and queued shares proportionally through their
+common exchange rate. Any difference between the base lot and the transferred
+lot becomes uncommitted capacity without causing an asset loss.
+
+A partial fill stores the remaining base bid and lot and applies the same
+45-day renewal threshold and 46-day bump to both temporary entries. Remaining
+committed value is reduced in proportion to the remaining base lot; the
+original debt, target, unfilled-target, and valuation-validity fields remain
+creation metadata. A complete fill removes both the pool auction and backstop
+commitment. Pool positions, canonical backstop liabilities, filler health,
+auction state, commitment state, tier accounting, and the token transfer MUST
+all succeed or roll back together.
+
+At the late bid-discount portion of the inherited curve, a complete auction can
+leave dToken liabilities assigned to the backstop because the removed base bid
+can exceed the time-scaled bid assumed by the filler. Those canonical
+liabilities continue to block withdrawal. Automatic preparation of a
+subsequent tier auction, exhaustion tracking, and supplier residual settlement
+remain implementation work. Future settlement MUST complete or otherwise
+resolve the current tier auction before preparing a later tier. Suppliers MUST
+NOT absorb a residual until all three tiers have been successfully valued
+below 200 USDC or have otherwise been exhausted by completed settlement. A
+failed path MUST NOT silently skip a tier or charge a later tier.
 
 Emission weights do not need to follow loss priority. Any difference MUST be
 explicit and tested.
@@ -1312,14 +1355,13 @@ The detailed test matrix is maintained in `docs/MIGRATION_TEST_PLAN.md`.
 The following require explicit resolution before their associated behavior is
 implemented:
 
-- Per-tier auction, transfer, and disposal mechanisms.
-- Behavior when a tier's oracle or disposal market is unavailable.
 - Production LP price sources, averaging, staleness, and failure policy.
 - Production lending-reserve admission policy for issuer controls, clawback,
   deauthorization, rebasing, and other nonstandard token behavior.
-- Exact bad-debt handoff and fill, interest-auction, and loss-settlement entry
-  points that invoke the remaining committed-loss and unresolved-bad-debt
-  transitions.
+- Automatic next-tier bad-debt sequencing, supplier residual settlement, and
+  user-liquidation bad-debt handoff, including the remaining committed-loss and
+  unresolved-bad-debt transitions.
+- Interest-auction entry points and settlement.
 - Exact take-rate accrual integration and distribution cadence.
 - Post-migration designated token.
 - Top-level BLND split between backstop depositors and pool supply/borrow
@@ -1346,6 +1388,10 @@ implemented:
    deploying shortened-delay evidence. A transaction-backed keepalive
    compensates for Quickstart's faster ledger cadence without changing queue
    timestamps or economic state.
+8. Implement single-tier bad-debt auction filling atomically across pool
+   liabilities, filler health, backstop commitments, tier-token transfer, and
+   pool-tier exchange-rate impairment; then add automatic next-tier sequencing
+   and supplier residual settlement.
 
 Milestones 1 through 5, the bounded-Q4W and canonical-loss-state-boundary
 portions of milestone 6, and the reproducible deployment runner for the local
@@ -1369,16 +1415,18 @@ non-auction v2 request types, v2-compatible reserve interest and share
 accounting, fail-closed oracle-valued health checks, v2-compatible
 user-liquidation creation and fills with an explicit pre-waterfall bad-debt
 boundary, pool-authorized preparation of one single-tier,
-200-USDC-minimum bad-debt lot in strict waterfall order, and a fail-closed pool
-callback derived from bounded canonical loss records.
+200-USDC-minimum bad-debt lot in strict waterfall order, atomic partial and
+complete single-tier fills using the inherited v2 curve, direct tier-token
+transfer with proportional active-and-queued exchange-rate impairment, and a
+fail-closed pool callback derived from bounded canonical loss records.
 The local runner deploys independently issued assets, a
 coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
-local run, the public-testnet exercise, bad-debt handoff and auction fills,
-interest auctions, the multi-tier settlement transitions, a production LP
-valuation source, take-rate realization, and ongoing BLND-emission accrual
-remain intentionally unimplemented.
+local run, the public-testnet exercise, user-liquidation bad-debt handoff,
+automatic next-tier and supplier residual settlement, interest auctions, a
+production LP valuation source, take-rate realization, and ongoing
+BLND-emission accrual remain intentionally unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

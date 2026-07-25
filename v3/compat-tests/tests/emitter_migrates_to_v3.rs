@@ -147,6 +147,25 @@ impl MockLossAwarePool {
         v3_backstop::Client::new(&env, &backstop)
             .release_bad_debt_lot(&env.current_contract_address(), &auction_id);
     }
+
+    pub fn settle_bad_debt_lot(
+        env: Env,
+        backstop: Address,
+        auction_id: BytesN<32>,
+        base_lot_amount: i128,
+        lot_amount: i128,
+        to: Address,
+    ) -> Option<i128> {
+        v3_backstop::Client::new(&env, &backstop)
+            .settle_bad_debt_lot(
+                &env.current_contract_address(),
+                &auction_id,
+                &base_lot_amount,
+                &lot_amount,
+                &to,
+            )
+            .map(|quote| quote.lot_amount)
+    }
 }
 
 const SCALAR_7: i128 = 10_000_000;
@@ -444,7 +463,7 @@ fn v3_wasm_derives_canonical_pool_valuation_from_accounted_shares() {
 }
 
 #[test]
-fn v3_wasm_commits_strict_pool_authorized_bad_debt_lot() {
+fn v3_wasm_commits_and_settles_strict_pool_authorized_bad_debt_lot() {
     let fixture = Fixture::create();
     let pool_client = fixture.loss_aware_pool(true);
     let pool = pool_client.address.clone();
@@ -508,15 +527,96 @@ fn v3_wasm_commits_strict_pool_authorized_bad_debt_lot() {
         }
     );
 
-    pool_client.release_bad_debt_lot(&fixture.candidate.address, &auction_id);
-    assert_eq!(fixture.candidate.pool_bad_debt_commitment_count(&pool), 0);
+    let recipient = Address::generate(&fixture.env);
+    assert_eq!(
+        pool_client.settle_bad_debt_lot(
+            &fixture.candidate.address,
+            &auction_id,
+            &(120 * SCALAR_7),
+            &(60 * SCALAR_7),
+            &recipient,
+        ),
+        Some(120 * SCALAR_7)
+    );
+    assert_eq!(
+        TokenClient::new(&fixture.env, &fixture.prefund_token).balance(&recipient),
+        60 * SCALAR_7
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .pool_tier_state(&v3_backstop::BackstopTier::Usdc, &pool),
+        v3_backstop::PoolTierState {
+            assets: 440 * SCALAR_7,
+            queued_shares: 0,
+            shares: 500 * SCALAR_7,
+        }
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .pool_tier_committed_assets(&v3_backstop::BackstopTier::Usdc, &pool),
+        120 * SCALAR_7
+    );
     assert_eq!(
         fixture.candidate.pool_valuation(&pool).active_values,
         v3_backstop::ActivationValues {
             blnd_usdc: 50 * SCALAR_7,
             blnd_xlm: 100 * SCALAR_7,
-            usdc: 500 * SCALAR_7,
+            usdc: 320 * SCALAR_7,
         }
+    );
+
+    assert_eq!(
+        pool_client.settle_bad_debt_lot(
+            &fixture.candidate.address,
+            &auction_id,
+            &(120 * SCALAR_7),
+            &(120 * SCALAR_7),
+            &recipient,
+        ),
+        None
+    );
+    assert_eq!(fixture.candidate.pool_bad_debt_commitment_count(&pool), 0);
+    assert_eq!(
+        TokenClient::new(&fixture.env, &fixture.prefund_token).balance(&recipient),
+        180 * SCALAR_7
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .pool_tier_state(&v3_backstop::BackstopTier::Usdc, &pool),
+        v3_backstop::PoolTierState {
+            assets: 320 * SCALAR_7,
+            queued_shares: 0,
+            shares: 500 * SCALAR_7,
+        }
+    );
+    assert_eq!(
+        fixture.candidate.pool_valuation(&pool).active_values,
+        v3_backstop::ActivationValues {
+            blnd_usdc: 50 * SCALAR_7,
+            blnd_xlm: 100 * SCALAR_7,
+            usdc: 320 * SCALAR_7,
+        }
+    );
+
+    let release_auction_id = BytesN::from_array(&fixture.env, &[4; 32]);
+    assert_eq!(
+        pool_client.commit_bad_debt_lot(
+            &fixture.candidate.address,
+            &release_auction_id,
+            &(100 * SCALAR_7),
+        ),
+        120 * SCALAR_7
+    );
+    pool_client.release_bad_debt_lot(&fixture.candidate.address, &release_auction_id);
+    assert_eq!(fixture.candidate.pool_bad_debt_commitment_count(&pool), 0);
+    assert_eq!(
+        fixture
+            .candidate
+            .pool_tier_assets(&v3_backstop::BackstopTier::Usdc, &pool),
+        320 * SCALAR_7
     );
 }
 
@@ -852,6 +952,107 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
     );
     assert!(filler_after.collateral.get(0).unwrap() > 99 * SCALAR_7);
     assert!(pool.position_health(&user).healthy);
+
+    let bad_debt_filler = Address::generate(&env);
+    legacy_token.mint(&bad_debt_filler, &(200 * SCALAR_7));
+    pool.submit(
+        &bad_debt_filler,
+        &bad_debt_filler,
+        &bad_debt_filler,
+        &soroban_sdk::vec![
+            &env,
+            v3_pool::Request {
+                address: legacy_token_id.clone(),
+                amount: 200 * SCALAR_7,
+                request_type: 2,
+            }
+        ],
+    );
+
+    legacy_token.mint(&candidate_id, &(100 * SCALAR_7));
+    let backstop_positions = pool.submit(
+        &candidate_id,
+        &candidate_id,
+        &candidate_id,
+        &soroban_sdk::vec![
+            &env,
+            v3_pool::Request {
+                address: legacy_token_id.clone(),
+                amount: 100 * SCALAR_7,
+                request_type: 2,
+            },
+            v3_pool::Request {
+                address: next_token_id.clone(),
+                amount: 50 * SCALAR_7,
+                request_type: 4,
+            }
+        ],
+    );
+    let backstop_debt = backstop_positions.liabilities.get(1).unwrap();
+    let bad_debt_auction_id = BytesN::from_array(&env, &[23; 32]);
+    let bad_debt_auction = pool.new_bad_debt_auction(
+        &bad_debt_auction_id,
+        &soroban_sdk::vec![&env, next_token_id.clone()],
+    );
+    assert_eq!(
+        bad_debt_auction.bid.get(next_token_id.clone()),
+        Some(backstop_debt)
+    );
+    assert_eq!(
+        bad_debt_auction.lot_quote.tier,
+        v3_pool::BackstopTier::BlndUsdc
+    );
+    assert_eq!(candidate.pool_bad_debt_commitment_count(&pool_id), 1);
+
+    env.ledger()
+        .set_sequence_number(bad_debt_auction.block + 100);
+    let first_fill = pool.fill_bad_debt_auction(&bad_debt_filler, &50);
+    let expected_first_bid = (backstop_debt + 1) / 2;
+    let expected_base_lot = bad_debt_auction.lot_quote.lot_amount / 2;
+    let expected_first_lot = expected_base_lot / 2;
+    assert_eq!(
+        first_fill.bid.get(next_token_id.clone()),
+        Some(expected_first_bid)
+    );
+    assert_eq!(first_fill.base_lot_amount, expected_base_lot);
+    assert_eq!(first_fill.lot_amount, expected_first_lot);
+    assert!(!first_fill.complete);
+    assert_eq!(
+        candidate
+            .bad_debt_commitment(&pool_id, &bad_debt_auction_id)
+            .unwrap()
+            .lot_amount,
+        bad_debt_auction.lot_quote.lot_amount - expected_base_lot
+    );
+    assert_eq!(
+        TokenClient::new(&env, &legacy_token_id).balance(&bad_debt_filler),
+        expected_first_lot
+    );
+
+    env.ledger()
+        .set_sequence_number(bad_debt_auction.block + 200);
+    let second_fill = pool.fill_bad_debt_auction(&bad_debt_filler, &100);
+    assert!(second_fill.complete);
+    assert_eq!(
+        second_fill.bid.get(next_token_id),
+        Some(backstop_debt - expected_first_bid)
+    );
+    assert_eq!(
+        second_fill.lot_amount,
+        bad_debt_auction.lot_quote.lot_amount - expected_base_lot
+    );
+    assert!(pool.try_get_bad_debt_auction().is_err());
+    assert_eq!(candidate.pool_bad_debt_commitment_count(&pool_id), 0);
+    assert!(pool.positions(&candidate_id).liabilities.is_empty());
+    assert_eq!(
+        pool.backstop_loss_state(),
+        v3_pool::BackstopLossState {
+            committed_loss_entries: 0,
+            liability_entries: 0,
+            unresolved_bad_debt_entries: 0,
+        }
+    );
+    assert!(pool.backstop_withdrawal_allowed(&candidate_id));
 }
 
 #[test]

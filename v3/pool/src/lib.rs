@@ -5,8 +5,8 @@ mod lending;
 
 pub use auction::{
     AuctionCreated, AuctionData, AuctionDeleted, AuctionFilled, BackstopTier,
-    BadDebtAuctionCreated, BadDebtAuctionData, BadDebtAuctionDeleted, BadDebtLotQuote,
-    ACTION_DELETE_LIQUIDATION, ACTION_FILL_USER_LIQUIDATION,
+    BadDebtAuctionCreated, BadDebtAuctionData, BadDebtAuctionDeleted, BadDebtAuctionFill,
+    BadDebtAuctionFilled, BadDebtLotQuote, ACTION_DELETE_LIQUIDATION, ACTION_FILL_USER_LIQUIDATION,
 };
 pub use lending::{
     LendingAction, LendingConfig, PositionHealth, Positions, PriceQuote, Request, Reserve,
@@ -97,6 +97,14 @@ pub trait Backstop {
         debt_value: i128,
     ) -> BadDebtLotQuote;
     fn release_bad_debt_lot(env: Env, pool: Address, auction_id: BytesN<32>);
+    fn settle_bad_debt_lot(
+        env: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        base_lot_amount: i128,
+        lot_amount: i128,
+        to: Address,
+    ) -> Option<BadDebtLotQuote>;
 }
 
 #[contractevent]
@@ -285,8 +293,7 @@ impl PoolContract {
     /// Prepare a v2-shaped bad-debt auction from liabilities already assigned
     /// to this pool's configured backstop.
     ///
-    /// This reserves a strict multi-tier lot but intentionally exposes no fill
-    /// path until atomic debt transfer and waterfall settlement are complete.
+    /// This reserves one strict single-tier lot for atomic filling.
     pub fn new_bad_debt_auction(
         env: Env,
         auction_id: BytesN<32>,
@@ -300,6 +307,15 @@ impl PoolContract {
     pub fn get_bad_debt_auction(env: Env) -> BadDebtAuctionData {
         extend_instance_ttl(&env);
         auction::get_bad_debt_auction(&env)
+    }
+
+    /// Fill part or all of the prepared bad-debt auction.
+    ///
+    /// The authenticated filler assumes the time-scaled dToken bid and
+    /// receives the time-scaled committed tier token directly.
+    pub fn fill_bad_debt_auction(env: Env, filler: Address, percent: u32) -> BadDebtAuctionFill {
+        extend_instance_ttl(&env);
+        auction::fill_bad_debt_auction(&env, &filler, percent)
     }
 
     /// Release a prepared bad-debt lot after the inherited stale boundary.
@@ -531,6 +547,10 @@ mod tests {
         CommittedAuction,
         CommittedDebt,
         ReleasedAuction,
+        SettledBaseLot,
+        SettledCount,
+        SettledLot,
+        SettledTo,
         SetQuote,
         UpdateQuote,
     }
@@ -610,6 +630,9 @@ mod tests {
                 .get(&MockBackstopKey::BadDebtQuote)
                 .unwrap();
             quote.debt_value = debt_value;
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::BadDebtQuote, &quote);
             quote
         }
 
@@ -618,6 +641,65 @@ mod tests {
             env.storage()
                 .instance()
                 .set(&MockBackstopKey::ReleasedAuction, &auction_id);
+        }
+
+        pub fn settle_bad_debt_lot(
+            env: Env,
+            pool: Address,
+            auction_id: BytesN<32>,
+            base_lot_amount: i128,
+            lot_amount: i128,
+            to: Address,
+        ) -> Option<BadDebtLotQuote> {
+            pool.require_auth();
+            let committed_auction: BytesN<32> = env
+                .storage()
+                .instance()
+                .get(&MockBackstopKey::CommittedAuction)
+                .unwrap();
+            assert_eq!(committed_auction, auction_id);
+            let mut quote: BadDebtLotQuote = env
+                .storage()
+                .instance()
+                .get(&MockBackstopKey::BadDebtQuote)
+                .unwrap();
+            assert!(base_lot_amount >= 0);
+            assert!(lot_amount >= 0);
+            assert!(lot_amount <= base_lot_amount);
+            assert!(base_lot_amount <= quote.lot_amount);
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::SettledBaseLot, &base_lot_amount);
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::SettledLot, &lot_amount);
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::SettledTo, &to);
+            let count = env
+                .storage()
+                .instance()
+                .get::<_, u32>(&MockBackstopKey::SettledCount)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::SettledCount, &(count + 1));
+
+            let previous_lot_amount = quote.lot_amount;
+            quote.lot_amount -= base_lot_amount;
+            if quote.lot_amount == 0 {
+                env.storage()
+                    .instance()
+                    .remove(&MockBackstopKey::BadDebtQuote);
+                None
+            } else {
+                quote.committed_value =
+                    quote.committed_value * quote.lot_amount / previous_lot_amount;
+                env.storage()
+                    .instance()
+                    .set(&MockBackstopKey::BadDebtQuote, &quote);
+                Some(quote)
+            }
         }
 
         pub fn committed_debt(env: Env) -> i128 {
@@ -637,6 +719,31 @@ mod tests {
             env.storage()
                 .instance()
                 .get(&MockBackstopKey::ReleasedAuction)
+        }
+
+        pub fn settled_base_lot(env: Env) -> i128 {
+            env.storage()
+                .instance()
+                .get(&MockBackstopKey::SettledBaseLot)
+                .unwrap_or(0)
+        }
+
+        pub fn settled_count(env: Env) -> u32 {
+            env.storage()
+                .instance()
+                .get(&MockBackstopKey::SettledCount)
+                .unwrap_or(0)
+        }
+
+        pub fn settled_lot(env: Env) -> i128 {
+            env.storage()
+                .instance()
+                .get(&MockBackstopKey::SettledLot)
+                .unwrap_or(0)
+        }
+
+        pub fn settled_to(env: Env) -> Option<Address> {
+            env.storage().instance().get(&MockBackstopKey::SettledTo)
         }
     }
 
@@ -1380,6 +1487,214 @@ mod tests {
                 unresolved_bad_debt_entries: 0,
             }
         );
+    }
+
+    #[test]
+    fn bad_debt_auction_partial_and_full_fills_are_atomic() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_000);
+        let backstop_id = env.register(MockBackstop, ());
+        let backstop = MockBackstopClient::new(&env, &backstop_id);
+        let oracle_id = env.register(MockPriceOracle, ());
+        let oracle = MockPriceOracleClient::new(&env, &oracle_id);
+        let debt_asset = Address::generate(&env);
+        let collateral_asset = Address::generate(&env);
+        for asset in [debt_asset.clone(), collateral_asset.clone()] {
+            oracle.set_price(
+                &asset,
+                &PriceQuote {
+                    decimals: 7,
+                    price: lending::SCALAR_7,
+                    valid_until: u64::MAX,
+                },
+            );
+        }
+        let pool_id = register_lending_pool(
+            &env,
+            &backstop_id,
+            &Address::generate(&env),
+            &oracle_id,
+            &vec![&env, debt_asset.clone(), collateral_asset],
+        );
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let filler = Address::generate(&env);
+        let unhealthy_filler = Address::generate(&env);
+        let debt_shares = 50 * lending::SCALAR_7;
+        env.as_contract(&pool_id, || {
+            let mut backstop_positions = Positions::empty(&env);
+            backstop_positions.liabilities.set(0, debt_shares);
+            lending::set_positions(&env, &backstop_id, &backstop_positions);
+            set_backstop_liability(&env, &debt_asset, debt_shares);
+
+            let mut filler_positions = Positions::empty(&env);
+            filler_positions.collateral.set(1, 200 * lending::SCALAR_7);
+            lending::set_positions(&env, &filler, &filler_positions);
+        });
+        backstop.set_bad_debt_quote(&BadDebtLotQuote {
+            committed_value: 60 * lending::SCALAR_7,
+            debt_value: 0,
+            tier: BackstopTier::BlndUsdc,
+            lot_amount: 60 * lending::SCALAR_7,
+            target_value: 60 * lending::SCALAR_7,
+            unfilled_target_value: 0,
+            valid_until: u64::MAX,
+        });
+
+        let auction_id = BytesN::from_array(&env, &[9; 32]);
+        let auction = pool.new_bad_debt_auction(&auction_id, &vec![&env, debt_asset.clone()]);
+        assert!(pool.try_fill_bad_debt_auction(&filler, &50).is_err());
+
+        env.mock_all_auths();
+        assert!(pool.try_fill_bad_debt_auction(&filler, &50).is_err());
+        assert!(pool.try_fill_bad_debt_auction(&pool_id, &50).is_err());
+        assert!(pool.try_fill_bad_debt_auction(&backstop_id, &50).is_err());
+        assert_eq!(backstop.settled_count(), 0);
+
+        env.ledger().set_sequence_number(auction.block + 100);
+        let auction_before_unhealthy_fill = pool.get_bad_debt_auction();
+        assert!(pool
+            .try_fill_bad_debt_auction(&unhealthy_filler, &50)
+            .is_err());
+        assert_eq!(pool.get_bad_debt_auction(), auction_before_unhealthy_fill);
+        assert_eq!(
+            pool.positions(&backstop_id).liabilities.get(0),
+            Some(debt_shares)
+        );
+        assert!(pool.positions(&unhealthy_filler).liabilities.is_empty());
+        assert_eq!(backstop.settled_count(), 0);
+
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &4_u32);
+        });
+        let first = pool.fill_bad_debt_auction(&filler, &50);
+        assert_eq!(
+            first,
+            BadDebtAuctionFill {
+                auction_id: auction_id.clone(),
+                base_lot_amount: 30 * lending::SCALAR_7,
+                bid: Map::from_array(&env, [(debt_asset.clone(), 25 * lending::SCALAR_7)]),
+                block: auction.block,
+                complete: false,
+                lot_amount: 15 * lending::SCALAR_7,
+                tier: BackstopTier::BlndUsdc,
+            }
+        );
+        assert_eq!(backstop.settled_count(), 1);
+        assert_eq!(backstop.settled_base_lot(), 30 * lending::SCALAR_7);
+        assert_eq!(backstop.settled_lot(), 15 * lending::SCALAR_7);
+        assert_eq!(backstop.settled_to(), Some(filler.clone()));
+        assert_eq!(
+            pool.get_bad_debt_auction(),
+            BadDebtAuctionData {
+                auction_id: auction_id.clone(),
+                bid: Map::from_array(&env, [(debt_asset.clone(), 25 * lending::SCALAR_7)]),
+                block: auction.block,
+                lot_quote: BadDebtLotQuote {
+                    committed_value: 30 * lending::SCALAR_7,
+                    debt_value: 50 * lending::SCALAR_7,
+                    tier: BackstopTier::BlndUsdc,
+                    lot_amount: 30 * lending::SCALAR_7,
+                    target_value: 60 * lending::SCALAR_7,
+                    unfilled_target_value: 0,
+                    valid_until: u64::MAX,
+                },
+            }
+        );
+        assert_eq!(
+            pool.positions(&backstop_id).liabilities.get(0),
+            Some(25 * lending::SCALAR_7)
+        );
+        assert_eq!(
+            pool.positions(&filler).liabilities.get(0),
+            Some(25 * lending::SCALAR_7)
+        );
+        assert_eq!(
+            pool.backstop_loss_state(),
+            BackstopLossState {
+                committed_loss_entries: 1,
+                liability_entries: 1,
+                unresolved_bad_debt_entries: 0,
+            }
+        );
+
+        env.ledger().set_sequence_number(auction.block + 200);
+        let second = pool.fill_bad_debt_auction(&filler, &100);
+        assert_eq!(
+            second,
+            BadDebtAuctionFill {
+                auction_id,
+                base_lot_amount: 30 * lending::SCALAR_7,
+                bid: Map::from_array(&env, [(debt_asset.clone(), 25 * lending::SCALAR_7)]),
+                block: auction.block,
+                complete: true,
+                lot_amount: 30 * lending::SCALAR_7,
+                tier: BackstopTier::BlndUsdc,
+            }
+        );
+        assert_eq!(backstop.settled_count(), 2);
+        assert_eq!(backstop.settled_base_lot(), 30 * lending::SCALAR_7);
+        assert_eq!(backstop.settled_lot(), 30 * lending::SCALAR_7);
+        assert!(pool.try_get_bad_debt_auction().is_err());
+        assert!(pool.positions(&backstop_id).liabilities.is_empty());
+        assert_eq!(
+            pool.positions(&filler).liabilities.get(0),
+            Some(50 * lending::SCALAR_7)
+        );
+        assert_eq!(
+            pool.backstop_loss_state(),
+            BackstopLossState {
+                committed_loss_entries: 0,
+                liability_entries: 0,
+                unresolved_bad_debt_entries: 0,
+            }
+        );
+        assert!(pool.backstop_withdrawal_allowed(&backstop_id));
+
+        let discounted_debt = 40 * lending::SCALAR_7;
+        env.as_contract(&pool_id, || {
+            let mut backstop_positions = Positions::empty(&env);
+            backstop_positions.liabilities.set(0, discounted_debt);
+            lending::set_positions(&env, &backstop_id, &backstop_positions);
+            set_backstop_liability(&env, &debt_asset, discounted_debt);
+        });
+        backstop.set_bad_debt_quote(&BadDebtLotQuote {
+            committed_value: 48 * lending::SCALAR_7,
+            debt_value: 0,
+            tier: BackstopTier::BlndUsdc,
+            lot_amount: 48 * lending::SCALAR_7,
+            target_value: 48 * lending::SCALAR_7,
+            unfilled_target_value: 0,
+            valid_until: u64::MAX,
+        });
+        let discounted_auction_id = BytesN::from_array(&env, &[10; 32]);
+        let discounted_auction =
+            pool.new_bad_debt_auction(&discounted_auction_id, &vec![&env, debt_asset]);
+        env.ledger()
+            .set_sequence_number(discounted_auction.block + 300);
+        let discounted_fill = pool.fill_bad_debt_auction(&filler, &100);
+        assert!(discounted_fill.complete);
+        assert_eq!(
+            discounted_fill.bid.values().get(0),
+            Some(20 * lending::SCALAR_7)
+        );
+        assert_eq!(discounted_fill.lot_amount, 48 * lending::SCALAR_7);
+        assert_eq!(
+            pool.positions(&backstop_id).liabilities.get(0),
+            Some(20 * lending::SCALAR_7)
+        );
+        assert_eq!(
+            pool.positions(&filler).liabilities.get(0),
+            Some(70 * lending::SCALAR_7)
+        );
+        assert_eq!(
+            pool.backstop_loss_state(),
+            BackstopLossState {
+                committed_loss_entries: 0,
+                liability_entries: 1,
+                unresolved_bad_debt_entries: 0,
+            }
+        );
+        assert!(!pool.backstop_withdrawal_allowed(&backstop_id));
     }
 
     #[test]

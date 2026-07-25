@@ -4,10 +4,10 @@ use crate::{
     get_backstop, get_backstop_liability,
     lending::{
         checked_add, checked_sub_nonnegative, config, mul_div_ceil, mul_div_floor,
-        position_data_with_prices, positions, reserve_config, set_positions, Positions, PriceQuote,
-        SCALAR_7,
+        position_data_with_prices, positions, require_position_limits, reserve_config,
+        set_positions, Positions, PriceQuote, SCALAR_7,
     },
-    BackstopClient, PoolError,
+    set_backstop_liability, BackstopClient, PoolError,
 };
 
 pub const ACTION_FILL_USER_LIQUIDATION: u32 = 6;
@@ -55,16 +55,33 @@ pub struct BadDebtLotQuote {
     pub valid_until: u64,
 }
 
-/// Prepared bad-debt auction data. No fill path is exposed yet.
+/// Prepared or partially filled bad-debt auction data.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct BadDebtAuctionData {
     pub auction_id: BytesN<32>,
-    /// dToken shares a future filler will assume, keyed by reserve asset.
+    /// Remaining base dToken shares, keyed by reserve asset.
     pub bid: Map<Address, i128>,
-    /// Ledger on which a future fill may begin.
+    /// Ledger on which filling may begin.
     pub block: u32,
     pub lot_quote: BadDebtLotQuote,
+}
+
+/// Exact amounts processed by one bad-debt auction fill.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BadDebtAuctionFill {
+    pub auction_id: BytesN<32>,
+    /// Base lot removed from the commitment before the time modifier.
+    pub base_lot_amount: i128,
+    /// Time-scaled dToken shares assumed by the filler.
+    pub bid: Map<Address, i128>,
+    pub block: u32,
+    /// True when no base bid or lot remains in the auction.
+    pub complete: bool,
+    /// Time-scaled tier-token amount transferred to the filler.
+    pub lot_amount: i128,
+    pub tier: BackstopTier,
 }
 
 #[contractevent]
@@ -102,6 +119,14 @@ pub struct BadDebtAuctionCreated {
 pub struct BadDebtAuctionDeleted {
     pub auction_id: BytesN<32>,
     pub stale: bool,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BadDebtAuctionFilled {
+    pub fill: BadDebtAuctionFill,
+    pub filler: Address,
+    pub percent: u32,
 }
 
 #[derive(Clone)]
@@ -189,6 +214,105 @@ pub(crate) fn get_bad_debt_auction(env: &Env) -> BadDebtAuctionData {
         .temporary()
         .get(&AuctionDataKey::BadDebt)
         .unwrap_or_else(|| panic_with_error!(env, PoolError::AuctionNotFound))
+}
+
+pub(crate) fn fill_bad_debt_auction(
+    env: &Env,
+    filler: &Address,
+    percent: u32,
+) -> BadDebtAuctionFill {
+    let pool = env.current_contract_address();
+    let backstop = get_backstop(env);
+    if filler == &pool || filler == &backstop || percent == 0 || percent > 100 {
+        panic_with_error!(env, PoolError::InvalidLiquidation);
+    }
+    filler.require_auth();
+    if has_user_liquidation(env, filler) {
+        panic_with_error!(env, PoolError::AuctionInProgress);
+    }
+
+    let auction = get_bad_debt_auction(env);
+    let (fill, remaining_bid, remaining_lot_amount) =
+        scale_bad_debt_auction(env, &auction, percent);
+    let mut backstop_positions = positions(env, &backstop);
+    let mut filler_positions = positions(env, filler);
+    let filler_previous_count = filler_positions.effective_count();
+    for (asset, _) in auction.bid.iter() {
+        let reserve = reserve_config(env, &asset);
+        if get_backstop_liability(env, &asset)
+            != backstop_positions
+                .liabilities
+                .get(reserve.index)
+                .unwrap_or(0)
+        {
+            panic_with_error!(env, PoolError::InvalidAuctionBid);
+        }
+    }
+    remove_positions(env, &mut backstop_positions, &Map::new(env), &fill.bid);
+    add_positions(env, &mut filler_positions, &Map::new(env), &fill.bid);
+    let mut prices = Map::new(env);
+    require_position_limits(env, &filler_positions, filler_previous_count, &mut prices);
+
+    let remaining_quote = BackstopClient::new(env, &backstop).settle_bad_debt_lot(
+        &pool,
+        &auction.auction_id,
+        &fill.base_lot_amount,
+        &fill.lot_amount,
+        filler,
+    );
+    if fill.complete != remaining_quote.is_none() {
+        panic_with_error!(env, PoolError::InvalidAuctionLot);
+    }
+    if let Some(remaining_quote) = remaining_quote {
+        let expected_committed_value = mul_div_floor(
+            env,
+            auction.lot_quote.committed_value,
+            remaining_lot_amount,
+            auction.lot_quote.lot_amount,
+        );
+        if remaining_quote.lot_amount != remaining_lot_amount
+            || remaining_quote.committed_value != expected_committed_value
+            || remaining_quote.debt_value != auction.lot_quote.debt_value
+            || remaining_quote.tier != auction.lot_quote.tier
+            || remaining_quote.target_value != auction.lot_quote.target_value
+            || remaining_quote.unfilled_target_value != auction.lot_quote.unfilled_target_value
+            || remaining_quote.valid_until != auction.lot_quote.valid_until
+        {
+            panic_with_error!(env, PoolError::InvalidAuctionLot);
+        }
+        set_bad_debt_auction(
+            env,
+            &BadDebtAuctionData {
+                auction_id: auction.auction_id.clone(),
+                bid: remaining_bid,
+                block: auction.block,
+                lot_quote: remaining_quote,
+            },
+        );
+    } else {
+        env.storage().temporary().remove(&AuctionDataKey::BadDebt);
+    }
+
+    set_positions(env, &backstop, &backstop_positions);
+    set_positions(env, filler, &filler_positions);
+    for (asset, _) in fill.bid.iter() {
+        let reserve = reserve_config(env, &asset);
+        set_backstop_liability(
+            env,
+            &asset,
+            backstop_positions
+                .liabilities
+                .get(reserve.index)
+                .unwrap_or(0),
+        );
+    }
+    BadDebtAuctionFilled {
+        fill: fill.clone(),
+        filler: filler.clone(),
+        percent,
+    }
+    .publish(env);
+    fill
 }
 
 pub(crate) fn delete_stale_bad_debt_auction(env: &Env) {
@@ -520,32 +644,7 @@ fn scale_auction(
     auction: &AuctionData,
     percent: u32,
 ) -> (AuctionData, Option<AuctionData>) {
-    let current_ledger = env.ledger().sequence();
-    if current_ledger < auction.block {
-        panic_with_error!(env, PoolError::AuctionNotStarted);
-    }
-    let elapsed = current_ledger - auction.block;
-    let (bid_modifier, lot_modifier) = if elapsed > AUCTION_PRICE_HALF_LEDGERS {
-        let bid_modifier = if elapsed < AUCTION_PRICE_LEDGERS {
-            checked_sub_nonnegative(
-                env,
-                SCALAR_7,
-                i128::from(elapsed - AUCTION_PRICE_HALF_LEDGERS)
-                    .checked_mul(AUCTION_MODIFIER_PER_LEDGER)
-                    .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError)),
-            )
-        } else {
-            0
-        };
-        (bid_modifier, SCALAR_7)
-    } else {
-        (
-            SCALAR_7,
-            i128::from(elapsed)
-                .checked_mul(AUCTION_MODIFIER_PER_LEDGER)
-                .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError)),
-        )
-    };
+    let (bid_modifier, lot_modifier) = auction_modifiers(env, auction.block);
     let percent_scaled = i128::from(percent)
         .checked_mul(100_000)
         .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError));
@@ -585,6 +684,81 @@ fn scale_auction(
         (filled, None)
     } else {
         (filled, Some(remaining))
+    }
+}
+
+fn scale_bad_debt_auction(
+    env: &Env,
+    auction: &BadDebtAuctionData,
+    percent: u32,
+) -> (BadDebtAuctionFill, Map<Address, i128>, i128) {
+    if percent == 0 || percent > 100 {
+        panic_with_error!(env, PoolError::InvalidLiquidation);
+    }
+    let (bid_modifier, lot_modifier) = auction_modifiers(env, auction.block);
+    let percent_scaled = i128::from(percent)
+        .checked_mul(100_000)
+        .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError));
+    let mut filled_bid = Map::new(env);
+    let mut remaining_bid = Map::new(env);
+    for (asset, amount) in auction.bid.iter() {
+        let base = mul_div_ceil(env, amount, percent_scaled, SCALAR_7);
+        let remainder = checked_sub_nonnegative(env, amount, base);
+        if remainder > 0 {
+            remaining_bid.set(asset.clone(), remainder);
+        }
+        let scaled = mul_div_ceil(env, base, bid_modifier, SCALAR_7);
+        if scaled > 0 {
+            filled_bid.set(asset, scaled);
+        }
+    }
+    let base_lot_amount =
+        mul_div_floor(env, auction.lot_quote.lot_amount, percent_scaled, SCALAR_7);
+    let remaining_lot_amount =
+        checked_sub_nonnegative(env, auction.lot_quote.lot_amount, base_lot_amount);
+    let lot_amount = mul_div_floor(env, base_lot_amount, lot_modifier, SCALAR_7);
+    let complete = remaining_bid.is_empty() && remaining_lot_amount == 0;
+    (
+        BadDebtAuctionFill {
+            auction_id: auction.auction_id.clone(),
+            base_lot_amount,
+            bid: filled_bid,
+            block: auction.block,
+            complete,
+            lot_amount,
+            tier: auction.lot_quote.tier,
+        },
+        remaining_bid,
+        remaining_lot_amount,
+    )
+}
+
+fn auction_modifiers(env: &Env, block: u32) -> (i128, i128) {
+    let current_ledger = env.ledger().sequence();
+    if current_ledger < block {
+        panic_with_error!(env, PoolError::AuctionNotStarted);
+    }
+    let elapsed = current_ledger - block;
+    if elapsed > AUCTION_PRICE_HALF_LEDGERS {
+        let bid_modifier = if elapsed < AUCTION_PRICE_LEDGERS {
+            checked_sub_nonnegative(
+                env,
+                SCALAR_7,
+                i128::from(elapsed - AUCTION_PRICE_HALF_LEDGERS)
+                    .checked_mul(AUCTION_MODIFIER_PER_LEDGER)
+                    .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError)),
+            )
+        } else {
+            0
+        };
+        (bid_modifier, SCALAR_7)
+    } else {
+        (
+            SCALAR_7,
+            i128::from(elapsed)
+                .checked_mul(AUCTION_MODIFIER_PER_LEDGER)
+                .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError)),
+        )
     }
 }
 

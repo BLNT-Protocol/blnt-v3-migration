@@ -86,9 +86,12 @@ value in strict BLND:USDC LP, BLND:XLM LP, then plain-USDC order. An
 authenticated healthy filler assumes the time-scaled dToken bid and receives
 the time-scaled tier token directly. The three-tier backstop impairs its
 pool-local asset/share exchange rate only by the amount actually transferred,
-so active and queued shares absorb the loss proportionally. Automatic
-next-tier continuation, supplier residual settlement, and user-liquidation
-bad-debt handoff remain disabled.
+so active and queued shares absorb the loss proportionally. After an auction
+ends, any caller can continue the waterfall in a separate bounded transaction.
+The pool prepares the next strict-priority tier auction while one qualifies;
+only a verified no-eligible-tier quote defaults all residual backstop
+liabilities to suppliers using Blend v2's bToken exchange-rate reduction.
+User-liquidation bad-debt handoff remains disabled.
 
 Run both lanes:
 

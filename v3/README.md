@@ -47,9 +47,11 @@ dust stays segregated in the backfill reserve. The backstop can reserve and
 settle a single-tier bad-debt auction by transferring the time-scaled tier
 token directly to the filler and impairing the pool-tier exchange rate by
 exactly that transferred amount. It intentionally does not yet implement
-automatic next-tier continuation, supplier residual settlement,
 user-liquidation bad-debt handoff, interest auctions, or ongoing-emission
-accrual.
+accrual. The pool implements next-step bad-debt continuation as a separate
+permissionless transaction: it either commits the next eligible strict-tier
+lot or, after a verified no-eligible-tier quote, reduces affected reserves'
+bToken exchange rates using Blend v2's supplier-default arithmetic.
 Each pool and tier stores separate accounted assets and shares. Deposits mint
 shares with floor rounding at the current exchange rate, withdrawals redeem
 assets with floor rounding, and the final share sweeps residual conversion
@@ -101,9 +103,11 @@ than being treated as clear. There is no administrator-controlled withdrawal
 override. Ordinary borrow and repay operations synchronize the configured
 backstop's liability record atomically. Bad-debt fills move their scaled dToken
 bid from the backstop to a healthy authenticated filler and synchronize those
-same records atomically. Future interest-auction and residual-loss entry points
-must update the other records with their real protocol transitions. The pool
-now implements permissionless v2-compatible
+same records atomically. Permissionless bad-debt continuation either prepares
+the next strict-tier auction or clears all residual canonical liabilities
+atomically while applying their asset loss to suppliers. Future
+interest-auction entry points must update the other records with their real
+protocol transitions. The pool now implements permissionless v2-compatible
 user-liquidation creation and request-type-6 fills, including the inherited
 400-ledger auction curve, partial fills, status-gated request-type-9
 cancellation, and permissionless stale deletion. Active auctions block ordinary
@@ -123,10 +127,12 @@ releases the commitment. A permissionless authenticated filler may assume the
 time-scaled dToken bid and receive the selected tier token directly. Partial
 fills remove the percentage-selected base lot from the reservation while only
 the time-scaled transfer impairs active and queued shares. The pool and
-backstop update atomically, including token-transfer failure. Automatic
-next-tier continuation, supplier residual settlement, user-liquidation
-bad-debt handoff, and interest auctions remain unimplemented, so the current
-pool is not yet a complete lending market.
+backstop update atomically, including token-transfer failure. Once no auction
+is active, any caller can continue resolution. A qualifying tier creates the
+next auction; a verified result that all tiers are below $200 defaults every
+remaining backstop liability through the affected reserves' supplier exchange
+rates. User-liquidation bad-debt handoff and interest auctions remain
+unimplemented, so the current pool is not yet a complete lending market.
 
 The v3 pool factory stores immutable backstop and pool-WASM configuration,
 deploys pools with explicit immutable operators, lending configuration, and
@@ -171,7 +177,7 @@ matrix.
 
 The loss-waterfall auction boundary selects at most one of BLND:USDC LP,
 BLND:XLM LP, and plain USDC in that order. A tier must have at least $200 of
-verified value to be auctioned; suppliers absorb a future residual only after
+verified value to be auctioned; suppliers absorb a residual only after
 all three tiers are below that operational minimum or otherwise exhausted. The
 implemented fill transfers the selected token directly to a healthy filler;
 the protocol performs no swap. Only the actual time-scaled transfer impairs
@@ -179,8 +185,9 @@ the tier exchange rate, including active and queued shares proportionally. The
 tiers have take-rate weights `2.5,2.5,2`, represented exactly on-chain as
 `5:5:4`; each tier's allocation is proportional to its reward-eligible USDC
 value multiplied by its weight. This priority and weighting do not change
-equal-USDC activation accounting. Automatic next-tier sequencing, supplier
-residual settlement, and take-rate accrual remain implementation work.
+equal-USDC activation accounting. Permissionless next-tier sequencing and
+v2-style supplier residual settlement are implemented as a separate bounded
+continuation call. Take-rate accrual remains implementation work.
 
 The backstop also exposes arithmetic-only ongoing BLND-emission quotes for the
 backstop-depositor tranche. Active pools are weighted by eligible underlying

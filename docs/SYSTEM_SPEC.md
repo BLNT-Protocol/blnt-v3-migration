@@ -542,9 +542,11 @@ resolve liability records. Bad-debt auction preparation now creates the
 canonical singleton commitment atomically with the backstop reservation.
 Bad-debt fills atomically move scaled dToken liabilities to a healthy filler,
 transfer the scaled tier-token lot, impair the pool-tier exchange rate, and
-update the singleton commitment. Automatic next-tier sequencing, supplier
-residual settlement, user-liquidation bad-debt handoff, and interest auctions
-remain unimplemented.
+update the singleton commitment. Permissionless continuation either prepares
+the next eligible strict-tier auction or, only after the backstop verifies
+that all tiers are below the auction minimum, clears the residual canonical
+liabilities while applying the loss to suppliers. User-liquidation bad-debt
+handoff and interest auctions remain unimplemented.
 
 ## 8. Pool activation
 
@@ -991,13 +993,55 @@ all succeed or roll back together.
 At the late bid-discount portion of the inherited curve, a complete auction can
 leave dToken liabilities assigned to the backstop because the removed base bid
 can exceed the time-scaled bid assumed by the filler. Those canonical
-liabilities continue to block withdrawal. Automatic preparation of a
-subsequent tier auction, exhaustion tracking, and supplier residual settlement
-remain implementation work. Future settlement MUST complete or otherwise
-resolve the current tier auction before preparing a later tier. Suppliers MUST
-NOT absorb a residual until all three tiers have been successfully valued
-below 200 USDC or have otherwise been exhausted by completed settlement. A
-failed path MUST NOT silently skip a tier or charge a later tier.
+liabilities continue to block withdrawal.
+
+Once no bad-debt auction is active, any caller may invoke
+`continue_bad_debt_resolution` with the identifier for a possible next
+auction. The call requires no caller authorization and performs one bounded
+step. It validates every configured-backstop liability against the pool's
+canonical reserve-keyed records. Unknown, missing, negative, or inconsistent
+records fail atomically. When the liability set is larger than one auction's
+position bound, the next bid batch is selected deterministically in immutable
+reserve-list order and contains at most
+`min(max_positions - 1, MAX_BAD_DEBT_BID_ASSETS)` reserve assets. The
+candidate fixes `MAX_BAD_DEBT_BID_ASSETS` at four so stateful per-reserve
+oracle reads retain ledger-footprint headroom while the same call validates
+the complete reserve set and may default it to suppliers.
+
+The pool values that batch with its immutable reserve oracle and asks the
+configured backstop for the next lot. If the first qualifying tier exists, the
+pool commits the returned quote under the supplied identifier and creates the
+next-ledger auction. The quote used for the decision and the committed quote
+MUST be identical. The strict tier search begins again on every continuation,
+so a tier is reused while its remaining uncommitted value is still at least
+200 USDC; later tiers cannot be reached merely because an earlier auction
+completed.
+
+If and only if the backstop successfully returns no eligible tier, the pool
+defaults every remaining canonical backstop liability to suppliers in the
+same transaction. Because a no-lot result means each of BLND:USDC LP,
+BLND:XLM LP, and plain USDC was successfully valued below 200 USDC, invalid,
+unavailable, or stale valuation fails closed before supplier loss. The
+supplier-default loop is bounded by the immutable 30-reserve maximum.
+
+For each affected reserve, the pool first accrues interest and then applies
+Blend v2's default arithmetic:
+
+```text
+default_asset_amount = ceil(d_tokens * d_rate / 10^12)
+b_rate_loss = ceil(default_asset_amount * 10^12 / b_supply)
+new_b_rate = max(previous_b_rate - b_rate_loss, 0)
+```
+
+The default removes the configured backstop's full dToken position, reduces
+reserve `d_supply` by the same shares, leaves `b_supply` unchanged, and emits
+the dToken, underlying-asset, and before/after bRate amounts. A missing
+supplier base, arithmetic failure, or inconsistent reserve state fails the
+entire call. After every reserve succeeds, the canonical liability map is
+cleared and backstop withdrawal eligibility is recomputed from the remaining
+loss records. No token transfer occurs during supplier default. If the loss
+exceeds supplier value, bRate intentionally saturates at zero as it does in
+v2.
 
 Emission weights do not need to follow loss priority. Any difference MUST be
 explicit and tested.
@@ -1358,9 +1402,8 @@ implemented:
 - Production LP price sources, averaging, staleness, and failure policy.
 - Production lending-reserve admission policy for issuer controls, clawback,
   deauthorization, rebasing, and other nonstandard token behavior.
-- Automatic next-tier bad-debt sequencing, supplier residual settlement, and
-  user-liquidation bad-debt handoff, including the remaining committed-loss and
-  unresolved-bad-debt transitions.
+- User-liquidation bad-debt handoff, including the remaining unresolved
+  bad-debt transition.
 - Interest-auction entry points and settlement.
 - Exact take-rate accrual integration and distribution cadence.
 - Post-migration designated token.
@@ -1390,12 +1433,12 @@ implemented:
    timestamps or economic state.
 8. Implement single-tier bad-debt auction filling atomically across pool
    liabilities, filler health, backstop commitments, tier-token transfer, and
-   pool-tier exchange-rate impairment; then add automatic next-tier sequencing
-   and supplier residual settlement.
+   pool-tier exchange-rate impairment; then add permissionless next-tier
+   sequencing and v2-style supplier residual settlement.
 
 Milestones 1 through 5, the bounded-Q4W and canonical-loss-state-boundary
-portions of milestone 6, and the reproducible deployment runner for the local
-portion of milestone 7 are
+portions of milestone 6, the reproducible deployment runner for the local
+portion of milestone 7, and milestone 8 are
 represented by the frozen v2 baseline, isolated Protocol-27 backstop crate,
 cross-version legacy-emitter migration harness, the candidate's
 pool-attributed continuous BLND:USDC shares, time-weighted migration
@@ -1417,16 +1460,17 @@ user-liquidation creation and fills with an explicit pre-waterfall bad-debt
 boundary, pool-authorized preparation of one single-tier,
 200-USDC-minimum bad-debt lot in strict waterfall order, atomic partial and
 complete single-tier fills using the inherited v2 curve, direct tier-token
-transfer with proportional active-and-queued exchange-rate impairment, and a
-fail-closed pool callback derived from bounded canonical loss records.
+transfer with proportional active-and-queued exchange-rate impairment,
+permissionless bounded continuation that reuses each eligible tier before
+advancing, v2-style residual supplier loss after a verified no-tier quote, and
+a fail-closed pool callback derived from bounded canonical loss records.
 The local runner deploys independently issued assets, a
 coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
 local run, the public-testnet exercise, user-liquidation bad-debt handoff,
-automatic next-tier and supplier residual settlement, interest auctions, a
-production LP valuation source, take-rate realization, and ongoing
-BLND-emission accrual remain intentionally unimplemented.
+interest auctions, a production LP valuation source, take-rate realization,
+and ongoing BLND-emission accrual remain intentionally unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

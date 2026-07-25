@@ -86,6 +86,14 @@ side effect of work in this repository.
   canonical backstop liabilities, the pool auction, the backstop commitment,
   the token transfer, and the exchange-rate impairment must succeed or roll
   back atomically.
+- Bad-debt continuation is a separate permissionless bounded transaction and
+  requires no active bad-debt auction. It restarts strict tier selection and
+  must reuse an earlier tier while that tier remains eligible.
+- Supplier loss is permitted only after the configured backstop successfully
+  reports that all three tiers are below the $200 minimum. It must accrue each
+  affected reserve and apply Blend v2's ceiling-rounded bToken exchange-rate
+  loss with intentional saturation at zero; stale or unavailable valuation
+  fails closed.
 - Legacy migration qualification uses the candidate contract's direct balance
   of the incumbent emitter-designated token and requires a strictly greater
   balance.

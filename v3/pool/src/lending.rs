@@ -630,6 +630,50 @@ pub(crate) fn set_positions(env: &Env, user: &Address, positions: &Positions) {
         .extend_ttl(&key, USER_TTL_THRESHOLD, USER_TTL_BUMP);
 }
 
+/// Remove one account's entire liability in a reserve and pass the equivalent
+/// asset loss to that reserve's suppliers through its bToken exchange rate.
+///
+/// The rounding and zero-rate saturation intentionally match Blend v2's
+/// `default_liabilities` behavior. The caller is responsible for persisting
+/// `positions` after all atomic defaults have been applied.
+pub(crate) fn default_liability_to_suppliers(
+    env: &Env,
+    positions: &mut Positions,
+    asset: &Address,
+    amount: i128,
+) -> (i128, i128, i128) {
+    if amount <= 0 {
+        panic_with_error!(env, PoolError::InvalidAuctionBid);
+    }
+
+    let mut reserve = accrue_reserve(env, asset);
+    if positions.liabilities.get(reserve.config.index).unwrap_or(0) != amount
+        || reserve.data.b_supply <= 0
+    {
+        panic_with_error!(env, PoolError::InvalidAuctionBid);
+    }
+
+    let default_amount = to_asset_from_d_tokens(env, &reserve, amount);
+    let previous_b_rate = reserve.data.b_rate;
+    let b_rate_loss = mul_div_ceil(env, default_amount, SCALAR_12, reserve.data.b_supply);
+
+    remove_position(
+        env,
+        &mut positions.liabilities,
+        reserve.config.index,
+        amount,
+    );
+    reserve.data.d_supply = checked_sub_nonnegative(env, reserve.data.d_supply, amount);
+    reserve.data.b_rate = if b_rate_loss >= previous_b_rate {
+        0
+    } else {
+        checked_sub_nonnegative(env, previous_b_rate, b_rate_loss)
+    };
+    set_reserve_data(env, asset, &reserve.data);
+
+    (default_amount, previous_b_rate, reserve.data.b_rate)
+}
+
 pub(crate) fn reserve_config(env: &Env, asset: &Address) -> ReserveConfig {
     env.storage()
         .instance()
@@ -1117,6 +1161,79 @@ mod tests {
             calculate_accrual(&env, &config, 9_696_969, SCALAR_7, 0, 500),
             (1_000_018_247_510, 10_002_196)
         );
+    }
+
+    #[test]
+    fn supplier_default_matches_v2_ceiling_rounding_and_zero_saturation() {
+        let env = Env::default();
+        let reserve = interest_config(&env);
+        let lending_config = LendingConfig {
+            backstop_take_rate: 0,
+            max_positions: 2,
+            min_collateral: 0,
+            oracle: Address::generate(&env),
+            price_decimals: 7,
+        };
+        let contract = env.register(
+            crate::PoolContract,
+            (
+                &Address::generate(&env),
+                &Address::generate(&env),
+                &lending_config,
+                &soroban_sdk::vec![&env, reserve.clone()],
+            ),
+        );
+
+        env.as_contract(&contract, || {
+            set_reserve_data(
+                &env,
+                &reserve.asset,
+                &ReserveData {
+                    b_rate: 2 * SCALAR_12,
+                    b_supply: 3,
+                    backstop_credit: 0,
+                    d_rate: 1_500_000_000_001,
+                    d_supply: 2,
+                    ir_mod: SCALAR_7,
+                    last_time: env.ledger().timestamp(),
+                },
+            );
+            let mut positions = Positions::empty(&env);
+            positions.liabilities.set(0, 2);
+
+            let result = default_liability_to_suppliers(&env, &mut positions, &reserve.asset, 2);
+
+            assert_eq!(result, (4, 2 * SCALAR_12, 666_666_666_666));
+            assert!(positions.liabilities.is_empty());
+            let data = reserve_data(&env, &reserve.asset);
+            assert_eq!(data.d_supply, 0);
+            assert_eq!(data.b_supply, 3);
+            assert_eq!(data.b_rate, 666_666_666_666);
+
+            set_reserve_data(
+                &env,
+                &reserve.asset,
+                &ReserveData {
+                    b_rate: SCALAR_12,
+                    b_supply: 3,
+                    backstop_credit: 0,
+                    d_rate: 2 * SCALAR_12,
+                    d_supply: 4,
+                    ir_mod: SCALAR_7,
+                    last_time: env.ledger().timestamp(),
+                },
+            );
+            positions.liabilities.set(0, 4);
+
+            let saturated = default_liability_to_suppliers(&env, &mut positions, &reserve.asset, 4);
+
+            assert_eq!(saturated, (8, SCALAR_12, 0));
+            assert!(positions.liabilities.is_empty());
+            let saturated_data = reserve_data(&env, &reserve.asset);
+            assert_eq!(saturated_data.d_supply, 0);
+            assert_eq!(saturated_data.b_supply, 3);
+            assert_eq!(saturated_data.b_rate, 0);
+        });
     }
 
     #[test]

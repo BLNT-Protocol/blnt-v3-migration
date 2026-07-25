@@ -198,6 +198,36 @@ fn lending_reserve_config(asset: &Address, index: u32) -> v3_pool_factory::Reser
         util: 7_500_000,
     }
 }
+
+fn direct_lending_config(oracle: &Address) -> v3_pool::LendingConfig {
+    v3_pool::LendingConfig {
+        backstop_take_rate: 0,
+        max_positions: 4,
+        min_collateral: 0,
+        oracle: oracle.clone(),
+        price_decimals: 7,
+    }
+}
+
+fn direct_lending_reserve_config(asset: &Address, index: u32) -> v3_pool::ReserveConfig {
+    v3_pool::ReserveConfig {
+        asset: asset.clone(),
+        c_factor: 8_000_000,
+        decimals: 7,
+        enabled: true,
+        index,
+        l_factor: 9_000_000,
+        max_util: 9_500_000,
+        r_base: 100_000,
+        r_one: 500_000,
+        r_three: 15_000_000,
+        r_two: 5_000_000,
+        reactivity: 20,
+        supply_cap: 1_000_000_000_000_000,
+        util: 7_500_000,
+    }
+}
+
 const QUEUE_SECONDS: u64 = 31 * 24 * 60 * 60;
 const PREPARATION_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 const SYNC_GRACE_SECONDS: u64 = 7 * 24 * 60 * 60;
@@ -1030,12 +1060,14 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
     );
 
     env.ledger()
-        .set_sequence_number(bad_debt_auction.block + 200);
+        .set_sequence_number(bad_debt_auction.block + 300);
     let second_fill = pool.fill_bad_debt_auction(&bad_debt_filler, &100);
     assert!(second_fill.complete);
+    let debt_before_second = backstop_debt - expected_first_bid;
+    let expected_second_bid = (debt_before_second + 1) / 2;
     assert_eq!(
-        second_fill.bid.get(next_token_id),
-        Some(backstop_debt - expected_first_bid)
+        second_fill.bid.get(next_token_id.clone()),
+        Some(expected_second_bid)
     );
     assert_eq!(
         second_fill.lot_amount,
@@ -1043,6 +1075,38 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
     );
     assert!(pool.try_get_bad_debt_auction().is_err());
     assert_eq!(candidate.pool_bad_debt_commitment_count(&pool_id), 0);
+    let residual_debt = debt_before_second - expected_second_bid;
+    assert_eq!(
+        pool.positions(&candidate_id).liabilities.get(1),
+        Some(residual_debt)
+    );
+    assert_eq!(
+        pool.backstop_loss_state(),
+        v3_pool::BackstopLossState {
+            committed_loss_entries: 0,
+            liability_entries: 1,
+            unresolved_bad_debt_entries: 0,
+        }
+    );
+    assert!(!pool.backstop_withdrawal_allowed(&candidate_id));
+
+    let continuation_id = BytesN::from_array(&env, &[24; 32]);
+    let continuation = pool.continue_bad_debt_resolution(&continuation_id);
+    assert!(continuation.auction_created);
+    assert!(continuation.defaulted.is_empty());
+    let continued_auction = pool.get_bad_debt_auction();
+    assert_eq!(continued_auction.auction_id, continuation_id);
+    assert_eq!(
+        continued_auction.lot_quote.tier,
+        v3_pool::BackstopTier::BlndUsdc
+    );
+    assert_eq!(
+        continued_auction.bid.get(next_token_id),
+        Some(residual_debt)
+    );
+    env.ledger()
+        .set_sequence_number(continued_auction.block + 200);
+    assert!(pool.fill_bad_debt_auction(&bad_debt_filler, &100).complete);
     assert!(pool.positions(&candidate_id).liabilities.is_empty());
     assert_eq!(
         pool.backstop_loss_state(),
@@ -1053,6 +1117,283 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
         }
     );
     assert!(pool.backstop_withdrawal_allowed(&candidate_id));
+}
+
+#[test]
+fn optimized_pool_defaults_residual_debt_only_after_backstop_exhaustion() {
+    let fixture = Fixture::create();
+    let env = &fixture.env;
+    let operator = Address::generate(env);
+    let pool_id = env.register(
+        v3_pool::WASM,
+        (
+            &fixture.candidate.address,
+            &operator,
+            &direct_lending_config(&fixture.valuation_adapter),
+            &soroban_sdk::vec![
+                env,
+                direct_lending_reserve_config(&fixture.legacy_token.address, 0),
+                direct_lending_reserve_config(&fixture.next_token, 1),
+            ],
+        ),
+    );
+    fixture.pool_factory.set_pool(&pool_id);
+    let pool = v3_pool::Client::new(env, &pool_id);
+    let activation_provider = Address::generate(env);
+    fixture
+        .legacy_token
+        .mint(&activation_provider, &(12_500 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_blnd_usdc(&activation_provider, &pool_id, &(12_500 * SCALAR_7));
+    assert_eq!(pool.set_pool_status(&0), 0);
+    let queued = fixture.candidate.queue_blnd_usdc_withdrawal(
+        &activation_provider,
+        &pool_id,
+        &(12_500 * SCALAR_7),
+    );
+    env.ledger().set_timestamp(queued.expires_at);
+    fixture.candidate.withdraw_blnd_usdc(
+        &activation_provider,
+        &pool_id,
+        &(12_500 * SCALAR_7),
+        &activation_provider,
+    );
+    let supplier = Address::generate(env);
+    let next_admin = StellarAssetClient::new(env, &fixture.next_token);
+    next_admin.mint(&supplier, &(1_000 * SCALAR_7));
+    fixture
+        .legacy_token
+        .mint(&fixture.candidate.address, &(100 * SCALAR_7));
+    pool.submit(
+        &supplier,
+        &supplier,
+        &supplier,
+        &soroban_sdk::vec![
+            env,
+            v3_pool::Request {
+                address: fixture.next_token.clone(),
+                amount: 1_000 * SCALAR_7,
+                request_type: 0,
+            }
+        ],
+    );
+    pool.submit(
+        &fixture.candidate.address,
+        &fixture.candidate.address,
+        &fixture.candidate.address,
+        &soroban_sdk::vec![
+            env,
+            v3_pool::Request {
+                address: fixture.legacy_token.address.clone(),
+                amount: 100 * SCALAR_7,
+                request_type: 2,
+            },
+            v3_pool::Request {
+                address: fixture.next_token.clone(),
+                amount: 50 * SCALAR_7,
+                request_type: 4,
+            },
+        ],
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .quote_bad_debt_lot(&pool_id, &(50 * SCALAR_7)),
+        None
+    );
+
+    let continuation = pool.continue_bad_debt_resolution(&BytesN::from_array(env, &[25; 32]));
+    assert!(!continuation.auction_created);
+    assert_eq!(
+        continuation.defaulted.get(fixture.next_token.clone()),
+        Some(50 * SCALAR_7)
+    );
+    assert!(pool
+        .positions(&fixture.candidate.address)
+        .liabilities
+        .is_empty());
+    let reserve = pool.reserve(&fixture.next_token).data;
+    assert_eq!(reserve.d_supply, 0);
+    assert_eq!(reserve.b_supply, 1_000 * SCALAR_7);
+    assert_eq!(reserve.b_rate, 950_000_000_000);
+    assert!(pool.backstop_withdrawal_allowed(&fixture.candidate.address));
+}
+
+#[test]
+fn optimized_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
+    let fixture = Fixture::create();
+    let env = &fixture.env;
+    let oracle = fixture.valuation_adapter.clone();
+    let oracle_client = v3_test_valuation_adapter::Client::new(env, &oracle);
+    let token_admin = Address::generate(env);
+    let mut reserve_assets = soroban_sdk::Vec::<Address>::new(env);
+    for _ in 0..30 {
+        let asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        oracle_client.set_price(
+            &asset,
+            &v3_test_valuation_adapter::PriceQuote {
+                decimals: 7,
+                price: SCALAR_7,
+                valid_until: u64::MAX,
+            },
+        );
+        reserve_assets.push_back(asset);
+    }
+    let mut reserves = soroban_sdk::Vec::<v3_pool::ReserveConfig>::new(env);
+    for (index, asset) in reserve_assets.iter().enumerate() {
+        reserves.push_back(direct_lending_reserve_config(&asset, index as u32));
+    }
+    let mut lending_config = direct_lending_config(&oracle);
+    lending_config.max_positions = 60;
+    let operator = Address::generate(env);
+    let pool_id = env.register(
+        v3_pool::WASM,
+        (
+            &fixture.candidate.address,
+            &operator,
+            &lending_config,
+            &reserves,
+        ),
+    );
+    fixture.pool_factory.set_pool(&pool_id);
+    let pool = v3_pool::Client::new(env, &pool_id);
+
+    let activation_provider = Address::generate(env);
+    fixture
+        .legacy_token
+        .mint(&activation_provider, &(12_500 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_blnd_usdc(&activation_provider, &pool_id, &(12_500 * SCALAR_7));
+    assert_eq!(pool.set_pool_status(&0), 0);
+    let queued = fixture.candidate.queue_blnd_usdc_withdrawal(
+        &activation_provider,
+        &pool_id,
+        &(12_500 * SCALAR_7),
+    );
+    env.ledger().set_timestamp(queued.expires_at);
+    fixture.candidate.withdraw_blnd_usdc(
+        &activation_provider,
+        &pool_id,
+        &(12_500 * SCALAR_7),
+        &activation_provider,
+    );
+    let dusty_tier_assets = 100 * SCALAR_7;
+    for token in [
+        fixture.legacy_token.address.clone(),
+        fixture.next_token.clone(),
+    ] {
+        oracle_client.set_valuation(
+            &token,
+            &v3_test_valuation_adapter::AssetValuation {
+                underlying_blnd: dusty_tier_assets,
+                usdc_value: dusty_tier_assets,
+                valid_until: u64::MAX,
+            },
+        );
+    }
+    let dust_provider = Address::generate(env);
+    fixture
+        .legacy_token
+        .mint(&dust_provider, &dusty_tier_assets);
+    StellarAssetClient::new(env, &fixture.next_token).mint(&dust_provider, &dusty_tier_assets);
+    StellarAssetClient::new(env, &fixture.prefund_token).mint(&dust_provider, &dusty_tier_assets);
+    fixture
+        .candidate
+        .deposit_blnd_usdc(&dust_provider, &pool_id, &dusty_tier_assets);
+    fixture
+        .candidate
+        .deposit_blnd_xlm(&dust_provider, &pool_id, &dusty_tier_assets);
+    fixture
+        .candidate
+        .deposit_usdc(&dust_provider, &pool_id, &dusty_tier_assets);
+    // The setup intentionally builds a maximum-size position over many
+    // invocations. Invocation-level mainnet limits remain enforced and are
+    // asserted explicitly for the continuation below.
+    env.cost_estimate().budget().reset_unlimited();
+
+    let supplier = Address::generate(env);
+    for asset in reserve_assets.iter() {
+        StellarAssetClient::new(env, &asset).mint(&supplier, &(100 * SCALAR_7));
+        pool.submit(
+            &supplier,
+            &supplier,
+            &supplier,
+            &soroban_sdk::vec![
+                env,
+                v3_pool::Request {
+                    address: asset,
+                    amount: 100 * SCALAR_7,
+                    request_type: 0,
+                }
+            ],
+        );
+    }
+
+    let collateral_asset = reserve_assets.get(0).unwrap();
+    StellarAssetClient::new(env, &collateral_asset)
+        .mint(&fixture.candidate.address, &(100 * SCALAR_7));
+    pool.submit(
+        &fixture.candidate.address,
+        &fixture.candidate.address,
+        &fixture.candidate.address,
+        &soroban_sdk::vec![
+            env,
+            v3_pool::Request {
+                address: collateral_asset,
+                amount: 100 * SCALAR_7,
+                request_type: 2,
+            }
+        ],
+    );
+    for asset in reserve_assets.iter() {
+        pool.submit(
+            &fixture.candidate.address,
+            &fixture.candidate.address,
+            &fixture.candidate.address,
+            &soroban_sdk::vec![
+                env,
+                v3_pool::Request {
+                    address: asset,
+                    amount: SCALAR_7,
+                    request_type: 4,
+                }
+            ],
+        );
+    }
+    assert_eq!(
+        pool.backstop_loss_state(),
+        v3_pool::BackstopLossState {
+            committed_loss_entries: 0,
+            liability_entries: 30,
+            unresolved_bad_debt_entries: 0,
+        }
+    );
+
+    let continuation = pool.continue_bad_debt_resolution(&BytesN::from_array(env, &[26; 32]));
+    let resources = env.cost_estimate().resources();
+    assert!(!continuation.auction_created);
+    assert_eq!(continuation.defaulted.len(), 30);
+    assert!(resources.instructions <= 600_000_000);
+    assert!(resources.mem_bytes <= 41_943_040);
+    assert!(resources.disk_read_entries <= 100);
+    assert!(resources.write_entries <= 50);
+    // Preserve at least ten entries of headroom beneath the mainnet total
+    // footprint limit for production-oracle implementation differences.
+    assert!(
+        resources.disk_read_entries + resources.memory_read_entries + resources.write_entries <= 90
+    );
+    assert!(resources.disk_read_bytes <= 200_000);
+    assert!(resources.write_bytes <= 132_096);
+    assert!(resources.contract_events_size_bytes <= 16_384);
+    assert!(pool
+        .positions(&fixture.candidate.address)
+        .liabilities
+        .is_empty());
+    assert!(pool.backstop_withdrawal_allowed(&fixture.candidate.address));
 }
 
 #[test]

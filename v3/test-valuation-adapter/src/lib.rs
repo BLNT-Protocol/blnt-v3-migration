@@ -27,6 +27,8 @@ pub struct PriceQuote {
 enum DataKey {
     BlndUsdc,
     BlndXlm,
+    Price(Address),
+    Valuation(Address),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -55,9 +57,36 @@ impl TestValuationAdapter {
         ADAPTER_VERSION
     }
 
+    /// Store a fixture price in its own persistent ledger entry.
+    ///
+    /// Compatibility resource tests use this path to model the per-asset
+    /// footprint of an optimized stateful oracle.
+    pub fn set_price(env: Env, asset: Address, quote: PriceQuote) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Price(asset), &quote);
+    }
+
+    /// Store an exact fixture valuation in its own persistent ledger entry.
+    ///
+    /// Resource tests use this to include stateful LP-valuation reads in the
+    /// measured bad-debt exhaustion path.
+    pub fn set_valuation(env: Env, token: Address, valuation: AssetValuation) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Valuation(token), &valuation);
+    }
+
     pub fn quote(env: Env, token: Address, amount: i128) -> AssetValuation {
         if amount <= 0 {
             panic_with_error!(&env, TestAdapterError::InvalidAmount);
+        }
+        if let Some(valuation) = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Valuation(token.clone()))
+        {
+            return valuation;
         }
         let blnd_usdc: Address = env.storage().instance().get(&DataKey::BlndUsdc).unwrap();
         let blnd_xlm: Address = env.storage().instance().get(&DataKey::BlndXlm).unwrap();
@@ -71,9 +100,17 @@ impl TestValuationAdapter {
         }
     }
 
-    /// Return a deterministic one-USDC lending price for either configured
-    /// fixture asset. This test-only interface is not a production oracle.
+    /// Return an explicitly stored fixture price, or a deterministic one-USDC
+    /// price for either configured LP token. This test-only interface is not a
+    /// production oracle.
     pub fn price(env: Env, asset: Address) -> PriceQuote {
+        if let Some(quote) = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Price(asset.clone()))
+        {
+            return quote;
+        }
         let blnd_usdc: Address = env.storage().instance().get(&DataKey::BlndUsdc).unwrap();
         let blnd_xlm: Address = env.storage().instance().get(&DataKey::BlndXlm).unwrap();
         if asset != blnd_usdc && asset != blnd_xlm {

@@ -405,12 +405,44 @@ The v3 tests must verify:
 - A complete fill removes both the pool auction and backstop commitment. A
   time-discounted dToken remainder stays assigned to the backstop, remains in
   canonical liability state, and continues to block withdrawals.
+- With no active bad-debt auction, any caller can invoke one bounded
+  continuation without authorization. An active auction rejects continuation.
+- Continuation validates the configured backstop's complete position against
+  every canonical reserve-liability record. Missing, unknown, negative, or
+  inconsistent state fails atomically.
+- A liability batch is selected in immutable reserve order and contains no
+  more than `min(max_positions - 1, 4)` assets. Repeated continuation
+  eventually covers a larger bounded liability set without exceeding the
+  auction position limit, while the four-asset cap preserves footprint
+  headroom for stateful per-reserve oracle reads.
+- When an eligible tier remains, continuation commits a quote identical to the
+  preceding read-only quote and creates the next-ledger auction under the
+  caller-supplied identifier. The same tier is selected again while it remains
+  at or above 200 USDC.
+- A backstop response indicating no eligible tier defaults every remaining
+  canonical liability to suppliers in one atomic, at-most-30-reserve loop. A
+  stale, invalid, or unavailable valuation traps and cannot enter this path.
+- Supplier default accrues each reserve, removes the backstop dToken position,
+  reduces `d_supply` by the same shares, preserves `b_supply`, and uses ceiling
+  rounding for both the dToken-to-asset conversion and bRate loss. The new
+  bRate saturates at zero exactly as in v2.
+- Supplier default transfers no tokens. It clears canonical liability records
+  only after every reserve succeeds, emits the before/after loss amounts, and
+  re-enables withdrawal only when no other canonical loss record remains.
 - The protocol transfers the selected tier token directly to the filler
   without a swap. Token-transfer failure rolls back the dToken movement,
   filler state, canonical liability, auction, commitment, and tier impairment.
 - Native tests and optimized-WASM tests cover authorization, pre-start
   rejection, unhealthy-filler rollback, partial and full fills, direct token
-  receipt, synchronized commitment state, and exact exchange-rate impairment.
+  receipt, synchronized commitment state, exact tier exchange-rate impairment,
+  repeated same-tier continuation, verified exhaustion, and exact supplier
+  exchange-rate impairment.
+- An optimized-WASM test constructs the maximum 30-reserve supplier-default
+  path with nonzero sub-threshold capital in all three tiers. Reserve prices
+  and both LP valuations use independent persistent entries. The test verifies
+  that the continuation remains within the SDK-27 mainnet invocation limits
+  for instructions, memory, footprint entries, read/write bytes, and contract
+  events.
 - Any caller may delete a prepared auction at, but not before, 500 ledgers,
   atomically releasing its backstop lot. The canonical liability remains and
   continues to block withdrawal until the debt is resolved.

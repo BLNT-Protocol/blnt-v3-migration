@@ -78,8 +78,10 @@ status transitions using that canonical boundary and an immutable pool-local
 operator. Its SDK-27 lending core executes the six non-auction v2 request
 types against immutable reserve configuration with checked interest, share,
 health, authorization, and token-transfer accounting. The pool also supports
-permissionless v2-compatible user-liquidation auctions and fails closed before
-any user fill that would require an unimplemented bad-debt handoff. It can
+permissionless v2-compatible user-liquidation auctions. Completion of an
+auction that exhausts the liquidatee's collateral atomically transfers all
+residual dToken liabilities to the configured backstop and its canonical loss
+records, without changing reserve dToken supply. It can
 prepare and atomically fill one pool-authorized, single-tier, 120%-of-debt
 backstop auction by selecting the first tier with at least $200 of verified
 value in strict BLND:USDC LP, BLND:XLM LP, then plain-USDC order. An
@@ -91,7 +93,9 @@ ends, any caller can continue the waterfall in a separate bounded transaction.
 The pool prepares the next strict-priority tier auction while one qualifies;
 only a verified no-eligible-tier quote defaults all residual backstop
 liabilities to suppliers using Blend v2's bToken exchange-rate reduction.
-User-liquidation bad-debt handoff remains disabled.
+An existing bad-debt auction remains unchanged when a later user liquidation
+adds liabilities; permissionless continuation handles those residual
+liabilities after the auction clears.
 
 Run both lanes:
 

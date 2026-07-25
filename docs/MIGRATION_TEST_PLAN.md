@@ -356,12 +356,30 @@ The v3 tests must verify:
   blocked under those statuses.
 - Any caller can delete an auction at, but not before, 500 ledgers after its
   start.
-- Until user-liquidation bad-debt handoff is implemented, a fill that would
-  worsen the liquidatee's effective health or leave collateral-free
-  liabilities fails atomically and preserves the auction, liquidatee, and
-  filler.
+- Completion of an auction that leaves nonzero liabilities and no collateral
+  atomically transfers every residual dToken share to the configured backstop,
+  accumulates same-reserve balances, updates canonical liability records, and
+  leaves reserve dToken supply unchanged.
+- Each transferred reserve emits a handoff event identifying the liquidatee,
+  configured backstop, asset, and dToken amount.
+- An incomplete fill that would exhaust collateral still fails atomically. A
+  fill that leaves collateral and liabilities but worsens the liquidatee's
+  effective health also fails atomically.
+- The handoff creates, fills, and resizes no bad-debt auction. If an earlier
+  bad-debt auction is active, its bid and committed tier lot remain unchanged;
+  newly handed-off liabilities remain canonical for later permissionless
+  continuation.
+- Checked overflow or canonical-record-capacity failure during a multi-reserve
+  handoff rolls back the auction, liquidatee, filler, backstop position,
+  canonical records, and events.
 - Native and optimized-WASM tests cover creation, partial or complete fills,
-  active-auction blocking, status enforcement, and rollback.
+  active-auction blocking, status enforcement, bad-debt handoff, existing
+  backstop-liability accumulation, active bad-debt-auction interaction, and
+  rollback.
+- An optimized-WASM test fills a completed liquidation with liabilities in all
+  30 reserves, verifies one canonical record per reserve and unchanged reserve
+  dToken supply, and measures the fill against SDK-27 mainnet instruction,
+  memory, footprint, byte, write-entry, and contract-event limits.
 
 ## Loss waterfall
 

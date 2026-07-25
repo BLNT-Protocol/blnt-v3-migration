@@ -545,8 +545,11 @@ transfer the scaled tier-token lot, impair the pool-tier exchange rate, and
 update the singleton commitment. Permissionless continuation either prepares
 the next eligible strict-tier auction or, only after the backstop verifies
 that all tiers are below the auction minimum, clears the residual canonical
-liabilities while applying the loss to suppliers. User-liquidation bad-debt
-handoff and interest auctions remain unimplemented.
+liabilities while applying the loss to suppliers. A completed
+user-liquidation auction that exhausts the liquidatee's collateral atomically
+hands every residual dToken liability to the configured backstop and updates
+the same canonical reserve-keyed records. Interest auctions remain
+unimplemented.
 
 ## 8. Pool activation
 
@@ -763,12 +766,12 @@ The initial lending core implements request types 0 through 5:
 | 4 | Borrow |
 | 5 | Repay |
 
-Request types 6 and 9 implement user-liquidation fill and cancellation.
-Remaining auction request types are reserved for future interest-auction and
-bad-debt-handoff integration. Each submitted request MUST enforce the stored
-v2-compatible status before changing accounting. Disabled reserves reject
-supply, collateral supply, and borrow but continue to permit withdrawal and
-repayment.
+Request types 6 and 9 implement user-liquidation fill and cancellation,
+including the completed-auction bad-debt handoff. Remaining auction request
+types are reserved for future interest-auction integration. Each submitted
+request MUST enforce the stored v2-compatible status before changing
+accounting. Disabled reserves reject supply, collateral supply, and borrow but
+continue to permit withdrawal and repayment.
 
 The request owner is `from`, the account providing incoming tokens is
 `spender`, and outgoing tokens are sent to `to`. `spender` MUST authorize every
@@ -871,14 +874,35 @@ any caller may delete an auction once 500 ledgers have elapsed from its start.
 Auction entries use temporary storage with a 45-day renewal threshold and a
 46-day bump. Creation and partial-fill writes apply that bounded TTL policy.
 
-V2 transfers collateral-free residual liabilities to its bad-debt engine after
-a full fill. V3 can prepare and fill a bad-debt auction for liabilities already
-assigned to its configured backstop, but user-liquidation fills do not yet hand
-new residual debt to that path. Until that handoff is implemented, any
-user-liquidation fill that would reduce the liquidatee's effective health
-factor, or remove all collateral while leaving a nonzero liability, MUST fail
-atomically with the auction and both accounts unchanged. This prevents the
-inherited bid-discount phase from manufacturing unhandled bad debt.
+Matching v2, completion of a user-liquidation auction MUST check whether the
+liquidatee has nonzero liabilities and no collateral. If so, the same
+transaction MUST:
+
+- move every residual dToken share from the liquidatee to the configured
+  backstop without changing reserve dToken supply;
+- accumulate each amount with any liability the backstop already holds in the
+  same reserve;
+- update every affected canonical reserve-keyed backstop-liability record;
+- clear the liquidatee's residual liabilities; and
+- emit one handoff event per affected reserve.
+
+The handoff MUST NOT prepare, resize, fill, or settle a bad-debt auction in the
+same submission. If an earlier bad-debt auction is active, its committed bid
+and tier lot remain unchanged; the newly assigned liabilities remain in
+canonical state and are picked up by a later permissionless continuation after
+the active auction is cleared. This permits new liquidations to complete
+without double-counting the earlier auction's bounded snapshot.
+
+An incomplete auction fill never performs the handoff. A fill that exhausts
+collateral while its auction remains incomplete MUST fail atomically. A fill
+that leaves collateral and liabilities but reduces the liquidatee's effective
+health factor MUST also fail atomically. These boundaries prevent a partial
+fill or an ineligible completed fill from manufacturing unhandled bad debt.
+The ordinary maximum-position, minimum-collateral, and health constraints
+continue to apply to the filler for the complete submission. The handoff loop
+is bounded by the immutable 30-reserve maximum and MUST batch its canonical
+liability-map mutation into one load and store. The maximum-reserve optimized
+WASM fill MUST remain within Protocol-27 mainnet invocation limits.
 
 ## 9. Loss waterfall
 
@@ -1402,8 +1426,6 @@ implemented:
 - Production LP price sources, averaging, staleness, and failure policy.
 - Production lending-reserve admission policy for issuer controls, clawback,
   deauthorization, rebasing, and other nonstandard token behavior.
-- User-liquidation bad-debt handoff, including the remaining unresolved
-  bad-debt transition.
 - Interest-auction entry points and settlement.
 - Exact take-rate accrual integration and distribution cadence.
 - Post-migration designated token.
@@ -1456,8 +1478,9 @@ canonical permissionless and operator status transitions, the v2-compatible
 action predicate, immutable lending and reserve configuration, the six
 non-auction v2 request types, v2-compatible reserve interest and share
 accounting, fail-closed oracle-valued health checks, v2-compatible
-user-liquidation creation and fills with an explicit pre-waterfall bad-debt
-boundary, pool-authorized preparation of one single-tier,
+user-liquidation creation and fills with atomic completed-auction handoff of
+collateral-free residual liabilities to the configured backstop,
+pool-authorized preparation of one single-tier,
 200-USDC-minimum bad-debt lot in strict waterfall order, atomic partial and
 complete single-tier fills using the inherited v2 curve, direct tier-token
 transfer with proportional active-and-queued exchange-rate impairment,
@@ -1468,9 +1491,9 @@ The local runner deploys independently issued assets, a
 coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
-local run, the public-testnet exercise, user-liquidation bad-debt handoff,
-interest auctions, a production LP valuation source, take-rate realization,
-and ongoing BLND-emission accrual remain intentionally unimplemented.
+local run, the public-testnet exercise, interest auctions, a production LP
+valuation source, take-rate realization, and ongoing BLND-emission accrual
+remain intentionally unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

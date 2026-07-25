@@ -7,7 +7,7 @@ use crate::{
         mul_div_floor, position_data_with_prices, positions, require_position_limits,
         reserve_config, reserve_list, set_positions, Positions, PriceQuote, SCALAR_7,
     },
-    set_backstop_liability, BackstopClient, PoolError,
+    set_backstop_liabilities, set_backstop_liability, BackstopClient, PoolError,
 };
 
 pub const ACTION_FILL_USER_LIQUIDATION: u32 = 6;
@@ -119,6 +119,15 @@ pub struct AuctionFilled {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuctionDeleted {
     pub stale: bool,
+    pub user: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserBadDebtTransferred {
+    pub asset: Address,
+    pub backstop: Address,
+    pub d_tokens: i128,
     pub user: Address,
 }
 
@@ -719,11 +728,21 @@ pub(crate) fn fill_user_liquidation(
     add_positions(env, filler_positions, &filled.lot, &filled.bid);
 
     if !liquidatee_positions.liabilities.is_empty() {
-        let liquidatee_after = position_data_with_prices(env, &liquidatee_positions, prices);
-        if liquidatee_positions.collateral.is_empty()
-            || liquidatee_after.is_hf_lower_than(env, &liquidatee_before)
-        {
-            panic_with_error!(env, PoolError::BadDebtUnsupported);
+        if remaining.is_none() && liquidatee_positions.collateral.is_empty() {
+            transfer_user_bad_debt(
+                env,
+                user,
+                filler,
+                &mut liquidatee_positions,
+                filler_positions,
+            );
+        } else {
+            let liquidatee_after = position_data_with_prices(env, &liquidatee_positions, prices);
+            if liquidatee_positions.collateral.is_empty()
+                || liquidatee_after.is_hf_lower_than(env, &liquidatee_before)
+            {
+                panic_with_error!(env, PoolError::BadDebtUnsupported);
+            }
         }
     }
 
@@ -741,6 +760,72 @@ pub(crate) fn fill_user_liquidation(
     }
     .publish(env);
     filled
+}
+
+/// Move every collateral-free residual dToken liability from a liquidated
+/// user to the configured backstop without changing reserve dToken supply.
+///
+/// The completed liquidation and this handoff share one Soroban transaction.
+/// Tier disposal remains a separate permissionless bad-debt continuation, so
+/// a pre-existing bad-debt auction is neither replaced nor resized here.
+fn transfer_user_bad_debt(
+    env: &Env,
+    user: &Address,
+    filler: &Address,
+    liquidatee_positions: &mut Positions,
+    filler_positions: &mut Positions,
+) {
+    let backstop = get_backstop(env);
+    let residual = liquidatee_positions.liabilities.clone();
+    if residual.is_empty() || !liquidatee_positions.collateral.is_empty() {
+        panic_with_error!(env, PoolError::BadDebtUnsupported);
+    }
+
+    let mut canonical_updates = Map::new(env);
+    if filler == &backstop {
+        for (index, amount) in residual.iter() {
+            if amount <= 0 {
+                panic_with_error!(env, PoolError::InvalidAuctionBid);
+            }
+            let asset = reserve_list(env)
+                .get(index)
+                .unwrap_or_else(|| panic_with_error!(env, PoolError::UnknownReserve));
+            add_position(env, &mut filler_positions.liabilities, index, amount);
+            let next = filler_positions.liabilities.get(index).unwrap_or(0);
+            canonical_updates.set(asset.clone(), next);
+            UserBadDebtTransferred {
+                asset,
+                backstop: backstop.clone(),
+                d_tokens: amount,
+                user: user.clone(),
+            }
+            .publish(env);
+        }
+    } else {
+        let mut backstop_positions = positions(env, &backstop);
+        for (index, amount) in residual.iter() {
+            if amount <= 0 {
+                panic_with_error!(env, PoolError::InvalidAuctionBid);
+            }
+            let asset = reserve_list(env)
+                .get(index)
+                .unwrap_or_else(|| panic_with_error!(env, PoolError::UnknownReserve));
+            add_position(env, &mut backstop_positions.liabilities, index, amount);
+            let next = backstop_positions.liabilities.get(index).unwrap_or(0);
+            canonical_updates.set(asset.clone(), next);
+            UserBadDebtTransferred {
+                asset,
+                backstop: backstop.clone(),
+                d_tokens: amount,
+                user: user.clone(),
+            }
+            .publish(env);
+        }
+        set_positions(env, &backstop, &backstop_positions);
+    }
+    set_backstop_liabilities(env, &canonical_updates);
+
+    liquidatee_positions.liabilities = Map::new(env);
 }
 
 pub(crate) fn cancel_user_liquidation(env: &Env, user: &Address) {

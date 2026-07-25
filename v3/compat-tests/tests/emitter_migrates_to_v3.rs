@@ -1120,6 +1120,363 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
 }
 
 #[test]
+fn optimized_pool_hands_liquidation_residual_to_active_backstop_auction_state() {
+    let fixture = Fixture::create();
+    let env = &fixture.env;
+    let operator = Address::generate(env);
+    let pool_id = env.register(
+        v3_pool::WASM,
+        (
+            &fixture.candidate.address,
+            &operator,
+            &direct_lending_config(&fixture.valuation_adapter),
+            &soroban_sdk::vec![
+                env,
+                direct_lending_reserve_config(&fixture.legacy_token.address, 0),
+                direct_lending_reserve_config(&fixture.next_token, 1),
+            ],
+        ),
+    );
+    fixture.pool_factory.set_pool(&pool_id);
+    let pool = v3_pool::Client::new(env, &pool_id);
+    let oracle = v3_test_valuation_adapter::Client::new(env, &fixture.valuation_adapter);
+
+    let activation_provider = Address::generate(env);
+    fixture
+        .legacy_token
+        .mint(&activation_provider, &(12_500 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_blnd_usdc(&activation_provider, &pool_id, &(12_500 * SCALAR_7));
+    assert_eq!(pool.set_pool_status(&0), 0);
+
+    let supplier = Address::generate(env);
+    let borrower = Address::generate(env);
+    let filler = Address::generate(env);
+    let next_admin = StellarAssetClient::new(env, &fixture.next_token);
+    next_admin.mint(&supplier, &(1_000 * SCALAR_7));
+    fixture
+        .legacy_token
+        .mint(&fixture.candidate.address, &(200 * SCALAR_7));
+    fixture.legacy_token.mint(&borrower, &(100 * SCALAR_7));
+    fixture.legacy_token.mint(&filler, &(200 * SCALAR_7));
+    pool.submit(
+        &supplier,
+        &supplier,
+        &supplier,
+        &soroban_sdk::vec![
+            env,
+            v3_pool::Request {
+                address: fixture.next_token.clone(),
+                amount: 1_000 * SCALAR_7,
+                request_type: 0,
+            },
+        ],
+    );
+    pool.submit(
+        &fixture.candidate.address,
+        &fixture.candidate.address,
+        &fixture.candidate.address,
+        &soroban_sdk::vec![
+            env,
+            v3_pool::Request {
+                address: fixture.legacy_token.address.clone(),
+                amount: 200 * SCALAR_7,
+                request_type: 2,
+            },
+            v3_pool::Request {
+                address: fixture.next_token.clone(),
+                amount: 10 * SCALAR_7,
+                request_type: 4,
+            },
+        ],
+    );
+    pool.submit(
+        &borrower,
+        &borrower,
+        &borrower,
+        &soroban_sdk::vec![
+            env,
+            v3_pool::Request {
+                address: fixture.legacy_token.address.clone(),
+                amount: 100 * SCALAR_7,
+                request_type: 2,
+            },
+            v3_pool::Request {
+                address: fixture.next_token.clone(),
+                amount: 70 * SCALAR_7,
+                request_type: 4,
+            },
+        ],
+    );
+    pool.submit(
+        &filler,
+        &filler,
+        &filler,
+        &soroban_sdk::vec![
+            env,
+            v3_pool::Request {
+                address: fixture.legacy_token.address.clone(),
+                amount: 200 * SCALAR_7,
+                request_type: 2,
+            },
+        ],
+    );
+
+    let bad_debt_auction = pool.new_bad_debt_auction(
+        &BytesN::from_array(env, &[26; 32]),
+        &soroban_sdk::vec![env, fixture.next_token.clone()],
+    );
+    assert_eq!(
+        bad_debt_auction.bid.get(fixture.next_token.clone()),
+        Some(10 * SCALAR_7)
+    );
+
+    oracle.set_price(
+        &fixture.legacy_token.address,
+        &v3_test_valuation_adapter::PriceQuote {
+            decimals: 7,
+            price: 5_000_000,
+            valid_until: u64::MAX,
+        },
+    );
+    let liquidation = pool.new_liquidation_auction(
+        &borrower,
+        &soroban_sdk::vec![env, fixture.next_token.clone()],
+        &soroban_sdk::vec![env, fixture.legacy_token.address.clone()],
+        &100,
+    );
+    let d_supply_before = pool.reserve(&fixture.next_token).data.d_supply;
+    env.ledger()
+        .set_sequence_number(liquidation.block.checked_add(300).unwrap());
+    pool.submit(
+        &filler,
+        &filler,
+        &filler,
+        &soroban_sdk::vec![
+            env,
+            v3_pool::Request {
+                address: borrower.clone(),
+                amount: 100,
+                request_type: 6,
+            },
+        ],
+    );
+
+    assert!(pool.try_get_liquidation_auction(&borrower).is_err());
+    assert!(pool.positions(&borrower).collateral.is_empty());
+    assert!(pool.positions(&borrower).liabilities.is_empty());
+    assert_eq!(
+        pool.positions(&fixture.candidate.address)
+            .liabilities
+            .get(1),
+        Some(45 * SCALAR_7)
+    );
+    assert_eq!(
+        pool.reserve(&fixture.next_token).data.d_supply,
+        d_supply_before
+    );
+    assert_eq!(pool.get_bad_debt_auction(), bad_debt_auction);
+    assert_eq!(
+        pool.backstop_loss_state(),
+        v3_pool::BackstopLossState {
+            committed_loss_entries: 1,
+            liability_entries: 1,
+            unresolved_bad_debt_entries: 0,
+        }
+    );
+    assert!(!pool.backstop_withdrawal_allowed(&fixture.candidate.address));
+}
+
+#[test]
+fn optimized_max_reserve_liquidation_handoff_fits_mainnet_invocation_limits() {
+    let fixture = Fixture::create();
+    let env = &fixture.env;
+    let oracle = fixture.valuation_adapter.clone();
+    let oracle_client = v3_test_valuation_adapter::Client::new(env, &oracle);
+    let token_admin = Address::generate(env);
+    let mut reserve_assets = soroban_sdk::Vec::<Address>::new(env);
+    for _ in 0..30 {
+        let asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        oracle_client.set_price(
+            &asset,
+            &v3_test_valuation_adapter::PriceQuote {
+                decimals: 7,
+                price: SCALAR_7,
+                valid_until: u64::MAX,
+            },
+        );
+        reserve_assets.push_back(asset);
+    }
+    let mut reserves = soroban_sdk::Vec::<v3_pool::ReserveConfig>::new(env);
+    for (index, asset) in reserve_assets.iter().enumerate() {
+        reserves.push_back(direct_lending_reserve_config(&asset, index as u32));
+    }
+    let mut lending_config = direct_lending_config(&oracle);
+    lending_config.max_positions = 60;
+    let pool_id = env.register(
+        v3_pool::WASM,
+        (
+            &fixture.candidate.address,
+            &Address::generate(env),
+            &lending_config,
+            &reserves,
+        ),
+    );
+    fixture.pool_factory.set_pool(&pool_id);
+    let pool = v3_pool::Client::new(env, &pool_id);
+
+    let activation_provider = Address::generate(env);
+    fixture
+        .legacy_token
+        .mint(&activation_provider, &(12_500 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_blnd_usdc(&activation_provider, &pool_id, &(12_500 * SCALAR_7));
+    assert_eq!(pool.set_pool_status(&0), 0);
+
+    // Setup intentionally spans multiple invocations. Only the maximum-size
+    // optimized-WASM liquidation fill below is measured against mainnet
+    // invocation limits.
+    env.cost_estimate().budget().reset_unlimited();
+    let supplier = Address::generate(env);
+    for asset in reserve_assets.iter() {
+        StellarAssetClient::new(env, &asset).mint(&supplier, &(100 * SCALAR_7));
+        pool.submit(
+            &supplier,
+            &supplier,
+            &supplier,
+            &soroban_sdk::vec![
+                env,
+                v3_pool::Request {
+                    address: asset,
+                    amount: 100 * SCALAR_7,
+                    request_type: 0,
+                },
+            ],
+        );
+    }
+
+    let collateral_asset = reserve_assets.get(0).unwrap();
+    let borrower = Address::generate(env);
+    let filler = Address::generate(env);
+    StellarAssetClient::new(env, &collateral_asset).mint(&borrower, &(1_000 * SCALAR_7));
+    StellarAssetClient::new(env, &collateral_asset).mint(&filler, &(5_000 * SCALAR_7));
+    pool.submit(
+        &borrower,
+        &borrower,
+        &borrower,
+        &soroban_sdk::vec![
+            env,
+            v3_pool::Request {
+                address: collateral_asset.clone(),
+                amount: 1_000 * SCALAR_7,
+                request_type: 2,
+            },
+        ],
+    );
+    for asset in reserve_assets.iter() {
+        pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &soroban_sdk::vec![
+                env,
+                v3_pool::Request {
+                    address: asset,
+                    amount: 10 * SCALAR_7,
+                    request_type: 4,
+                },
+            ],
+        );
+    }
+    pool.submit(
+        &filler,
+        &filler,
+        &filler,
+        &soroban_sdk::vec![
+            env,
+            v3_pool::Request {
+                address: collateral_asset.clone(),
+                amount: 5_000 * SCALAR_7,
+                request_type: 2,
+            },
+        ],
+    );
+
+    oracle_client.set_price(
+        &collateral_asset,
+        &v3_test_valuation_adapter::PriceQuote {
+            decimals: 7,
+            price: 3_000_000,
+            valid_until: u64::MAX,
+        },
+    );
+    assert!(!pool.position_health(&borrower).healthy);
+    let liquidation = pool.new_liquidation_auction(
+        &borrower,
+        &reserve_assets,
+        &soroban_sdk::vec![env, collateral_asset],
+        &100,
+    );
+    let mut d_supplies_before = soroban_sdk::Vec::<i128>::new(env);
+    for asset in reserve_assets.iter() {
+        d_supplies_before.push_back(pool.reserve(&asset).data.d_supply);
+    }
+    env.ledger()
+        .set_sequence_number(liquidation.block.checked_add(300).unwrap());
+    pool.submit(
+        &filler,
+        &filler,
+        &filler,
+        &soroban_sdk::vec![
+            env,
+            v3_pool::Request {
+                address: borrower.clone(),
+                amount: 100,
+                request_type: 6,
+            },
+        ],
+    );
+    let resources = env.cost_estimate().resources();
+
+    assert!(pool.positions(&borrower).liabilities.is_empty());
+    let backstop_positions = pool.positions(&fixture.candidate.address);
+    assert_eq!(backstop_positions.liabilities.len(), 30);
+    for (index, asset) in reserve_assets.iter().enumerate() {
+        assert_eq!(
+            backstop_positions.liabilities.get(index as u32),
+            Some(5 * SCALAR_7)
+        );
+        assert_eq!(
+            pool.reserve(&asset).data.d_supply,
+            d_supplies_before.get(index as u32).unwrap()
+        );
+    }
+    assert_eq!(
+        pool.backstop_loss_state(),
+        v3_pool::BackstopLossState {
+            committed_loss_entries: 0,
+            liability_entries: 30,
+            unresolved_bad_debt_entries: 0,
+        }
+    );
+    assert!(resources.instructions <= 600_000_000);
+    assert!(resources.mem_bytes <= 41_943_040);
+    assert!(resources.disk_read_entries <= 100);
+    assert!(resources.write_entries <= 50);
+    assert!(
+        resources.disk_read_entries + resources.memory_read_entries + resources.write_entries
+            <= 100
+    );
+    assert!(resources.disk_read_bytes <= 200_000);
+    assert!(resources.write_bytes <= 132_096);
+    assert!(resources.contract_events_size_bytes <= 16_384);
+}
+
+#[test]
 fn optimized_pool_defaults_residual_debt_only_after_backstop_exhaustion() {
     let fixture = Fixture::create();
     let env = &fixture.env;

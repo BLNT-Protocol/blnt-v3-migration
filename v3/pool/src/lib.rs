@@ -7,7 +7,7 @@ pub use auction::{
     AuctionCreated, AuctionData, AuctionDeleted, AuctionFilled, BackstopTier,
     BadDebtAuctionCreated, BadDebtAuctionData, BadDebtAuctionDeleted, BadDebtAuctionFill,
     BadDebtAuctionFilled, BadDebtContinuation, BadDebtLotQuote, SupplierDebtDefaulted,
-    ACTION_DELETE_LIQUIDATION, ACTION_FILL_USER_LIQUIDATION,
+    UserBadDebtTransferred, ACTION_DELETE_LIQUIDATION, ACTION_FILL_USER_LIQUIDATION,
 };
 pub use lending::{
     LendingAction, LendingConfig, PositionHealth, Positions, PriceQuote, Request, Reserve,
@@ -456,6 +456,14 @@ fn set_backstop_liability(env: &Env, reserve: &Address, amount: i128) {
     set_loss_records(env, &records);
 }
 
+fn set_backstop_liabilities(env: &Env, liabilities: &Map<Address, i128>) {
+    let mut records = get_loss_records(env);
+    for (reserve, amount) in liabilities.iter() {
+        set_nonzero_address_record(env, &mut records.liabilities, &reserve, amount);
+    }
+    set_loss_records(env, &records);
+}
+
 fn get_backstop_liability(env: &Env, reserve: &Address) -> i128 {
     get_loss_records(env)
         .liabilities
@@ -552,7 +560,7 @@ mod tests {
         contract, contractimpl,
         testutils::{Address as _, Events, Ledger, MockAuth, MockAuthInvoke},
         token::{StellarAssetClient, TokenClient},
-        vec, IntoVal,
+        vec, Event, IntoVal,
     };
 
     #[contract]
@@ -2097,7 +2105,7 @@ mod tests {
     }
 
     #[test]
-    fn liquidation_fill_fails_closed_when_bad_debt_would_be_required() {
+    fn completed_liquidation_hands_collateral_free_debt_to_backstop() {
         let env = Env::default();
         let (pool_id, oracle_id, collateral_asset, borrowed_asset, borrower, filler) =
             setup_liquidation_pool(&env);
@@ -2112,33 +2120,410 @@ mod tests {
         );
         let auction = pool.new_liquidation_auction(
             &borrower,
-            &vec![&env, borrowed_asset],
+            &vec![&env, borrowed_asset.clone()],
             &vec![&env, collateral_asset],
             &100,
         );
         env.ledger().set_sequence_number(auction.block + 300);
         let borrower_before = pool.positions(&borrower);
         let filler_before = pool.positions(&filler);
-        for percent in [50_i128, 100] {
-            assert!(pool
-                .try_submit(
-                    &filler,
-                    &filler,
-                    &filler,
-                    &vec![
-                        &env,
-                        Request {
-                            address: borrower.clone(),
-                            amount: percent,
-                            request_type: ACTION_FILL_USER_LIQUIDATION,
-                        }
-                    ],
-                )
-                .is_err());
-        }
+
+        // An incomplete fill cannot hand off debt, so the pre-handoff
+        // fail-closed health boundary remains in force.
+        assert!(pool
+            .try_submit(
+                &filler,
+                &filler,
+                &filler,
+                &vec![
+                    &env,
+                    Request {
+                        address: borrower.clone(),
+                        amount: 50,
+                        request_type: ACTION_FILL_USER_LIQUIDATION,
+                    }
+                ],
+            )
+            .is_err());
         assert_eq!(pool.positions(&borrower), borrower_before);
         assert_eq!(pool.positions(&filler), filler_before);
         assert_eq!(pool.get_liquidation_auction(&borrower), auction);
+
+        let d_supply_before = pool.reserve(&borrowed_asset).data.d_supply;
+        let filler_after = pool.submit(
+            &filler,
+            &filler,
+            &filler,
+            &vec![
+                &env,
+                Request {
+                    address: borrower.clone(),
+                    amount: 100,
+                    request_type: ACTION_FILL_USER_LIQUIDATION,
+                },
+            ],
+        );
+        assert!(env
+            .events()
+            .all()
+            .filter_by_contract(&pool_id)
+            .events()
+            .contains(
+                &UserBadDebtTransferred {
+                    asset: borrowed_asset.clone(),
+                    backstop: filler.clone(),
+                    d_tokens: 35 * lending::SCALAR_7,
+                    user: borrower.clone(),
+                }
+                .to_xdr(&env, &pool_id)
+            ));
+
+        assert!(pool.try_get_liquidation_auction(&borrower).is_err());
+        assert!(pool.positions(&borrower).collateral.is_empty());
+        assert!(pool.positions(&borrower).liabilities.is_empty());
+        assert_eq!(
+            filler_after.liabilities.get(1),
+            borrower_before.liabilities.get(1)
+        );
+        assert_eq!(pool.reserve(&borrowed_asset).data.d_supply, d_supply_before);
+        assert_eq!(
+            pool.backstop_loss_state(),
+            BackstopLossState {
+                committed_loss_entries: 0,
+                liability_entries: 1,
+                unresolved_bad_debt_entries: 0,
+            }
+        );
+        assert!(!pool.backstop_withdrawal_allowed(&filler));
+    }
+
+    fn assert_failed_liquidation_handoff_rolls_back(
+        env: &Env,
+        pool_id: &Address,
+        borrowed_asset: &Address,
+        borrower: &Address,
+        filler: &Address,
+        auction: &AuctionData,
+    ) {
+        let pool = PoolContractClient::new(env, pool_id);
+        let borrower_before = pool.positions(borrower);
+        let filler_before = pool.positions(filler);
+        let d_supply_before = pool.reserve(borrowed_asset).data.d_supply;
+        let records_before = env.as_contract(pool_id, || get_loss_records(env));
+        let events_before = env.events().all();
+
+        assert!(pool
+            .try_submit(
+                filler,
+                filler,
+                filler,
+                &vec![
+                    env,
+                    Request {
+                        address: borrower.clone(),
+                        amount: 100,
+                        request_type: ACTION_FILL_USER_LIQUIDATION,
+                    }
+                ],
+            )
+            .is_err());
+
+        assert_eq!(pool.positions(borrower), borrower_before);
+        assert_eq!(pool.positions(filler), filler_before);
+        assert_eq!(pool.reserve(borrowed_asset).data.d_supply, d_supply_before);
+        assert_eq!(pool.get_liquidation_auction(borrower), *auction);
+        assert_eq!(
+            env.as_contract(pool_id, || get_loss_records(env)),
+            records_before
+        );
+        assert_eq!(env.events().all().events(), events_before.events());
+    }
+
+    #[test]
+    fn liquidation_handoff_capacity_failure_rolls_back_atomically() {
+        let env = Env::default();
+        let (pool_id, oracle_id, collateral_asset, borrowed_asset, borrower, filler) =
+            setup_liquidation_pool(&env);
+        let pool = PoolContractClient::new(&env, &pool_id);
+        MockPriceOracleClient::new(&env, &oracle_id).set_price(
+            &collateral_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: 5_000_000,
+                valid_until: u64::MAX,
+            },
+        );
+        let auction = pool.new_liquidation_auction(
+            &borrower,
+            &vec![&env, borrowed_asset.clone()],
+            &vec![&env, collateral_asset],
+            &100,
+        );
+        env.ledger()
+            .set_sequence_number(auction.block.checked_add(300).unwrap());
+
+        // Fill the bounded canonical map with test-only records so adding the
+        // handoff reserve fails inside the same submit transaction.
+        env.as_contract(&pool_id, || {
+            for _ in 0..MAX_LOSS_RECORDS_PER_KIND {
+                set_backstop_liability(&env, &Address::generate(&env), 1);
+            }
+        });
+
+        assert_failed_liquidation_handoff_rolls_back(
+            &env,
+            &pool_id,
+            &borrowed_asset,
+            &borrower,
+            &filler,
+            &auction,
+        );
+    }
+
+    #[test]
+    fn liquidation_handoff_overflow_rolls_back_atomically() {
+        let env = Env::default();
+        let (pool_id, oracle_id, collateral_asset, borrowed_asset, borrower, filler) =
+            setup_liquidation_pool(&env);
+        let pool = PoolContractClient::new(&env, &pool_id);
+        MockPriceOracleClient::new(&env, &oracle_id).set_price(
+            &collateral_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: 5_000_000,
+                valid_until: u64::MAX,
+            },
+        );
+        let auction = pool.new_liquidation_auction(
+            &borrower,
+            &vec![&env, borrowed_asset.clone()],
+            &vec![&env, collateral_asset],
+            &100,
+        );
+        env.ledger()
+            .set_sequence_number(auction.block.checked_add(300).unwrap());
+
+        // The late auction fill first transfers 35 dTokens to the configured
+        // backstop, reaching i128::MAX, then the 35-dToken residual handoff
+        // must fail checked addition. This deliberately corrupts only the
+        // test pre-state; valid lending flows conserve dToken supply and
+        // cannot originate this balance.
+        let injected_liability = i128::MAX.checked_sub(35 * lending::SCALAR_7).unwrap();
+        let mut filler_positions = pool.positions(&filler);
+        filler_positions.liabilities.set(1, injected_liability);
+        env.as_contract(&pool_id, || {
+            lending::set_positions(&env, &filler, &filler_positions);
+            set_backstop_liability(&env, &borrowed_asset, injected_liability);
+        });
+
+        assert_failed_liquidation_handoff_rolls_back(
+            &env,
+            &pool_id,
+            &borrowed_asset,
+            &borrower,
+            &filler,
+            &auction,
+        );
+    }
+
+    #[test]
+    fn liquidation_handoff_accumulates_debt_without_resizing_active_auction() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        env.ledger().set_timestamp(1_000);
+
+        let token_admin = Address::generate(&env);
+        let collateral_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let first_debt_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let second_debt_asset = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
+        let collateral_admin = StellarAssetClient::new(&env, &collateral_asset);
+        let first_debt_admin = StellarAssetClient::new(&env, &first_debt_asset);
+        let second_debt_admin = StellarAssetClient::new(&env, &second_debt_asset);
+        let backstop_id = env.register(MockBackstop, ());
+        let backstop = MockBackstopClient::new(&env, &backstop_id);
+        let oracle_id = env.register(MockPriceOracle, ());
+        let oracle = MockPriceOracleClient::new(&env, &oracle_id);
+        for asset in [
+            collateral_asset.clone(),
+            first_debt_asset.clone(),
+            second_debt_asset.clone(),
+        ] {
+            oracle.set_price(
+                &asset,
+                &PriceQuote {
+                    decimals: 7,
+                    price: lending::SCALAR_7,
+                    valid_until: u64::MAX,
+                },
+            );
+        }
+
+        let pool_id = register_lending_pool(
+            &env,
+            &backstop_id,
+            &Address::generate(&env),
+            &oracle_id,
+            &vec![
+                &env,
+                collateral_asset.clone(),
+                first_debt_asset.clone(),
+                second_debt_asset.clone(),
+            ],
+        );
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let supplier = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let filler = Address::generate(&env);
+
+        first_debt_admin.mint(&supplier, &(1_000 * lending::SCALAR_7));
+        second_debt_admin.mint(&supplier, &(1_000 * lending::SCALAR_7));
+        collateral_admin.mint(&backstop_id, &(200 * lending::SCALAR_7));
+        collateral_admin.mint(&borrower, &(100 * lending::SCALAR_7));
+        collateral_admin.mint(&filler, &(200 * lending::SCALAR_7));
+        pool.submit(
+            &supplier,
+            &supplier,
+            &supplier,
+            &vec![
+                &env,
+                Request {
+                    address: first_debt_asset.clone(),
+                    amount: 1_000 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY,
+                },
+                Request {
+                    address: second_debt_asset.clone(),
+                    amount: 1_000 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY,
+                },
+            ],
+        );
+        pool.submit(
+            &backstop_id,
+            &backstop_id,
+            &backstop_id,
+            &vec![
+                &env,
+                Request {
+                    address: collateral_asset.clone(),
+                    amount: 200 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY_COLLATERAL,
+                },
+                Request {
+                    address: first_debt_asset.clone(),
+                    amount: 10 * lending::SCALAR_7,
+                    request_type: ACTION_BORROW,
+                },
+            ],
+        );
+        pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &vec![
+                &env,
+                Request {
+                    address: collateral_asset.clone(),
+                    amount: 100 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY_COLLATERAL,
+                },
+                Request {
+                    address: first_debt_asset.clone(),
+                    amount: 40 * lending::SCALAR_7,
+                    request_type: ACTION_BORROW,
+                },
+                Request {
+                    address: second_debt_asset.clone(),
+                    amount: 30 * lending::SCALAR_7,
+                    request_type: ACTION_BORROW,
+                },
+            ],
+        );
+        pool.submit(
+            &filler,
+            &filler,
+            &filler,
+            &vec![
+                &env,
+                Request {
+                    address: collateral_asset.clone(),
+                    amount: 200 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY_COLLATERAL,
+                },
+            ],
+        );
+
+        backstop.set_bad_debt_quote(&BadDebtLotQuote {
+            committed_value: 12 * lending::SCALAR_7,
+            debt_value: 0,
+            tier: BackstopTier::BlndUsdc,
+            lot_amount: 12 * lending::SCALAR_7,
+            target_value: 12 * lending::SCALAR_7,
+            unfilled_target_value: 0,
+            valid_until: u64::MAX,
+        });
+        let existing_auction = pool.new_bad_debt_auction(
+            &BytesN::from_array(&env, &[41; 32]),
+            &vec![&env, first_debt_asset.clone()],
+        );
+
+        oracle.set_price(
+            &collateral_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: 5_000_000,
+                valid_until: u64::MAX,
+            },
+        );
+        let liquidation = pool.new_liquidation_auction(
+            &borrower,
+            &vec![&env, first_debt_asset.clone(), second_debt_asset.clone()],
+            &vec![&env, collateral_asset],
+            &100,
+        );
+        env.ledger()
+            .set_sequence_number(liquidation.block.checked_add(300).unwrap());
+        pool.submit(
+            &filler,
+            &filler,
+            &filler,
+            &vec![
+                &env,
+                Request {
+                    address: borrower.clone(),
+                    amount: 100,
+                    request_type: ACTION_FILL_USER_LIQUIDATION,
+                },
+            ],
+        );
+
+        assert!(pool.positions(&borrower).liabilities.is_empty());
+        assert_eq!(
+            pool.positions(&backstop_id).liabilities,
+            Map::from_array(
+                &env,
+                [(1, 30 * lending::SCALAR_7), (2, 15 * lending::SCALAR_7),],
+            )
+        );
+        assert_eq!(pool.get_bad_debt_auction(), existing_auction);
+        assert_eq!(
+            pool.backstop_loss_state(),
+            BackstopLossState {
+                committed_loss_entries: 1,
+                liability_entries: 2,
+                unresolved_bad_debt_entries: 0,
+            }
+        );
+        assert!(!pool.backstop_withdrawal_allowed(&backstop_id));
     }
 
     #[test]

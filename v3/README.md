@@ -47,8 +47,8 @@ dust stays segregated in the backfill reserve. The backstop can reserve and
 settle a single-tier bad-debt auction by transferring the time-scaled tier
 token directly to the filler and impairing the pool-tier exchange rate by
 exactly that transferred amount. It intentionally does not yet implement
-user-liquidation bad-debt handoff, interest auctions, or ongoing-emission
-accrual. The pool implements next-step bad-debt continuation as a separate
+interest auctions or ongoing-emission accrual. The pool implements next-step
+bad-debt continuation as a separate
 permissionless transaction: it either commits the next eligible strict-tier
 lot or, after a verified no-eligible-tier quote, reduces affected reserves'
 bToken exchange rates using Blend v2's supplier-default arithmetic.
@@ -111,9 +111,12 @@ protocol transitions. The pool now implements permissionless v2-compatible
 user-liquidation creation and request-type-6 fills, including the inherited
 400-ledger auction curve, partial fills, status-gated request-type-9
 cancellation, and permissionless stale deletion. Active auctions block ordinary
-liquidatee submissions. Until user-liquidation bad-debt handoff exists, a fill
-that would leave collateral-free debt or worsen the liquidatee's effective
-health fails atomically. The pool can prepare one v2-shaped bad-debt auction
+liquidatee submissions. A completed auction that exhausts the liquidatee's
+collateral atomically moves every residual dToken liability to the configured
+backstop and updates its canonical reserve records without changing reserve
+dToken supply. Incomplete fills that would exhaust collateral, and fills that
+leave collateral while worsening effective health, still fail atomically. The
+pool can prepare one v2-shaped bad-debt auction
 for liabilities already assigned to its backstop. Preparation atomically
 commits a
 single-tier, 120%-of-debt lot from the first tier with at least $200 of verified
@@ -131,8 +134,10 @@ backstop update atomically, including token-transfer failure. Once no auction
 is active, any caller can continue resolution. A qualifying tier creates the
 next auction; a verified result that all tiers are below $200 defaults every
 remaining backstop liability through the affected reserves' supplier exchange
-rates. User-liquidation bad-debt handoff and interest auctions remain
-unimplemented, so the current pool is not yet a complete lending market.
+rates. A pre-existing bad-debt auction is not resized when a later liquidation
+adds debt; permissionless continuation handles the canonical residual after
+that auction clears. Interest auctions remain unimplemented, so the current
+pool is not yet a complete lending market.
 
 The v3 pool factory stores immutable backstop and pool-WASM configuration,
 deploys pools with explicit immutable operators, lending configuration, and

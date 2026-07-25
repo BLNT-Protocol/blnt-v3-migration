@@ -136,6 +136,25 @@ The v3 tests must verify:
   token contract, user shares, pool totals, and global totals.
 - BLND:USDC shares continue across migration without conversion, reissuance, or
   a second opt-in.
+- Every pool and tier stores separate accounted assets, total shares, and
+  queued shares; a loss in one pool cannot change another pool's exchange rate.
+- Initial deposits mint one share per token base unit. Later deposits round
+  shares down at the current exchange rate, and zero-share deposits fail
+  atomically.
+- Withdrawals round assets down, while redemption of the final pool-tier share
+  sweeps its remaining conversion dust.
+- A fully drained tier rejects new deposits while shares remain, permits
+  expired worthless shares to burn for zero assets, and can restart at one to
+  one only after every old share is removed.
+- Active and queued shares are converted independently at one common
+  pool-tier rate. A partial or complete tier impairment reduces both
+  proportionally without iterating depositors.
+- Direct token transfers change neither pool assets nor global accounted asset
+  totals and cannot manipulate exchange rates.
+- BLND:USDC backfill principal records actual LP tokens contributed separately
+  from shares after an exchange-rate change. Withdrawals remove principal and
+  time basis pro rata to shares burned; protocol loss absorption does not
+  forfeit the depositor's backfill history.
 - Pre-migration and post-migration BLND:USDC deposits follow the same
   activation, waterfall, take-rate, and ongoing-emission eligibility rules,
   except that ongoing emissions cannot accrue before the emitter migrates.
@@ -167,17 +186,17 @@ The v3 tests must verify:
 - Direct BLND:USDC transfers can affect the emitter's raw balance comparison
   but do not mint tier shares or receive any other protocol role.
 - The BLND:USDC, BLND:XLM, and plain-USDC token contracts are distinct.
-- BLND:XLM and USDC deposits mint one share per token base unit while no gain
-  or loss execution exists and conserve exact user, pool, queued, active, and
-  global totals through withdrawal.
+- BLND:XLM and USDC deposits mint shares at their pool-tier exchange rate and
+  conserve exact user, pool, queued, active, asset, and global totals through
+  withdrawal.
 - BLND:XLM and USDC shares can be deposited before and after migration and use
   the same bounded Q4W and pool loss-safety callback as BLND:USDC.
 - BLND:XLM and USDC balances do not qualify the incumbent emitter, earn
   migration backfill, or change scheduled backfill.
 - Direct transfers of BLND:XLM or USDC do not create accounted shares.
-- Before loss execution can alter a tier's redemption value, tests MUST cover
-  the checked share-to-asset exchange rate, conservative rounding, dust
-  handling, and proportional loss exposure of active and queued shares.
+- Tests cover the checked share-to-asset exchange rate, conservative rounding,
+  dust handling, cross-pool isolation, and proportional loss exposure of active
+  and queued shares.
 - One BLND:USDC position may serve migration, activation, emissions, and loss
   roles, but its shares cannot be duplicated within any calculation.
 - The active-share interface excludes queued withdrawals; future canonical

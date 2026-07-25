@@ -79,6 +79,7 @@ enum DataKey {
     TotalBlndUsdcQueuedShares,
     TotalTierShares(BackstopTier),
     TotalTierQueuedShares(BackstopTier),
+    TotalTierAssets(BackstopTier),
 }
 
 #[derive(Clone)]
@@ -92,6 +93,7 @@ enum PersistentKey {
     TierQ4W(BackstopTier, Address, Address),
     PoolTierShares(BackstopTier, Address),
     PoolTierQueuedShares(BackstopTier, Address),
+    PoolTierAssets(BackstopTier, Address),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -160,7 +162,12 @@ pub struct EmitterSwap {
 #[contracttype]
 /// One continuous BLND:USDC tier position plus temporary backfill metadata.
 pub struct MigrationPosition {
+    /// Tier shares owned by this position.
     pub amount: i128,
+    /// Actual BLND:USDC contributed before migration and still backfill
+    /// eligible. This remains separate from shares once the exchange rate
+    /// differs from one token per share.
+    pub backfill_amount: i128,
     pub backfill_claimed: bool,
     pub frozen_weight: Option<i128>,
     pub time_basis: i128,
@@ -172,6 +179,15 @@ pub struct MigrationPosition {
 pub struct Q4WEntry {
     pub amount: i128,
     pub expires_at: u64,
+}
+
+/// Accounted assets and shares for one pool in one backstop tier.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PoolTierState {
+    pub assets: i128,
+    pub queued_shares: i128,
+    pub shares: i128,
 }
 
 /// Verified, pool-specific asset values denominated in 7-decimal USDC units.
@@ -385,6 +401,7 @@ pub struct BlndUsdcWithdrawn {
     pub amount: i128,
     pub depositor: Address,
     pub pool: Address,
+    pub shares: i128,
     pub to: Address,
 }
 
@@ -516,9 +533,9 @@ impl BackstopContract {
 
     /// Deposit BLND:XLM LP into its pool-attributed second-loss tier.
     ///
-    /// Until loss execution is implemented, each token base unit mints exactly
-    /// one share. The attributed pool must be factory registered and expose the
-    /// permanent fail-closed withdrawal callback.
+    /// Shares are minted at the pool-tier's current exchange rate. The
+    /// attributed pool must be factory registered and expose the permanent
+    /// fail-closed withdrawal callback.
     pub fn deposit_blnd_xlm(env: Env, from: Address, pool: Address, amount: i128) {
         extend_instance_ttl(&env);
         deposit_standard_tier(&env, BackstopTier::BlndXlm, from, pool, amount);
@@ -616,10 +633,41 @@ impl BackstopContract {
     /// Return all shares allocated to one pool in a fixed tier.
     pub fn pool_tier_shares(env: Env, tier: BackstopTier, pool: Address) -> i128 {
         extend_instance_ttl(&env);
-        match tier {
-            BackstopTier::BlndUsdc => get_pool_blnd_usdc_shares(&env, &pool),
-            _ => get_pool_tier_shares(&env, tier, &pool),
-        }
+        pool_shares(&env, tier, &pool)
+    }
+
+    /// Return accounted token base units allocated to one pool and tier.
+    ///
+    /// Direct token transfers are excluded. Assets may be lower than shares
+    /// after a tier absorbs loss.
+    pub fn pool_tier_assets(env: Env, tier: BackstopTier, pool: Address) -> i128 {
+        extend_instance_ttl(&env);
+        get_pool_tier_assets(&env, tier, &pool)
+    }
+
+    /// Return one pool's complete share-to-asset state for a fixed tier.
+    pub fn pool_tier_state(env: Env, tier: BackstopTier, pool: Address) -> PoolTierState {
+        extend_instance_ttl(&env);
+        get_pool_tier_state(&env, tier, &pool)
+    }
+
+    /// Preview shares minted by a token deposit at the current pool-tier rate.
+    pub fn preview_tier_deposit(env: Env, tier: BackstopTier, pool: Address, assets: i128) -> i128 {
+        extend_instance_ttl(&env);
+        require_positive(&env, assets);
+        shares_from_assets(&env, assets, &get_pool_tier_state(&env, tier, &pool))
+    }
+
+    /// Preview token base units redeemed by burning pool-tier shares.
+    pub fn preview_tier_withdrawal(
+        env: Env,
+        tier: BackstopTier,
+        pool: Address,
+        shares: i128,
+    ) -> i128 {
+        extend_instance_ttl(&env);
+        require_positive(&env, shares);
+        assets_from_shares(&env, shares, &get_pool_tier_state(&env, tier, &pool))
     }
 
     /// Return all queued shares for one pool in a fixed tier.
@@ -656,6 +704,17 @@ impl BackstopContract {
                 .get(&DataKey::TotalTierShares(tier))
                 .unwrap_or(0),
         }
+    }
+
+    /// Return all accounted token base units in a fixed tier.
+    ///
+    /// Direct transfers are deliberately excluded.
+    pub fn total_tier_assets(env: Env, tier: BackstopTier) -> i128 {
+        extend_instance_ttl(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalTierAssets(tier))
+            .unwrap_or(0)
     }
 
     /// Return all queued shares in a fixed tier.
@@ -823,10 +882,9 @@ impl BackstopContract {
         quote_activation_values(&env, &values, currently_active)
     }
 
-    /// Derive one pool's canonical value from accounted active and queued
-    /// shares. While loss execution is absent, one share equals one token
-    /// base unit. LP quotes come only from the immutable adapter; plain USDC
-    /// is valued one-for-one.
+    /// Derive one pool's canonical value from the redeemable assets represented
+    /// by its active and queued shares. LP quotes come only from the immutable
+    /// adapter; plain USDC is valued one-for-one.
     pub fn pool_valuation(env: Env, pool: Address) -> PoolValuation {
         extend_instance_ttl(&env);
         build_pool_valuation(&env, &pool)
@@ -1718,6 +1776,10 @@ fn deposit_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: i
     from.require_auth();
     require_compatible_pool(env, &pool);
 
+    let state = get_pool_tier_state(env, BackstopTier::BlndUsdc, &pool);
+    let shares = shares_from_assets(env, amount, &state);
+    require_positive(env, shares);
+
     // Keep companion withdrawal state live whenever the position is touched.
     get_blnd_usdc_q4w(env, &from, &pool);
     let backfill_end = env
@@ -1733,22 +1795,41 @@ fn deposit_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: i
         try_open_epoch_from_current_queue(env);
         let timestamp = eligibility_timestamp(env, env.ledger().timestamp());
         let time_basis_delta = checked_mul_i128(env, amount, timestamp as i128);
+        position.backfill_amount = checked_add_i128(env, position.backfill_amount, amount);
         position.time_basis = checked_add_i128(env, position.time_basis, time_basis_delta);
         add_to_instance_total(env, DataKey::TotalMigrationAmount, amount);
         add_to_instance_total(env, DataKey::TotalMigrationTimeBasis, time_basis_delta);
     }
-    position.amount = checked_add_i128(env, position.amount, amount);
+    position.amount = checked_add_i128(env, position.amount, shares);
     set_position(env, &from, &pool, &position);
 
-    let pool_shares = get_pool_blnd_usdc_shares(env, &pool);
-    set_pool_blnd_usdc_shares(env, &pool, checked_add_i128(env, pool_shares, amount));
-    add_to_instance_total(env, DataKey::TotalBlndUsdcShares, amount);
+    set_pool_blnd_usdc_shares(env, &pool, checked_add_i128(env, state.shares, shares));
+    set_pool_tier_assets(
+        env,
+        BackstopTier::BlndUsdc,
+        &pool,
+        checked_add_i128(env, state.assets, amount),
+    );
+    add_to_instance_total(env, DataKey::TotalBlndUsdcShares, shares);
+    add_to_instance_total(
+        env,
+        DataKey::TotalTierAssets(BackstopTier::BlndUsdc),
+        amount,
+    );
 
     TokenClient::new(env, &legacy_backstop_token(env)).transfer(
         &from,
         env.current_contract_address(),
         &amount,
     );
+    TierDeposited {
+        amount,
+        depositor: from,
+        pool,
+        shares,
+        tier: BackstopTier::BlndUsdc,
+    }
+    .publish(env);
 }
 
 fn deposit_standard_tier(
@@ -1763,6 +1844,10 @@ fn deposit_standard_tier(
     from.require_auth();
     require_compatible_pool(env, &pool);
 
+    let state = get_pool_tier_state(env, tier, &pool);
+    let shares = shares_from_assets(env, amount, &state);
+    require_positive(env, shares);
+
     // Keep the companion queue live whenever its position is touched.
     get_tier_q4w(env, tier, &from, &pool);
     let user_shares = get_tier_shares(env, tier, &from, &pool);
@@ -1771,11 +1856,22 @@ fn deposit_standard_tier(
         tier,
         &from,
         &pool,
-        checked_add_i128(env, user_shares, amount),
+        checked_add_i128(env, user_shares, shares),
     );
-    let pool_shares = get_pool_tier_shares(env, tier, &pool);
-    set_pool_tier_shares(env, tier, &pool, checked_add_i128(env, pool_shares, amount));
-    add_to_instance_total(env, DataKey::TotalTierShares(tier), amount);
+    set_pool_tier_shares(
+        env,
+        tier,
+        &pool,
+        checked_add_i128(env, state.shares, shares),
+    );
+    set_pool_tier_assets(
+        env,
+        tier,
+        &pool,
+        checked_add_i128(env, state.assets, amount),
+    );
+    add_to_instance_total(env, DataKey::TotalTierShares(tier), shares);
+    add_to_instance_total(env, DataKey::TotalTierAssets(tier), amount);
 
     TokenClient::new(env, &tier_token(env, tier)).transfer(
         &from,
@@ -1786,7 +1882,7 @@ fn deposit_standard_tier(
         amount,
         depositor: from,
         pool,
-        shares: amount,
+        shares,
         tier,
     }
     .publish(env);
@@ -1879,6 +1975,8 @@ fn withdraw_standard_tier(
     if !PoolLossClient::new(env, &pool).backstop_withdrawal_allowed(&backstop) {
         panic_with_error!(env, BackstopError::PoolWithdrawalBlocked);
     }
+    let state = get_pool_tier_state(env, tier, &pool);
+    let assets = assets_from_shares(env, shares, &state);
     consume_expired_tier_q4w(env, tier, &from, &pool, shares);
     let user_shares = get_tier_shares(env, tier, &from, &pool);
     if shares > user_shares {
@@ -1891,22 +1989,35 @@ fn withdraw_standard_tier(
         &pool,
         checked_sub_i128(env, user_shares, shares),
     );
-    let pool_shares = get_pool_tier_shares(env, tier, &pool);
-    if shares > pool_shares {
+    if shares > state.shares {
         panic_with_error!(env, BackstopError::ArithmeticError);
     }
-    set_pool_tier_shares(env, tier, &pool, checked_sub_i128(env, pool_shares, shares));
+    set_pool_tier_shares(
+        env,
+        tier,
+        &pool,
+        checked_sub_i128(env, state.shares, shares),
+    );
+    set_pool_tier_assets(
+        env,
+        tier,
+        &pool,
+        checked_sub_i128(env, state.assets, assets),
+    );
     add_pool_tier_queued_shares(env, tier, &pool, -shares);
     add_to_instance_total(env, DataKey::TotalTierShares(tier), -shares);
     add_to_instance_total(env, DataKey::TotalTierQueuedShares(tier), -shares);
+    add_to_instance_total(env, DataKey::TotalTierAssets(tier), -assets);
 
-    TokenClient::new(env, &tier_token(env, tier)).transfer(
-        &env.current_contract_address(),
-        &to,
-        &shares,
-    );
+    if assets > 0 {
+        TokenClient::new(env, &tier_token(env, tier)).transfer(
+            &env.current_contract_address(),
+            &to,
+            &assets,
+        );
+    }
     TierWithdrawn {
-        amount: shares,
+        amount: assets,
         depositor: from,
         pool,
         shares,
@@ -2057,6 +2168,8 @@ fn withdraw_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: 
     if !PoolLossClient::new(env, &pool).backstop_withdrawal_allowed(&backstop) {
         panic_with_error!(env, BackstopError::PoolWithdrawalBlocked);
     }
+    let state = get_pool_tier_state(env, BackstopTier::BlndUsdc, &pool);
+    let assets = assets_from_shares(env, amount, &state);
     consume_expired_blnd_usdc_q4w(env, &from, &pool, amount);
     let mut position = get_position(env, &from, &pool);
     if amount > position.amount {
@@ -2072,32 +2185,49 @@ fn withdraw_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: 
             position.frozen_weight = Some(position_weight(env, &position, backfill_end));
         }
     } else {
+        let backfill_removed =
+            proportional_floor(env, position.backfill_amount, amount, position.amount);
         let basis_removed = proportional_floor(env, position.time_basis, amount, position.amount);
+        position.backfill_amount =
+            checked_sub_i128(env, position.backfill_amount, backfill_removed);
         position.time_basis = checked_sub_i128(env, position.time_basis, basis_removed);
-        add_to_instance_total(env, DataKey::TotalMigrationAmount, -amount);
+        add_to_instance_total(env, DataKey::TotalMigrationAmount, -backfill_removed);
         add_to_instance_total(env, DataKey::TotalMigrationTimeBasis, -basis_removed);
     }
 
     position.amount = checked_sub_i128(env, position.amount, amount);
     set_position(env, &from, &pool, &position);
-    let pool_shares = get_pool_blnd_usdc_shares(env, &pool);
-    if amount > pool_shares {
+    if amount > state.shares {
         panic_with_error!(env, BackstopError::ArithmeticError);
     }
-    set_pool_blnd_usdc_shares(env, &pool, checked_sub_i128(env, pool_shares, amount));
+    set_pool_blnd_usdc_shares(env, &pool, checked_sub_i128(env, state.shares, amount));
+    set_pool_tier_assets(
+        env,
+        BackstopTier::BlndUsdc,
+        &pool,
+        checked_sub_i128(env, state.assets, assets),
+    );
     add_pool_blnd_usdc_queued_shares(env, &pool, -amount);
     add_to_instance_total(env, DataKey::TotalBlndUsdcShares, -amount);
     add_to_instance_total(env, DataKey::TotalBlndUsdcQueuedShares, -amount);
-
-    TokenClient::new(env, &legacy_backstop_token(env)).transfer(
-        &env.current_contract_address(),
-        &to,
-        &amount,
+    add_to_instance_total(
+        env,
+        DataKey::TotalTierAssets(BackstopTier::BlndUsdc),
+        -assets,
     );
+
+    if assets > 0 {
+        TokenClient::new(env, &legacy_backstop_token(env)).transfer(
+            &env.current_contract_address(),
+            &to,
+            &assets,
+        );
+    }
     BlndUsdcWithdrawn {
-        amount,
+        amount: assets,
         depositor: from,
         pool,
+        shares: amount,
         to,
     }
     .publish(env);
@@ -2134,6 +2264,7 @@ fn get_position(env: &Env, user: &Address, pool: &Address) -> MigrationPosition 
         .get(&key)
         .unwrap_or(MigrationPosition {
             amount: 0,
+            backfill_amount: 0,
             backfill_claimed: false,
             frozen_weight: None,
             time_basis: 0,
@@ -2172,21 +2303,127 @@ fn queued_shares(env: &Env, queue: &Vec<Q4WEntry>) -> i128 {
     total
 }
 
+fn pool_shares(env: &Env, tier: BackstopTier, pool: &Address) -> i128 {
+    match tier {
+        BackstopTier::BlndUsdc => get_pool_blnd_usdc_shares(env, pool),
+        _ => get_pool_tier_shares(env, tier, pool),
+    }
+}
+
+fn pool_queued_shares(env: &Env, tier: BackstopTier, pool: &Address) -> i128 {
+    match tier {
+        BackstopTier::BlndUsdc => get_pool_blnd_usdc_queued_shares(env, pool),
+        _ => get_pool_tier_queued_shares(env, tier, pool),
+    }
+}
+
+fn get_pool_tier_state(env: &Env, tier: BackstopTier, pool: &Address) -> PoolTierState {
+    let state = PoolTierState {
+        assets: get_pool_tier_assets(env, tier, pool),
+        queued_shares: pool_queued_shares(env, tier, pool),
+        shares: pool_shares(env, tier, pool),
+    };
+    if state.assets < 0
+        || state.shares < 0
+        || state.queued_shares < 0
+        || state.queued_shares > state.shares
+        || (state.shares == 0 && state.assets != 0)
+    {
+        panic_with_error!(env, BackstopError::ArithmeticError);
+    }
+    state
+}
+
+fn get_pool_tier_assets(env: &Env, tier: BackstopTier, pool: &Address) -> i128 {
+    let key = PersistentKey::PoolTierAssets(tier, pool.clone());
+    let shares_key = match tier {
+        BackstopTier::BlndUsdc => PersistentKey::PoolBlndUsdcShares(pool.clone()),
+        _ => PersistentKey::PoolTierShares(tier, pool.clone()),
+    };
+    let queued_key = match tier {
+        BackstopTier::BlndUsdc => PersistentKey::PoolBlndUsdcQueuedShares(pool.clone()),
+        _ => PersistentKey::PoolTierQueuedShares(tier, pool.clone()),
+    };
+    let assets = env.storage().persistent().get(&key).unwrap_or(0);
+    extend_persistent_ttl_if_present(env, &key);
+    extend_persistent_ttl_if_present(env, &shares_key);
+    extend_persistent_ttl_if_present(env, &queued_key);
+    assets
+}
+
+fn set_pool_tier_assets(env: &Env, tier: BackstopTier, pool: &Address, assets: i128) {
+    if assets < 0 {
+        panic_with_error!(env, BackstopError::ArithmeticError);
+    }
+    let key = PersistentKey::PoolTierAssets(tier, pool.clone());
+    env.storage().persistent().set(&key, &assets);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
+}
+
+fn shares_from_assets(env: &Env, assets: i128, state: &PoolTierState) -> i128 {
+    if assets < 0 {
+        panic_with_error!(env, BackstopError::ArithmeticError);
+    }
+    if assets == 0 {
+        return 0;
+    }
+    if state.shares == 0 {
+        if state.assets != 0 {
+            panic_with_error!(env, BackstopError::ArithmeticError);
+        }
+        return assets;
+    }
+    if state.assets == 0 {
+        return 0;
+    }
+    proportional_floor(env, assets, state.shares, state.assets)
+}
+
+fn assets_from_shares(env: &Env, shares: i128, state: &PoolTierState) -> i128 {
+    if shares < 0 || shares > state.shares || (shares > 0 && state.shares == 0) {
+        panic_with_error!(env, BackstopError::InsufficientBalance);
+    }
+    if shares == 0 {
+        return 0;
+    }
+    if shares == state.shares {
+        return state.assets;
+    }
+    proportional_floor(env, state.assets, shares, state.shares)
+}
+
+#[cfg(test)]
+fn apply_pool_tier_loss(env: &Env, tier: BackstopTier, pool: &Address, assets: i128) {
+    require_positive(env, assets);
+    let state = get_pool_tier_state(env, tier, pool);
+    if assets > state.assets {
+        panic_with_error!(env, BackstopError::InsufficientBalance);
+    }
+    set_pool_tier_assets(env, tier, pool, checked_sub_i128(env, state.assets, assets));
+    add_to_instance_total(env, DataKey::TotalTierAssets(tier), -assets);
+}
+
 fn get_pool_blnd_usdc_shares(env: &Env, pool: &Address) -> i128 {
     let key = PersistentKey::PoolBlndUsdcShares(pool.clone());
     let queued_key = PersistentKey::PoolBlndUsdcQueuedShares(pool.clone());
+    let assets_key = PersistentKey::PoolTierAssets(BackstopTier::BlndUsdc, pool.clone());
     let shares = env.storage().persistent().get(&key).unwrap_or(0);
     extend_persistent_ttl_if_present(env, &key);
     extend_persistent_ttl_if_present(env, &queued_key);
+    extend_persistent_ttl_if_present(env, &assets_key);
     shares
 }
 
 fn get_pool_blnd_usdc_queued_shares(env: &Env, pool: &Address) -> i128 {
     let key = PersistentKey::PoolBlndUsdcQueuedShares(pool.clone());
     let shares_key = PersistentKey::PoolBlndUsdcShares(pool.clone());
+    let assets_key = PersistentKey::PoolTierAssets(BackstopTier::BlndUsdc, pool.clone());
     let shares = env.storage().persistent().get(&key).unwrap_or(0);
     extend_persistent_ttl_if_present(env, &key);
     extend_persistent_ttl_if_present(env, &shares_key);
+    extend_persistent_ttl_if_present(env, &assets_key);
     shares
 }
 
@@ -2258,9 +2495,11 @@ fn set_tier_q4w(
 fn get_pool_tier_shares(env: &Env, tier: BackstopTier, pool: &Address) -> i128 {
     let key = PersistentKey::PoolTierShares(tier, pool.clone());
     let queued_key = PersistentKey::PoolTierQueuedShares(tier, pool.clone());
+    let assets_key = PersistentKey::PoolTierAssets(tier, pool.clone());
     let shares = env.storage().persistent().get(&key).unwrap_or(0);
     extend_persistent_ttl_if_present(env, &key);
     extend_persistent_ttl_if_present(env, &queued_key);
+    extend_persistent_ttl_if_present(env, &assets_key);
     shares
 }
 
@@ -2275,9 +2514,11 @@ fn set_pool_tier_shares(env: &Env, tier: BackstopTier, pool: &Address, shares: i
 fn get_pool_tier_queued_shares(env: &Env, tier: BackstopTier, pool: &Address) -> i128 {
     let key = PersistentKey::PoolTierQueuedShares(tier, pool.clone());
     let shares_key = PersistentKey::PoolTierShares(tier, pool.clone());
+    let assets_key = PersistentKey::PoolTierAssets(tier, pool.clone());
     let shares = env.storage().persistent().get(&key).unwrap_or(0);
     extend_persistent_ttl_if_present(env, &key);
     extend_persistent_ttl_if_present(env, &shares_key);
+    extend_persistent_ttl_if_present(env, &assets_key);
     shares
 }
 
@@ -2314,7 +2555,7 @@ fn add_to_instance_total(env: &Env, key: DataKey, delta: i128) {
 fn position_weight(env: &Env, position: &MigrationPosition, end: u64) -> i128 {
     checked_sub_i128(
         env,
-        checked_mul_i128(env, position.amount, end as i128),
+        checked_mul_i128(env, position.backfill_amount, end as i128),
         position.time_basis,
     )
 }
@@ -2349,15 +2590,11 @@ fn build_pool_valuation(env: &Env, pool: &Address) -> PoolValuation {
         panic_with_error!(env, BackstopError::InvalidValuationAdapter);
     }
 
-    let blnd_usdc_total = get_pool_blnd_usdc_shares(env, pool);
-    let blnd_usdc_queued = get_pool_blnd_usdc_queued_shares(env, pool);
-    let blnd_usdc_active = checked_nonnegative_sub_i128(env, blnd_usdc_total, blnd_usdc_queued);
-    let blnd_xlm_total = get_pool_tier_shares(env, BackstopTier::BlndXlm, pool);
-    let blnd_xlm_queued = get_pool_tier_queued_shares(env, BackstopTier::BlndXlm, pool);
-    let blnd_xlm_active = checked_nonnegative_sub_i128(env, blnd_xlm_total, blnd_xlm_queued);
-    let usdc_total = get_pool_tier_shares(env, BackstopTier::Usdc, pool);
-    let usdc_queued = get_pool_tier_queued_shares(env, BackstopTier::Usdc, pool);
-    let usdc_active = checked_nonnegative_sub_i128(env, usdc_total, usdc_queued);
+    let (blnd_usdc_active, blnd_usdc_queued) =
+        pool_tier_asset_partition(env, BackstopTier::BlndUsdc, pool);
+    let (blnd_xlm_active, blnd_xlm_queued) =
+        pool_tier_asset_partition(env, BackstopTier::BlndXlm, pool);
+    let (usdc_active, usdc_queued) = pool_tier_asset_partition(env, BackstopTier::Usdc, pool);
 
     let blnd_usdc_active_quote =
         quote_lp_amount(env, &adapter, BackstopTier::BlndUsdc, blnd_usdc_active);
@@ -2389,6 +2626,14 @@ fn build_pool_valuation(env: &Env, pool: &Address) -> PoolValuation {
             .min(blnd_xlm_active_quote.valid_until)
             .min(blnd_xlm_queued_quote.valid_until),
     }
+}
+
+fn pool_tier_asset_partition(env: &Env, tier: BackstopTier, pool: &Address) -> (i128, i128) {
+    let state = get_pool_tier_state(env, tier, pool);
+    let active_shares = checked_nonnegative_sub_i128(env, state.shares, state.queued_shares);
+    let active_assets = assets_from_shares(env, active_shares, &state);
+    let queued_assets = assets_from_shares(env, state.queued_shares, &state);
+    (active_assets, queued_assets)
 }
 
 fn quote_lp_amount(
@@ -2921,6 +3166,36 @@ mod tests {
     }
 
     #[test]
+    fn pool_tier_exchange_rate_rounds_conservatively_and_sweeps_final_dust() {
+        let env = Env::default();
+        let impaired = PoolTierState {
+            assets: 40,
+            queued_shares: 40,
+            shares: 100,
+        };
+
+        assert_eq!(shares_from_assets(&env, 10, &impaired), 25);
+        assert_eq!(assets_from_shares(&env, 40, &impaired), 16);
+        assert_eq!(assets_from_shares(&env, 60, &impaired), 24);
+
+        let dusty = PoolTierState {
+            assets: 10,
+            queued_shares: 0,
+            shares: 6,
+        };
+        assert_eq!(assets_from_shares(&env, 1, &dusty), 1);
+        assert_eq!(assets_from_shares(&env, 6, &dusty), 10);
+
+        let drained = PoolTierState {
+            assets: 0,
+            queued_shares: 0,
+            shares: 100,
+        };
+        assert_eq!(shares_from_assets(&env, 10, &drained), 0);
+        assert_eq!(assets_from_shares(&env, 100, &drained), 0);
+    }
+
+    #[test]
     fn prepares_and_finalizes_once() {
         let env = Env::default();
         let incumbent = Address::generate(&env);
@@ -3158,6 +3433,7 @@ mod tests {
                 &pool,
                 &MigrationPosition {
                     amount: 10,
+                    backfill_amount: 10,
                     backfill_claimed: false,
                     frozen_weight: Some(10),
                     time_basis: 0,
@@ -3560,7 +3836,229 @@ mod tests {
     }
 
     #[test]
-    fn canonical_pool_valuation_uses_active_and_queued_tier_shares() {
+    fn pool_local_exchange_rates_impair_active_and_queued_shares_proportionally() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+        let incumbent = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let blnd_token = Address::generate(&env);
+        let legacy_token = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let next_token = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let usdc_token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
+        let candidate_id = Address::generate(&env);
+        let pool_factory_id = env.register(MockPoolFactory, (&candidate_id,));
+        let pool_factory = MockPoolFactoryClient::new(&env, &pool_factory_id);
+        let pool = env.register(MockLossAwarePool, (&candidate_id,));
+        let other_pool = env.register(MockLossAwarePool, (&candidate_id,));
+        pool_factory.set_pool(&pool);
+        pool_factory.set_pool(&other_pool);
+        let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
+        let valuation_adapter = register_valuation_adapter(&env);
+        env.register_at(
+            &candidate_id,
+            BackstopContract,
+            (
+                &emitter_id,
+                &blnd_token,
+                &pool_factory_id,
+                &legacy_token,
+                &next_token,
+                &usdc_token,
+                &valuation_adapter,
+            ),
+        );
+        let candidate = BackstopContractClient::new(&env, &candidate_id);
+        let first = Address::generate(&env);
+        let second = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let tiers = [
+            (BackstopTier::BlndUsdc, legacy_token.clone()),
+            (BackstopTier::BlndXlm, next_token.clone()),
+            (BackstopTier::Usdc, usdc_token.clone()),
+        ];
+        for (_, token) in &tiers {
+            StellarAssetClient::new(&env, token).mint(&first, &100);
+            StellarAssetClient::new(&env, token).mint(&second, &11);
+        }
+        StellarAssetClient::new(&env, &usdc_token).mint(&first, &20);
+
+        candidate.deposit_blnd_usdc(&first, &pool, &100);
+        candidate.deposit_blnd_xlm(&first, &pool, &100);
+        candidate.deposit_usdc(&first, &pool, &100);
+        candidate.deposit_usdc(&first, &other_pool, &20);
+        let blnd_usdc_entry = candidate.queue_blnd_usdc_withdrawal(&first, &pool, &40);
+        let blnd_xlm_entry = candidate.queue_blnd_xlm_withdrawal(&first, &pool, &40);
+        let usdc_entry = candidate.queue_usdc_withdrawal(&first, &pool, &40);
+
+        env.as_contract(&candidate_id, || {
+            for (tier, _) in &tiers {
+                apply_pool_tier_loss(&env, *tier, &pool, 60);
+            }
+        });
+        for (tier, _) in &tiers {
+            assert_eq!(
+                candidate.pool_tier_state(tier, &pool),
+                PoolTierState {
+                    assets: 40,
+                    queued_shares: 40,
+                    shares: 100,
+                }
+            );
+            assert_eq!(candidate.preview_tier_deposit(tier, &pool, &10), 25);
+            assert_eq!(candidate.preview_tier_withdrawal(tier, &pool, &40), 16);
+        }
+        assert_eq!(
+            candidate.pool_tier_state(&BackstopTier::Usdc, &other_pool),
+            PoolTierState {
+                assets: 20,
+                queued_shares: 0,
+                shares: 20,
+            }
+        );
+        assert_eq!(
+            candidate.preview_tier_deposit(&BackstopTier::Usdc, &other_pool, &10),
+            10
+        );
+
+        candidate.deposit_blnd_usdc(&second, &pool, &10);
+        candidate.deposit_blnd_xlm(&second, &pool, &10);
+        candidate.deposit_usdc(&second, &pool, &10);
+        assert_eq!(
+            candidate.migration_position(&second, &pool),
+            MigrationPosition {
+                amount: 25,
+                backfill_amount: 10,
+                backfill_claimed: false,
+                frozen_weight: None,
+                time_basis: 10_000,
+            }
+        );
+        assert_eq!(
+            candidate.tier_shares(&BackstopTier::BlndXlm, &second, &pool),
+            25
+        );
+        assert_eq!(
+            candidate.tier_shares(&BackstopTier::Usdc, &second, &pool),
+            25
+        );
+
+        let valuation = candidate.pool_valuation(&pool);
+        assert_eq!(
+            valuation.active_values,
+            ActivationValues {
+                blnd_usdc: 34,
+                blnd_xlm: 34,
+                usdc: 34,
+            }
+        );
+        assert_eq!(
+            valuation.queued_values,
+            ActivationValues {
+                blnd_usdc: 16,
+                blnd_xlm: 16,
+                usdc: 16,
+            }
+        );
+        assert_eq!(
+            valuation.active_blnd,
+            BlndEmissionValues {
+                blnd_usdc: 34,
+                blnd_xlm: 34,
+            }
+        );
+
+        env.ledger().set_timestamp(
+            blnd_usdc_entry
+                .expires_at
+                .max(blnd_xlm_entry.expires_at)
+                .max(usdc_entry.expires_at),
+        );
+        candidate.withdraw_blnd_usdc(&first, &pool, &40, &recipient);
+        candidate.withdraw_blnd_xlm(&first, &pool, &40, &recipient);
+        candidate.withdraw_usdc(&first, &pool, &40, &recipient);
+        for (tier, token) in &tiers {
+            assert_eq!(
+                candidate.pool_tier_state(tier, &pool),
+                PoolTierState {
+                    assets: 34,
+                    queued_shares: 0,
+                    shares: 85,
+                }
+            );
+            let expected_total_assets = match tier {
+                BackstopTier::Usdc => 54,
+                _ => 34,
+            };
+            assert_eq!(candidate.total_tier_assets(tier), expected_total_assets);
+            assert_eq!(TokenClient::new(&env, token).balance(&recipient), 16);
+        }
+        assert_eq!(
+            candidate.migration_position(&first, &pool),
+            MigrationPosition {
+                amount: 60,
+                backfill_amount: 60,
+                backfill_claimed: false,
+                frozen_weight: None,
+                time_basis: 60_000,
+            }
+        );
+        env.as_contract(&candidate_id, || {
+            assert_eq!(
+                env.storage()
+                    .instance()
+                    .get::<DataKey, i128>(&DataKey::TotalMigrationAmount),
+                Some(70)
+            );
+        });
+
+        env.as_contract(&candidate_id, || {
+            apply_pool_tier_loss(&env, BackstopTier::Usdc, &pool, 34);
+        });
+        assert!(candidate.try_deposit_usdc(&second, &pool, &1).is_err());
+        let drained_entry = candidate.queue_usdc_withdrawal(&second, &pool, &25);
+        env.ledger().set_timestamp(drained_entry.expires_at);
+        candidate.withdraw_usdc(&second, &pool, &25, &recipient);
+        assert_eq!(
+            candidate.pool_tier_state(&BackstopTier::Usdc, &pool),
+            PoolTierState {
+                assets: 0,
+                queued_shares: 0,
+                shares: 60,
+            }
+        );
+        assert_eq!(TokenClient::new(&env, &usdc_token).balance(&recipient), 16);
+
+        let final_entry = candidate.queue_usdc_withdrawal(&first, &pool, &60);
+        env.ledger().set_timestamp(final_entry.expires_at);
+        candidate.withdraw_usdc(&first, &pool, &60, &recipient);
+        assert_eq!(
+            candidate.pool_tier_state(&BackstopTier::Usdc, &pool),
+            PoolTierState {
+                assets: 0,
+                queued_shares: 0,
+                shares: 0,
+            }
+        );
+        candidate.deposit_usdc(&second, &pool, &1);
+        assert_eq!(
+            candidate.pool_tier_state(&BackstopTier::Usdc, &pool),
+            PoolTierState {
+                assets: 1,
+                queued_shares: 0,
+                shares: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn canonical_pool_valuation_uses_active_and_queued_tier_assets() {
         let env = Env::default();
         env.ledger().set_timestamp(1_000);
         let incumbent = Address::generate(&env);
@@ -3592,10 +4090,13 @@ mod tests {
 
         env.as_contract(&candidate_id, || {
             set_pool_blnd_usdc_shares(&env, &pool_id, 5_000 * SCALAR_7);
+            set_pool_tier_assets(&env, BackstopTier::BlndUsdc, &pool_id, 5_000 * SCALAR_7);
             add_pool_blnd_usdc_queued_shares(&env, &pool_id, 1_000 * SCALAR_7);
             set_pool_tier_shares(&env, BackstopTier::BlndXlm, &pool_id, 5_000 * SCALAR_7);
+            set_pool_tier_assets(&env, BackstopTier::BlndXlm, &pool_id, 5_000 * SCALAR_7);
             add_pool_tier_queued_shares(&env, BackstopTier::BlndXlm, &pool_id, 1_000 * SCALAR_7);
             set_pool_tier_shares(&env, BackstopTier::Usdc, &pool_id, 5_500 * SCALAR_7);
+            set_pool_tier_assets(&env, BackstopTier::Usdc, &pool_id, 5_500 * SCALAR_7);
             add_pool_tier_queued_shares(&env, BackstopTier::Usdc, &pool_id, 1_000 * SCALAR_7);
         });
 
@@ -3665,6 +4166,7 @@ mod tests {
 
         env.as_contract(&candidate_id, || {
             set_pool_blnd_usdc_shares(&env, &pool_id, SCALAR_7);
+            set_pool_tier_assets(&env, BackstopTier::BlndUsdc, &pool_id, SCALAR_7);
         });
 
         adapter.set_valid_until(&999);

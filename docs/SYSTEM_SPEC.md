@@ -357,11 +357,42 @@ Share conversion MUST specify rounding direction for every operation. A user
 MUST NOT receive more assets than the position owns, and dust MUST have a
 documented destination.
 
+The implemented exchange-rate foundation stores checked `assets`, `shares`,
+and `queued_shares` for every pool and tier. Accounted assets are pool-local:
+a loss attributed to one pool MUST NOT impair another pool's tier. Global
+per-tier asset totals provide a bounded conservation check but do not include
+raw direct token transfers.
+
+The first deposit into an empty pool-tier mints one share per token base unit.
+Later deposits mint
+\(\lfloor deposited\ assets \times existing\ shares / existing\ assets\rfloor\)
+shares. A deposit that would mint zero shares MUST fail before custody or
+accounting changes. In particular, a fully drained tier with outstanding
+shares rejects new deposits rather than donating a recapitalization to the
+worthless shares.
+
+A withdrawal burns the requested shares and returns
+\(\lfloor burned\ shares \times existing\ assets / existing\ shares\rfloor\)
+token base units. Burning the final outstanding share balance returns all
+remaining accounted assets, so conversion dust remains in its pool-tier until
+the final redemption rather than being assigned to the protocol or a favored
+depositor. Expired shares in a fully drained tier MAY be burned for zero
+assets; only after all outstanding shares are removed can a later deposit
+initialize a fresh one-to-one rate.
+
 Active and queued shares in one tier MUST use the same share-to-asset exchange
 rate. Queueing MUST NOT snapshot or guarantee the position's current asset
 value. A gain or loss applied to the tier changes the redemption value of
 active and queued shares proportionally; the implementation MUST NOT preserve
 queued principal by charging the change only to active shares.
+
+Canonical activation, status, and ongoing-emission valuation converts active
+and queued shares independently at the common pool-tier exchange rate and
+rounds both asset amounts down. Any partition rounding dust remains unallocated
+in the pool-tier until later redemption. The exchange-rate mutation used by
+the future waterfall is internal-only until the loss auction and disposal
+policy is implemented; there is no administrator or external loss-adjustment
+entry point.
 
 ### 7.2.1 Continuous BLND:USDC migration tier
 
@@ -375,6 +406,15 @@ Before migration succeeds, the same shares additionally:
 - Contribute their tokens to the candidate's direct legacy-emitter qualifying
   balance.
 - Accumulate migration-backfill weight while they remain deposited.
+
+Once an exchange rate differs from one token per share, the position stores
+backfill-eligible BLND:USDC principal separately from its tier shares. New
+pre-migration deposits add their actual LP-token amount to backfill principal,
+not the possibly larger or smaller number of shares minted. A withdrawal
+forfeits principal and time basis pro rata to the shares burned. Loss absorption
+does not forfeit backfill principal: those LP tokens remained committed and
+were consumed protecting the attributed candidate pool rather than withdrawn
+by the depositor.
 
 Emitter migration freezes only the temporary backfill weight. It MUST NOT
 redeem, convert, reissue, or change ownership of the tier shares. Deposits made
@@ -418,13 +458,10 @@ BLND:XLM and USDC MUST:
   rules defined for their respective tiers. BLND:XLM, but not plain USDC, is
   eligible for ongoing BLND-emission weight.
 
-Until gain and loss execution exists, each token base unit transferred through
-an accounted BLND:XLM or USDC deposit MUST mint exactly one share and each
-withdrawn share MUST redeem exactly one token base unit. Before any operation
-can change a tier's asset-per-share value, the implementation MUST add a
-checked share-to-asset exchange rate and specify conservative conversion
-rounding and dust handling. Active and queued shares MUST use that same
-exchange rate and absorb changes proportionally.
+BLND:XLM and USDC use the same implemented checked pool-local share-to-asset
+exchange rate, conservative conversion rounding, drained-tier behavior, and
+final-redemption dust sweep as BLND:USDC. Active and queued shares use that same
+rate and absorb changes proportionally.
 
 Direct BLND:XLM or USDC transfers that do not use an attributed deposit entry
 point MUST NOT create shares or count toward activation, loss capacity,
@@ -573,11 +610,10 @@ adapter invocation, negative result, or quote whose expiry precedes the
 current ledger timestamp MUST fail the canonical valuation atomically.
 Unattributed direct token transfers MUST NOT enter the calculation.
 
-This derivation currently relies on the pre-loss invariant that one accounted
-share equals one token base unit. Before gain or loss execution can change a
-tier's asset-per-share rate, canonical valuation MUST convert active and queued
-shares through that common checked rate before quoting LP token amounts or
-plain-USDC value.
+Canonical valuation converts active and queued shares independently through
+their common pool-tier exchange rate before quoting LP token amounts or
+plain-USDC value. Conservative rounding can leave conversion dust unallocated;
+the final share redemption sweeps the remaining accounted assets.
 
 A production adapter MUST still define manipulation-resistant BLND:USDC and
 BLND:XLM LP valuation and its concrete oracle freshness policy before these
@@ -1277,8 +1313,11 @@ pool-attributed continuous BLND:USDC shares, time-weighted migration
 checkpoints, independent pool-attributed BLND:XLM and plain-USDC share ledgers,
 canonical asset-neutral 12,500-USDC entry and 10,000-USDC maintenance
 activation-policy arithmetic, an immutable versioned valuation-adapter
-boundary that derives active and queued values from canonical pool shares,
-and 17-day bounded withdrawal queues for all three tiers, exact one-time
+boundary that derives active and queued values from canonical pool-tier
+asset/share state,
+pool-local checked asset/share exchange rates that proportionally expose active
+and queued shares to tier impairment, and 17-day bounded withdrawal queues for
+all three tiers, exact one-time
 backfill funding and owner-authorized constant-time claims, an immutable
 Protocol-27 pool factory, immutable per-pool operator and stored status,
 canonical permissionless and operator status transitions, the v2-compatible

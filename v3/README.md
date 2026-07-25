@@ -46,23 +46,32 @@ floor-rounded claim per frozen position without iteration; remaining integer
 dust stays segregated in the backfill reserve. It intentionally does not yet
 implement loss-waterfall execution, bad-debt or interest auctions, or
 ongoing-emission accrual.
+Each pool and tier stores separate accounted assets and shares. Deposits mint
+shares with floor rounding at the current exchange rate, withdrawals redeem
+assets with floor rounding, and the final share sweeps residual conversion
+dust. Active and queued shares use the same rate, so a pool-local tier
+impairment affects both proportionally without depositor iteration. Drained
+tiers reject deposits until their zero-value shares are burned, and direct
+token transfers remain outside accounted assets. BLND:USDC migration backfill
+tracks actual contributed LP principal separately from tier shares once the
+exchange rate differs from one.
 All three tier withdrawals use independent bounded 17-day queues with at most
 20 entries per user, pool, and tier, FIFO withdrawal, and LIFO dequeue.
 Withdrawal also requires an affirmative, read-only response from the attributed
 pool's `backstop_withdrawal_allowed` interface; missing, failed, and false
 responses block the transfer. Queued shares remain in custody and retain
 migration-backfill eligibility until actual withdrawal. Active-share queries
-exclude them for use by the future canonical activation and ongoing-emission
-integrations. Queued shares remain take-rate eligible until actual withdrawal,
+exclude them from the raw active-share view. Canonical activation converts that
+view to redeemable assets, and ongoing-emission integration will use the same
+separation. Queued shares remain take-rate eligible until actual withdrawal,
 and remain proportionally exposed to tier losses through the same exchange
 rate as active shares, matching the inherited v2 economics. Total accounted
 in-custody shares are the canonical take-rate and within-tier loss-allocation
 input. BLND:XLM and plain USDC now have independent user, pool, queued, active,
 and global share accounting. Both may be deposited before or after migration;
-neither qualifies the incumbent emitter or earns migration backfill. Until
-loss execution is implemented, their deposits and withdrawals use exact
-one-token/one-share accounting. A future loss engine must introduce checked
-share-to-asset conversion before it can change redemption value.
+neither qualifies the incumbent emitter or earns migration backfill. Canonical
+pool valuation converts their active and queued shares to redeemable assets at
+the common pool-tier rate before applying USDC or LP valuation.
 
 The v3 pool stores immutable lending and reserve configuration, v2-compatible
 reserve interest accounting, bToken and dToken positions, oracle-valued health

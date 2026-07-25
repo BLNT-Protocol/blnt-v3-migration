@@ -362,6 +362,34 @@ fn v3_wasm_derives_canonical_pool_valuation_from_accounted_shares() {
         .candidate
         .queue_usdc_withdrawal(&depositor, &pool, &(1_000 * SCALAR_7));
 
+    for (tier, assets) in [
+        (v3_backstop::BackstopTier::BlndUsdc, 5_000 * SCALAR_7),
+        (v3_backstop::BackstopTier::BlndXlm, 5_000 * SCALAR_7),
+        (v3_backstop::BackstopTier::Usdc, 5_500 * SCALAR_7),
+    ] {
+        assert_eq!(
+            fixture.candidate.pool_tier_state(&tier, &pool),
+            v3_backstop::PoolTierState {
+                assets,
+                queued_shares: 1_000 * SCALAR_7,
+                shares: assets,
+            }
+        );
+        assert_eq!(fixture.candidate.total_tier_assets(&tier), assets);
+        assert_eq!(
+            fixture
+                .candidate
+                .preview_tier_deposit(&tier, &pool, &SCALAR_7),
+            SCALAR_7
+        );
+        assert_eq!(
+            fixture
+                .candidate
+                .preview_tier_withdrawal(&tier, &pool, &SCALAR_7),
+            SCALAR_7
+        );
+    }
+
     let valuation = fixture.candidate.pool_valuation(&pool);
     assert_eq!(
         valuation.active_blnd,
@@ -791,6 +819,12 @@ fn direct_legacy_token_transfers_do_not_create_blnd_usdc_tier_shares() {
     assert_eq!(fixture.candidate.blnd_usdc_shares(&user, &pool), 0);
     assert_eq!(fixture.candidate.pool_blnd_usdc_shares(&pool), 0);
     assert_eq!(fixture.candidate.total_blnd_usdc_shares(), 0);
+    assert_eq!(
+        fixture
+            .candidate
+            .total_tier_assets(&v3_backstop::BackstopTier::BlndUsdc),
+        0
+    );
     assert_eq!(
         fixture.legacy_token.balance(&fixture.candidate.address),
         100 * SCALAR_7
@@ -1783,6 +1817,14 @@ fn standard_tiers_are_pool_attributed_queued_and_conserved() {
         80 * SCALAR_7
     );
     assert_eq!(
+        fixture.candidate.total_tier_assets(&blnd_xlm_tier),
+        100 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_tier_assets(&usdc_tier),
+        80 * SCALAR_7
+    );
+    assert_eq!(
         fixture
             .candidate
             .migration_position(&depositor, &pool)
@@ -1810,6 +1852,14 @@ fn standard_tiers_are_pool_attributed_queued_and_conserved() {
     );
     assert_eq!(
         fixture.candidate.total_tier_shares(&usdc_tier),
+        80 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_tier_assets(&blnd_xlm_tier),
+        100 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_tier_assets(&usdc_tier),
         80 * SCALAR_7
     );
 
@@ -1876,6 +1926,14 @@ fn standard_tiers_are_pool_attributed_queued_and_conserved() {
     );
     assert_eq!(
         fixture.candidate.total_tier_shares(&usdc_tier),
+        60 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_tier_assets(&blnd_xlm_tier),
+        75 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.total_tier_assets(&usdc_tier),
         60 * SCALAR_7
     );
     assert_eq!(

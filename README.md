@@ -79,7 +79,9 @@ operator. Its SDK-27 lending core executes the six non-auction v2 request
 types against immutable reserve configuration with checked interest, share,
 health, authorization, and token-transfer accounting. The pool also supports
 permissionless v2-compatible user-liquidation auctions and fails closed before
-any fill that would require the future bad-debt waterfall.
+any fill that would require the future bad-debt waterfall. The three-tier
+backstop maintains pool-local checked asset/share exchange rates so active and
+queued shares can absorb future losses proportionally.
 
 Run both lanes:
 

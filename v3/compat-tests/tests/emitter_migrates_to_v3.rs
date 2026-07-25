@@ -1753,6 +1753,273 @@ fn optimized_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
     assert!(pool.backstop_withdrawal_allowed(&fixture.candidate.address));
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum InterestTierCase {
+    BlndUsdc,
+    BlndXlm,
+    Usdc,
+}
+
+fn assert_optimized_interest_auction(case: InterestTierCase) {
+    macro_rules! assert_mainnet_invocation_limits {
+        ($resources:expr) => {{
+            let resources = $resources;
+            assert!(resources.instructions <= 600_000_000);
+            assert!(resources.mem_bytes <= 41_943_040);
+            assert!(resources.disk_read_entries <= 100);
+            assert!(resources.write_entries <= 50);
+            assert!(
+                resources.disk_read_entries
+                    + resources.memory_read_entries
+                    + resources.write_entries
+                    <= 90
+            );
+            assert!(resources.disk_read_bytes <= 200_000);
+            assert!(resources.write_bytes <= 132_096);
+            assert!(resources.contract_events_size_bytes <= 16_384);
+        }};
+    }
+
+    let fixture = Fixture::create();
+    let env = &fixture.env;
+    let oracle = v3_test_valuation_adapter::Client::new(env, &fixture.valuation_adapter);
+    let operator = Address::generate(env);
+    let extra_admin = Address::generate(env);
+    let loan_asset = env
+        .register_stellar_asset_contract_v2(extra_admin.clone())
+        .address();
+    let collateral_asset = env
+        .register_stellar_asset_contract_v2(extra_admin)
+        .address();
+    let lending_config = v3_pool::LendingConfig {
+        backstop_take_rate: 9_999_999,
+        max_positions: 6,
+        min_collateral: SCALAR_7,
+        oracle: fixture.valuation_adapter.clone(),
+        price_decimals: 7,
+    };
+    let reserves = soroban_sdk::vec![
+        env,
+        direct_lending_reserve_config(&loan_asset, 0),
+        direct_lending_reserve_config(&collateral_asset, 1),
+        direct_lending_reserve_config(&fixture.next_token, 2),
+        direct_lending_reserve_config(&fixture.legacy_token.address, 3)
+    ];
+    let pool_id = env.register(
+        v3_pool::WASM,
+        (
+            &fixture.candidate.address,
+            &operator,
+            &lending_config,
+            &reserves,
+        ),
+    );
+    fixture.pool_factory.set_pool(&pool_id);
+    let pool = v3_pool::Client::new(env, &pool_id);
+
+    for asset in [
+        loan_asset.clone(),
+        collateral_asset.clone(),
+        fixture.next_token.clone(),
+        fixture.legacy_token.address.clone(),
+    ] {
+        oracle.set_price(
+            &asset,
+            &v3_test_valuation_adapter::PriceQuote {
+                decimals: 7,
+                price: SCALAR_7,
+                valid_until: u64::MAX,
+            },
+        );
+    }
+
+    let backstop_depositor = Address::generate(env);
+    let backstop_amount = 12_500 * SCALAR_7;
+    let (pool_tier, backstop_tier, bid_token) = match case {
+        InterestTierCase::BlndUsdc => {
+            fixture
+                .legacy_token
+                .mint(&backstop_depositor, &backstop_amount);
+            fixture
+                .candidate
+                .deposit_blnd_usdc(&backstop_depositor, &pool_id, &backstop_amount);
+            (
+                v3_pool::BackstopTier::BlndUsdc,
+                v3_backstop::BackstopTier::BlndUsdc,
+                fixture.legacy_token.address.clone(),
+            )
+        }
+        InterestTierCase::BlndXlm => {
+            StellarAssetClient::new(env, &fixture.next_token)
+                .mint(&backstop_depositor, &backstop_amount);
+            fixture
+                .candidate
+                .deposit_blnd_xlm(&backstop_depositor, &pool_id, &backstop_amount);
+            (
+                v3_pool::BackstopTier::BlndXlm,
+                v3_backstop::BackstopTier::BlndXlm,
+                fixture.next_token.clone(),
+            )
+        }
+        InterestTierCase::Usdc => {
+            StellarAssetClient::new(env, &fixture.prefund_token)
+                .mint(&backstop_depositor, &backstop_amount);
+            fixture
+                .candidate
+                .deposit_usdc(&backstop_depositor, &pool_id, &backstop_amount);
+            (
+                v3_pool::BackstopTier::Usdc,
+                v3_backstop::BackstopTier::Usdc,
+                fixture.prefund_token.clone(),
+            )
+        }
+    };
+    assert_eq!(pool.set_pool_status(&0), 0);
+
+    let lender = Address::generate(env);
+    let borrower = Address::generate(env);
+    let loan_token = StellarAssetClient::new(env, &loan_asset);
+    loan_token.mint(&lender, &(30_000 * SCALAR_7));
+    StellarAssetClient::new(env, &collateral_asset).mint(&borrower, &(20_000 * SCALAR_7));
+    pool.submit(
+        &lender,
+        &lender,
+        &lender,
+        &soroban_sdk::vec![
+            env,
+            v3_pool::Request {
+                address: loan_asset.clone(),
+                amount: 30_000 * SCALAR_7,
+                request_type: 0,
+            }
+        ],
+    );
+    pool.submit(
+        &borrower,
+        &borrower,
+        &borrower,
+        &soroban_sdk::vec![
+            env,
+            v3_pool::Request {
+                address: collateral_asset.clone(),
+                amount: 20_000 * SCALAR_7,
+                request_type: 2,
+            },
+            v3_pool::Request {
+                address: loan_asset.clone(),
+                amount: 10_000 * SCALAR_7,
+                request_type: 4,
+            }
+        ],
+    );
+
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + 365 * 24 * 60 * 60);
+    // LP-tier quoting exceeds the SDK test host's conservative default
+    // budget. Run without that artificial cap and enforce Protocol 27's
+    // invocation limits explicitly for both creation and fill.
+    env.cost_estimate().budget().reset_unlimited();
+    let auction = pool.new_interest_auction(
+        &BytesN::from_array(env, &[71; 32]),
+        &soroban_sdk::vec![
+            env,
+            loan_asset.clone(),
+            collateral_asset,
+            fixture.next_token.clone(),
+            fixture.legacy_token.address.clone()
+        ],
+    );
+    assert_mainnet_invocation_limits!(env.cost_estimate().resources());
+    assert_eq!(auction.tier, pool_tier);
+    let credit = auction.auction.lot.get(loan_asset.clone()).unwrap();
+    assert!(credit >= 200 * SCALAR_7);
+    assert_eq!(auction.lot_value, credit);
+    assert_eq!(
+        auction.auction.bid.get(bid_token.clone()).unwrap(),
+        (credit * 6 + 4) / 5
+    );
+
+    let shares_before = fixture.candidate.pool_tier_shares(&backstop_tier, &pool_id);
+    let blnd_usdc_assets_before = fixture
+        .candidate
+        .pool_tier_assets(&v3_backstop::BackstopTier::BlndUsdc, &pool_id);
+    let blnd_xlm_assets_before = fixture
+        .candidate
+        .pool_tier_assets(&v3_backstop::BackstopTier::BlndXlm, &pool_id);
+    let usdc_assets_before = fixture
+        .candidate
+        .pool_tier_assets(&v3_backstop::BackstopTier::Usdc, &pool_id);
+    let filler = Address::generate(env);
+    let bid = auction.auction.bid.get(bid_token.clone()).unwrap();
+    let bid_token_client = StellarAssetClient::new(env, &bid_token);
+    bid_token_client.mint(&filler, &bid);
+    env.ledger()
+        .set_sequence_number(auction.auction.block + 200);
+    env.cost_estimate().budget().reset_unlimited();
+    let fill = pool.fill_interest_auction(&filler, &100);
+    assert_mainnet_invocation_limits!(env.cost_estimate().resources());
+    assert!(fill.complete);
+    assert_eq!(fill.bid_amount, bid);
+    assert_eq!(fill.lot.get(loan_asset.clone()), Some(credit));
+    assert_eq!(loan_token.balance(&filler), credit);
+    assert_eq!(TokenClient::new(env, &bid_token).balance(&filler), 0);
+    assert_eq!(
+        fixture
+            .candidate
+            .pool_tier_shares(&backstop_tier, &pool_id,),
+        shares_before
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .pool_tier_assets(&v3_backstop::BackstopTier::BlndUsdc, &pool_id,),
+        blnd_usdc_assets_before
+            + if case == InterestTierCase::BlndUsdc {
+                bid
+            } else {
+                0
+            }
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .pool_tier_assets(&v3_backstop::BackstopTier::BlndXlm, &pool_id,),
+        blnd_xlm_assets_before
+            + if case == InterestTierCase::BlndXlm {
+                bid
+            } else {
+                0
+            }
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .pool_tier_assets(&v3_backstop::BackstopTier::Usdc, &pool_id,),
+        usdc_assets_before
+            + if case == InterestTierCase::Usdc {
+                bid
+            } else {
+                0
+            }
+    );
+    assert_eq!(pool.reserve(&loan_asset).data.backstop_credit, 0);
+}
+
+#[test]
+fn optimized_v3_pool_realizes_blnd_usdc_interest_auction() {
+    assert_optimized_interest_auction(InterestTierCase::BlndUsdc);
+}
+
+#[test]
+fn optimized_v3_pool_realizes_blnd_xlm_interest_auction() {
+    assert_optimized_interest_auction(InterestTierCase::BlndXlm);
+}
+
+#[test]
+fn optimized_v3_pool_realizes_usdc_interest_auction() {
+    assert_optimized_interest_auction(InterestTierCase::Usdc);
+}
+
 #[test]
 fn v3_wasm_exposes_weighted_take_rate_quote() {
     let fixture = Fixture::create();

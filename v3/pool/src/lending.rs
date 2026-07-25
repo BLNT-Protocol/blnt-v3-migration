@@ -702,6 +702,58 @@ fn set_reserve_data(env: &Env, asset: &Address, data: &ReserveData) {
         .extend_ttl(&key, SHARED_TTL_THRESHOLD, SHARED_TTL_BUMP);
 }
 
+#[cfg(test)]
+pub(crate) fn set_backstop_credit(env: &Env, asset: &Address, amount: i128) {
+    let mut data = reserve_data(env, asset);
+    data.backstop_credit = amount;
+    set_reserve_data(env, asset, &data);
+}
+
+pub(crate) fn checkpoint_reserve(env: &Env, asset: &Address) -> Reserve {
+    let reserve = accrue_reserve(env, asset);
+    set_reserve_data(env, asset, &reserve.data);
+    reserve
+}
+
+pub(crate) fn consume_backstop_credit(env: &Env, asset: &Address, amount: i128) {
+    if amount < 0 {
+        panic_with_error!(env, PoolError::ArithmeticError);
+    }
+    let mut reserve = accrue_reserve(env, asset);
+    reserve.data.backstop_credit =
+        checked_sub_nonnegative(env, reserve.data.backstop_credit, amount);
+    set_reserve_data(env, asset, &reserve.data);
+}
+
+/// Value three amounts of one reserve in 7-decimal USDC with one oracle read.
+pub(crate) fn value_reserve_amounts(
+    env: &Env,
+    asset: &Address,
+    first: i128,
+    second: i128,
+    third: i128,
+) -> (i128, i128, i128, u64) {
+    if first < 0 || second < 0 || third < 0 {
+        panic_with_error!(env, PoolError::ArithmeticError);
+    }
+    let reserve = reserve_config(env, asset);
+    let lending_config = config(env);
+    let quote = PriceOracleClient::new(env, &lending_config.oracle).price(asset);
+    if quote.price <= 0
+        || quote.decimals != lending_config.price_decimals
+        || quote.valid_until < env.ledger().timestamp()
+    {
+        panic_with_error!(env, PoolError::InvalidPrice);
+    }
+    let asset_scalar = pow10(env, reserve.decimals);
+    let oracle_scalar = pow10(env, lending_config.price_decimals);
+    let value = |amount| {
+        let quoted = mul_div_floor(env, quote.price, amount, asset_scalar);
+        mul_div_floor(env, quoted, SCALAR_7, oracle_scalar)
+    };
+    (value(first), value(second), value(third), quote.valid_until)
+}
+
 fn accrue_reserve(env: &Env, asset: &Address) -> Reserve {
     let reserve_config = reserve_config(env, asset);
     let mut reserve = Reserve {

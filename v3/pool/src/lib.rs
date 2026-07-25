@@ -6,7 +6,9 @@ mod lending;
 pub use auction::{
     AuctionCreated, AuctionData, AuctionDeleted, AuctionFilled, BackstopTier,
     BadDebtAuctionCreated, BadDebtAuctionData, BadDebtAuctionDeleted, BadDebtAuctionFill,
-    BadDebtAuctionFilled, BadDebtContinuation, BadDebtLotQuote, SupplierDebtDefaulted,
+    BadDebtAuctionFilled, BadDebtContinuation, BadDebtLotQuote, InterestAuctionCreated,
+    InterestAuctionData, InterestAuctionDeleted, InterestAuctionFill, InterestAuctionFilled,
+    InterestLotQuote, InterestReserveState, SupplierDebtDefaulted, TakeRateQuote,
     UserBadDebtTransferred, ACTION_DELETE_LIQUIDATION, ACTION_FILL_USER_LIQUIDATION,
 };
 pub use lending::{
@@ -68,6 +70,8 @@ pub enum PoolError {
     AuctionNotStarted = 1325,
     AuctionNotStale = 1326,
     BadDebtUnsupported = 1327,
+    InvalidInterestAuction = 1328,
+    NoInterestAuctionCapacity = 1329,
 }
 
 /// Canonical status result returned by the configured backstop.
@@ -107,6 +111,27 @@ pub trait Backstop {
         lot_amount: i128,
         to: Address,
     ) -> Option<BadDebtLotQuote>;
+    fn quote_pool_take_rate_batch(
+        env: Env,
+        pool: Address,
+        distributions: Map<Address, i128>,
+    ) -> Map<Address, TakeRateQuote>;
+    fn commit_interest_lot(
+        env: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        tier: BackstopTier,
+        lot_value: i128,
+    ) -> InterestLotQuote;
+    fn release_interest_lot(env: Env, pool: Address, auction_id: BytesN<32>);
+    fn settle_interest_lot(
+        env: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        base_bid_amount: i128,
+        bid_amount: i128,
+        from: Address,
+    ) -> Option<InterestLotQuote>;
 }
 
 #[contractevent]
@@ -336,6 +361,41 @@ impl PoolContract {
     pub fn delete_stale_bad_debt_auction(env: Env) {
         extend_instance_ttl(&env);
         auction::delete_stale_bad_debt_auction(&env);
+    }
+
+    /// Checkpoint a bounded reserve-credit batch and create one tier-specific
+    /// interest auction from the next qualifying cyclic tier.
+    pub fn new_interest_auction(
+        env: Env,
+        auction_id: BytesN<32>,
+        lot_assets: Vec<Address>,
+    ) -> InterestAuctionData {
+        extend_instance_ttl(&env);
+        auction::create_interest_auction(&env, &auction_id, &lot_assets)
+    }
+
+    /// Return this pool's single active tier-specific interest auction.
+    pub fn get_interest_auction(env: Env) -> InterestAuctionData {
+        extend_instance_ttl(&env);
+        auction::get_interest_auction(&env)
+    }
+
+    /// Fill part or all of the active tier-specific interest auction.
+    pub fn fill_interest_auction(env: Env, filler: Address, percent: u32) -> InterestAuctionFill {
+        extend_instance_ttl(&env);
+        auction::fill_interest_auction(&env, &filler, percent)
+    }
+
+    /// Return one reserve's pending tier-specific interest-credit state.
+    pub fn interest_reserve_state(env: Env, asset: Address) -> InterestReserveState {
+        extend_instance_ttl(&env);
+        auction::interest_reserve_state(&env, &asset)
+    }
+
+    /// Permissionlessly release an interest auction after 500 ledgers.
+    pub fn delete_stale_interest_auction(env: Env) {
+        extend_instance_ttl(&env);
+        auction::delete_stale_interest_auction(&env);
     }
 
     /// Return counts derived from the canonical nonzero loss records.
@@ -578,6 +638,14 @@ mod tests {
         BadDebtQuote,
         CommittedAuction,
         CommittedDebt,
+        InterestAuction,
+        InterestBid,
+        InterestBidToken,
+        InterestLotValue,
+        InterestReleased,
+        InterestTarget,
+        InterestTier,
+        InterestWeighted,
         ReleasedAuction,
         SettledBaseLot,
         SettledCount,
@@ -796,6 +864,167 @@ mod tests {
 
         pub fn settled_to(env: Env) -> Option<Address> {
             env.storage().instance().get(&MockBackstopKey::SettledTo)
+        }
+
+        pub fn set_interest_bid_token(env: Env, token: Address) {
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::InterestBidToken, &token);
+        }
+
+        pub fn set_interest_weighted(env: Env, weighted: bool) {
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::InterestWeighted, &weighted);
+        }
+
+        pub fn quote_pool_take_rate_batch(
+            env: Env,
+            _pool: Address,
+            distributions: Map<Address, i128>,
+        ) -> Map<Address, TakeRateQuote> {
+            let weighted = env
+                .storage()
+                .instance()
+                .get::<_, bool>(&MockBackstopKey::InterestWeighted)
+                .unwrap_or(false);
+            let mut quotes = Map::new(&env);
+            for (asset, amount) in distributions.iter() {
+                let (blnd_usdc, blnd_xlm, usdc) = if weighted {
+                    (amount * 5 / 14, amount * 5 / 14, amount * 4 / 14)
+                } else {
+                    (amount, 0, 0)
+                };
+                quotes.set(
+                    asset,
+                    TakeRateQuote {
+                        blnd_usdc,
+                        blnd_xlm,
+                        remainder: amount - blnd_usdc - blnd_xlm - usdc,
+                        usdc,
+                    },
+                );
+            }
+            quotes
+        }
+
+        pub fn commit_interest_lot(
+            env: Env,
+            pool: Address,
+            auction_id: BytesN<32>,
+            tier: BackstopTier,
+            lot_value: i128,
+        ) -> InterestLotQuote {
+            pool.require_auth();
+            let bid_token: Address = env
+                .storage()
+                .instance()
+                .get(&MockBackstopKey::InterestBidToken)
+                .unwrap();
+            let bid_amount = lending::mul_div_ceil(&env, lot_value, 6, 5);
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::InterestAuction, &auction_id);
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::InterestBid, &bid_amount);
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::InterestLotValue, &lot_value);
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::InterestTarget, &bid_amount);
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::InterestTier, &tier);
+            InterestLotQuote {
+                bid_token,
+                bid_amount,
+                lot_value,
+                target_value: bid_amount,
+                tier,
+                valid_until: u64::MAX,
+            }
+        }
+
+        pub fn release_interest_lot(env: Env, pool: Address, auction_id: BytesN<32>) {
+            pool.require_auth();
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::InterestReleased, &auction_id);
+            env.storage()
+                .instance()
+                .remove(&MockBackstopKey::InterestAuction);
+        }
+
+        pub fn settle_interest_lot(
+            env: Env,
+            pool: Address,
+            auction_id: BytesN<32>,
+            base_bid_amount: i128,
+            _bid_amount: i128,
+            _from: Address,
+        ) -> Option<InterestLotQuote> {
+            pool.require_auth();
+            let committed: BytesN<32> = env
+                .storage()
+                .instance()
+                .get(&MockBackstopKey::InterestAuction)
+                .unwrap();
+            assert_eq!(committed, auction_id);
+            let previous_bid: i128 = env
+                .storage()
+                .instance()
+                .get(&MockBackstopKey::InterestBid)
+                .unwrap();
+            let remaining_bid = previous_bid - base_bid_amount;
+            if remaining_bid == 0 {
+                env.storage()
+                    .instance()
+                    .remove(&MockBackstopKey::InterestAuction);
+                return None;
+            }
+            let previous_lot_value: i128 = env
+                .storage()
+                .instance()
+                .get(&MockBackstopKey::InterestLotValue)
+                .unwrap();
+            let lot_value = previous_lot_value * remaining_bid / previous_bid;
+            let bid_token: Address = env
+                .storage()
+                .instance()
+                .get(&MockBackstopKey::InterestBidToken)
+                .unwrap();
+            let tier: BackstopTier = env
+                .storage()
+                .instance()
+                .get(&MockBackstopKey::InterestTier)
+                .unwrap();
+            let target_value: i128 = env
+                .storage()
+                .instance()
+                .get(&MockBackstopKey::InterestTarget)
+                .unwrap();
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::InterestBid, &remaining_bid);
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::InterestLotValue, &lot_value);
+            Some(InterestLotQuote {
+                bid_token,
+                bid_amount: remaining_bid,
+                lot_value,
+                target_value,
+                tier,
+                valid_until: u64::MAX,
+            })
+        }
+
+        pub fn released_interest_auction(env: Env) -> Option<BytesN<32>> {
+            env.storage()
+                .instance()
+                .get(&MockBackstopKey::InterestReleased)
         }
     }
 
@@ -1551,6 +1780,300 @@ mod tests {
         env.ledger().set_sequence_number(replacement.block + 500);
         pool.delete_stale_liquidation_auction(&borrower);
         assert!(pool.try_get_liquidation_auction(&borrower).is_err());
+    }
+
+    #[test]
+    fn tier_specific_interest_auction_conserves_partial_fill_and_compounds_bid() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        env.ledger().set_timestamp(1_000);
+        env.ledger().set_sequence_number(10);
+        let token_admin = Address::generate(&env);
+        let reserve_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let reserve_admin = StellarAssetClient::new(&env, &reserve_asset);
+        let bid_token = Address::generate(&env);
+        let backstop_id = env.register(MockBackstop, ());
+        let backstop = MockBackstopClient::new(&env, &backstop_id);
+        backstop.set_interest_bid_token(&bid_token);
+        let oracle_id = env.register(MockPriceOracle, ());
+        MockPriceOracleClient::new(&env, &oracle_id).set_price(
+            &reserve_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: lending::SCALAR_7,
+                valid_until: u64::MAX,
+            },
+        );
+        let pool_id = register_lending_pool(
+            &env,
+            &backstop_id,
+            &Address::generate(&env),
+            &oracle_id,
+            &vec![&env, reserve_asset.clone()],
+        );
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let credit = 400 * lending::SCALAR_7;
+        reserve_admin.mint(&pool_id, &credit);
+        env.as_contract(&pool_id, || {
+            lending::set_backstop_credit(&env, &reserve_asset, credit);
+        });
+
+        let auction_id = BytesN::from_array(&env, &[41; 32]);
+        let auction = pool.new_interest_auction(&auction_id, &vec![&env, reserve_asset.clone()]);
+        assert_eq!(auction.tier, BackstopTier::BlndUsdc);
+        assert_eq!(auction.auction.lot.get(reserve_asset.clone()), Some(credit));
+        assert_eq!(auction.lot_value, credit);
+        assert_eq!(
+            pool.interest_reserve_state(&reserve_asset).blnd_usdc,
+            credit
+        );
+        assert_eq!(
+            pool.backstop_loss_state(),
+            BackstopLossState {
+                committed_loss_entries: 0,
+                liability_entries: 0,
+                unresolved_bad_debt_entries: 0,
+            }
+        );
+
+        let filler = Address::generate(&env);
+        env.ledger()
+            .set_sequence_number(auction.auction.block + 100);
+        let partial = pool.fill_interest_auction(&filler, &50);
+        assert!(!partial.complete);
+        assert_eq!(
+            partial.base_lot.get(reserve_asset.clone()),
+            Some(200 * lending::SCALAR_7)
+        );
+        assert_eq!(
+            partial.lot.get(reserve_asset.clone()),
+            Some(100 * lending::SCALAR_7)
+        );
+        assert_eq!(
+            partial.returned_lot.get(reserve_asset.clone()),
+            Some(100 * lending::SCALAR_7)
+        );
+        assert_eq!(
+            TokenClient::new(&env, &reserve_asset).balance(&filler),
+            100 * lending::SCALAR_7
+        );
+        assert_eq!(
+            pool.reserve(&reserve_asset).data.backstop_credit,
+            300 * lending::SCALAR_7
+        );
+        assert_eq!(
+            pool.interest_reserve_state(&reserve_asset).blnd_usdc,
+            300 * lending::SCALAR_7
+        );
+
+        env.ledger()
+            .set_sequence_number(auction.auction.block + 200);
+        let complete = pool.fill_interest_auction(&filler, &100);
+        assert!(complete.complete);
+        assert_eq!(
+            TokenClient::new(&env, &reserve_asset).balance(&filler),
+            300 * lending::SCALAR_7
+        );
+        assert_eq!(
+            pool.reserve(&reserve_asset).data.backstop_credit,
+            100 * lending::SCALAR_7
+        );
+        assert_eq!(
+            pool.interest_reserve_state(&reserve_asset).blnd_usdc,
+            100 * lending::SCALAR_7
+        );
+        assert!(pool.try_get_interest_auction().is_err());
+    }
+
+    #[test]
+    fn stale_interest_auction_returns_the_reserved_lot_to_pending_credit() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        env.ledger().set_timestamp(1_000);
+        env.ledger().set_sequence_number(10);
+        let token_admin = Address::generate(&env);
+        let reserve_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let reserve_admin = StellarAssetClient::new(&env, &reserve_asset);
+        let backstop_id = env.register(MockBackstop, ());
+        let backstop = MockBackstopClient::new(&env, &backstop_id);
+        backstop.set_interest_bid_token(&Address::generate(&env));
+        let oracle_id = env.register(MockPriceOracle, ());
+        MockPriceOracleClient::new(&env, &oracle_id).set_price(
+            &reserve_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: lending::SCALAR_7,
+                valid_until: u64::MAX,
+            },
+        );
+        let pool_id = register_lending_pool(
+            &env,
+            &backstop_id,
+            &Address::generate(&env),
+            &oracle_id,
+            &vec![&env, reserve_asset.clone()],
+        );
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let credit = 200 * lending::SCALAR_7;
+        reserve_admin.mint(&pool_id, &credit);
+        env.as_contract(&pool_id, || {
+            lending::set_backstop_credit(&env, &reserve_asset, credit);
+        });
+        let auction_id = BytesN::from_array(&env, &[42; 32]);
+        let auction = pool.new_interest_auction(&auction_id, &vec![&env, reserve_asset.clone()]);
+
+        env.ledger()
+            .set_sequence_number(auction.auction.block + 499);
+        assert!(pool.try_delete_stale_interest_auction().is_err());
+        env.ledger()
+            .set_sequence_number(auction.auction.block + 500);
+        pool.delete_stale_interest_auction();
+        assert_eq!(
+            pool.interest_reserve_state(&reserve_asset).blnd_usdc,
+            credit
+        );
+        assert_eq!(backstop.released_interest_auction(), Some(auction_id));
+        assert_eq!(pool.reserve(&reserve_asset).data.backstop_credit, credit);
+    }
+
+    #[test]
+    fn interest_auction_cursor_cycles_across_all_qualifying_weighted_tiers() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        env.ledger().set_timestamp(1_000);
+        env.ledger().set_sequence_number(10);
+        let token_admin = Address::generate(&env);
+        let reserve_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let reserve_admin = StellarAssetClient::new(&env, &reserve_asset);
+        let backstop_id = env.register(MockBackstop, ());
+        let backstop = MockBackstopClient::new(&env, &backstop_id);
+        backstop.set_interest_bid_token(&Address::generate(&env));
+        backstop.set_interest_weighted(&true);
+        let oracle_id = env.register(MockPriceOracle, ());
+        MockPriceOracleClient::new(&env, &oracle_id).set_price(
+            &reserve_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: lending::SCALAR_7,
+                valid_until: u64::MAX,
+            },
+        );
+        let pool_id = register_lending_pool(
+            &env,
+            &backstop_id,
+            &Address::generate(&env),
+            &oracle_id,
+            &vec![&env, reserve_asset.clone()],
+        );
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let credit = 1_400 * lending::SCALAR_7;
+        reserve_admin.mint(&pool_id, &credit);
+        env.as_contract(&pool_id, || {
+            lending::set_backstop_credit(&env, &reserve_asset, credit);
+        });
+
+        for (index, expected_tier, expected_lot) in [
+            (0_u8, BackstopTier::BlndUsdc, 500 * lending::SCALAR_7),
+            (1_u8, BackstopTier::BlndXlm, 500 * lending::SCALAR_7),
+            (2_u8, BackstopTier::Usdc, 400 * lending::SCALAR_7),
+        ] {
+            let auction = pool.new_interest_auction(
+                &BytesN::from_array(&env, &[60 + index; 32]),
+                &vec![&env, reserve_asset.clone()],
+            );
+            assert_eq!(auction.tier, expected_tier);
+            assert_eq!(
+                auction.auction.lot.get(reserve_asset.clone()),
+                Some(expected_lot)
+            );
+            env.ledger()
+                .set_sequence_number(auction.auction.block + 500);
+            pool.delete_stale_interest_auction();
+        }
+        assert_eq!(
+            pool.interest_reserve_state(&reserve_asset),
+            InterestReserveState {
+                blnd_usdc: 500 * lending::SCALAR_7,
+                blnd_xlm: 500 * lending::SCALAR_7,
+                carry: 0,
+                usdc: 400 * lending::SCALAR_7,
+            }
+        );
+    }
+
+    #[test]
+    fn interest_auction_enforces_bounded_batch_and_exact_200_usdc_minimum() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        env.ledger().set_timestamp(1_000);
+        let token_admin = Address::generate(&env);
+        let reserve_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let reserve_admin = StellarAssetClient::new(&env, &reserve_asset);
+        let backstop_id = env.register(MockBackstop, ());
+        let backstop = MockBackstopClient::new(&env, &backstop_id);
+        backstop.set_interest_bid_token(&Address::generate(&env));
+        let oracle_id = env.register(MockPriceOracle, ());
+        MockPriceOracleClient::new(&env, &oracle_id).set_price(
+            &reserve_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: lending::SCALAR_7,
+                valid_until: u64::MAX,
+            },
+        );
+        let pool_id = register_lending_pool(
+            &env,
+            &backstop_id,
+            &Address::generate(&env),
+            &oracle_id,
+            &vec![&env, reserve_asset.clone()],
+        );
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let auction_id = BytesN::from_array(&env, &[70; 32]);
+        assert!(pool
+            .try_new_interest_auction(&auction_id, &Vec::new(&env))
+            .is_err());
+        assert!(pool
+            .try_new_interest_auction(
+                &auction_id,
+                &vec![&env, reserve_asset.clone(), reserve_asset.clone()]
+            )
+            .is_err());
+        assert!(pool
+            .try_new_interest_auction(
+                &auction_id,
+                &vec![
+                    &env,
+                    Address::generate(&env),
+                    Address::generate(&env),
+                    Address::generate(&env),
+                    Address::generate(&env),
+                    Address::generate(&env)
+                ]
+            )
+            .is_err());
+
+        let below = 200 * lending::SCALAR_7 - 1;
+        reserve_admin.mint(&pool_id, &(below + 1));
+        env.as_contract(&pool_id, || {
+            lending::set_backstop_credit(&env, &reserve_asset, below);
+        });
+        assert!(pool
+            .try_new_interest_auction(&auction_id, &vec![&env, reserve_asset.clone()])
+            .is_err());
+        env.as_contract(&pool_id, || {
+            lending::set_backstop_credit(&env, &reserve_asset, below + 1);
+        });
+        let auction = pool.new_interest_auction(&auction_id, &vec![&env, reserve_asset.clone()]);
+        assert_eq!(auction.lot_value, 200 * lending::SCALAR_7);
     }
 
     #[test]

@@ -486,16 +486,21 @@ All three backstop tiers inherit the v2 queue-for-withdrawal shape:
   BLND:XLM and USDC never receive migration-backfill weight.
 - Queued shares are excluded from activation value and ongoing BLND-emission
   weight immediately upon queueing.
-- Queued shares remain eligible for take-rate allocation while they remain in
-  contract custody. Take-rate eligibility uses total accounted tier shares,
-  including active and queued shares, exactly once.
+- Queued shares remain eligible for take-rate realization while they remain in
+  contract custody. A completed interest auction donates its tier-token bid
+  against the tier's total shares, including active and queued shares, exactly
+  once.
 - Queued shares remain exposed to the tier's loss waterfall until actual
   withdrawal. Queueing does not reserve their underlying assets or protect
   their redemption value; a tier loss reduces active and queued share value
   proportionally through their common exchange rate, as in v2.
-- Queueing and dequeueing do not change take-rate eligibility. Actual
-  withdrawal MUST checkpoint accrued take-rate value before removing the
-  withdrawn shares from future take-rate allocations.
+- Queueing and dequeueing do not change take-rate eligibility. While an
+  interest-auction commitment is active, deposits into and actual withdrawals
+  from its selected tier MUST fail so the share set that receives the donated
+  bid cannot change between preparation and settlement. Queueing and
+  dequeueing remain available because they do not change total shares. Other
+  tiers are unaffected by this interest-only lock. Permissionless stale-auction
+  deletion bounds the lock to 500 ledgers after the auction start.
 - User, pool, and global total shares are reduced only when an expired
   withdrawal transfers the tokens out of the contract.
 - Every withdrawal calls the attributed pool's read-only
@@ -527,6 +532,9 @@ The callback MUST return false for an address other than the pool's immutable
 backstop or when any count is nonzero. Missing canonical loss records MUST fail
 closed rather than being interpreted as empty. No administrator, governance
 address, or mutable boolean override may make the callback return true.
+An interest-auction commitment is a gain process rather than committed loss
+capital and MUST NOT enter this pool-level loss callback. The backstop enforces
+its narrower selected-tier deposit and withdrawal lock directly.
 
 The withdrawal implementation MUST:
 
@@ -548,8 +556,7 @@ that all tiers are below the auction minimum, clears the residual canonical
 liabilities while applying the loss to suppliers. A completed
 user-liquidation auction that exhausts the liquidatee's collateral atomically
 hands every residual dToken liability to the configured backstop and updates
-the same canonical reserve-keyed records. Interest auctions remain
-unimplemented.
+the same canonical reserve-keyed records.
 
 ## 8. Pool activation
 
@@ -742,8 +749,10 @@ refresh and operator requests call the immutable backstop, reject disallowed
 or invalid results, and store the returned status atomically. The pool exposes
 the centralized v2-compatible action predicate enforced by the implemented
 lending and user-liquidation requests. Bad-debt fills are explicit direct
-entry points that remain available under every status. Future interest-auction
-entry points must apply the corresponding v2-compatible status policy.
+entry points that remain available under every status. Tier-specific interest
+auction creation, filling, and stale recovery are explicit direct entry points
+that remain available under every status because they realize already accrued
+credit and do not create or modify a user lending position.
 
 ### 8.2 Initial lending core
 
@@ -767,11 +776,11 @@ The initial lending core implements request types 0 through 5:
 | 5 | Repay |
 
 Request types 6 and 9 implement user-liquidation fill and cancellation,
-including the completed-auction bad-debt handoff. Remaining auction request
-types are reserved for future interest-auction integration. Each submitted
-request MUST enforce the stored v2-compatible status before changing
-accounting. Disabled reserves reject supply, collateral supply, and borrow but
-continue to permit withdrawal and repayment.
+including the completed-auction bad-debt handoff. Tier-specific interest
+auctions use their dedicated direct entry points rather than a submit request
+type. Each submitted request MUST enforce the stored v2-compatible status
+before changing accounting. Disabled reserves reject supply, collateral
+supply, and borrow but continue to permit withdrawal and repayment.
 
 The request owner is `from`, the account providing incoming tokens is
 `spender`, and outgoing tokens are sent to `to`. `spender` MUST authorize every
@@ -793,9 +802,9 @@ Reserve accounting retains the v2 bToken/dToken model and interest curve:
 - All intermediate multiplication uses checked I256 fixed-point arithmetic;
   results that do not fit i128 fail the transaction.
 
-Accrued backstop credit is accounting state only until the take-rate realization
-and distribution cadence is specified. This milestone MUST NOT introduce an
-ad hoc distribution path.
+Accrued backstop credit remains reserve-asset accounting state until a
+tier-specific interest auction checkpoints and realizes it under Section 9.1.
+No direct user claim or administrator distribution path exists.
 
 Each submission MUST verify the pool's exact per-asset token-balance delta
 across its transfers. Fee-on-transfer behavior, a downward rebase during the
@@ -1098,31 +1107,104 @@ D
 \right\rfloor
 \]
 
-A tier with zero reward-eligible value contributes zero to the numerator and
+A tier with zero eligible value contributes zero to the numerator and
 denominator. The formula therefore renormalizes across only populated,
-reward-eligible tiers. Within each tier, allocation MUST be proportional to
-reward-eligible depositor shares.
+eligible tiers.
 
-For take-rate purposes, reward-eligible value and shares include every
-accounted position still held in contract custody, whether active or queued
-for withdrawal. Queue expiry alone does not change eligibility. The protocol
-MUST checkpoint a position's accrued allocation before an actual withdrawal
-removes its shares from the tier. Queueing or dequeueing MUST NOT add or remove
-take-rate value, and active plus queued views MUST NOT cause the same share to
-be counted twice.
+For take-rate purposes, eligible value is derived from every accounted
+pool-tier asset still held in contract custody, whether its corresponding
+shares are active or queued for withdrawal. The canonical weighting quote MUST
+use full accounted assets rather than subtract assets separately committed to
+a bad-debt auction. A bad-debt commitment and an interest commitment may
+coexist, but their transfers MUST remain independently accounted and atomic.
 
 The fixed weights compensate earlier-loss capital more per USDC of eligible
 value without changing activation weighting. Take-rate weighting is separate
 from BLND-emission allocation and does not determine the loss amount charged to
 a tier.
 
-The implementation MUST use accumulator/checkpoint accounting rather than
-iterate across depositors. If \(D\) is denominated in a supplied reserve asset,
-each tier accrues that asset directly; the calculation MUST NOT assume an
-immediate conversion to a backstop asset. Integer remainder MUST remain in a
-carry accumulator keyed by both pool and distributed reserve asset for a future
-distribution of that same asset. Remainders from different reserve assets MUST
-NOT be combined, converted, or silently assigned to a favored tier.
+The allocation determines which tier receives each reserve-asset lot; it does
+not transfer reserve assets directly to depositors. For every pool and reserve
+asset, the pool MUST store pending amounts for each tier and one integer carry.
+The carry remains isolated to that pool and reserve asset. New accrued credit
+plus its carry is apportioned with the canonical `5:5:4` weighted-value quote.
+The three floor-rounded tier amounts and the new carry MUST conserve the exact
+input amount. Remainders from different pools or reserve assets MUST NOT be
+combined, converted, or silently assigned to a favored tier.
+
+Any caller may create one tier-specific interest auction for a pool by
+supplying a unique auction identifier and a bounded, duplicate-free batch of
+one to `min(max_positions - 1, 4)` configured reserve assets. Creation MUST:
+
+1. Accrue and persist every reserve in the supplied batch.
+2. Checkpoint each asset's newly available backstop credit into its three
+   pending tier amounts through one canonical backstop weighting quote.
+3. Value each tier's pending amounts with the pool's immutable reserve oracle.
+4. Starting at the pool's stored cyclic tier cursor, select the first supplied
+   tier whose pending lot is worth at least 200 USDC.
+5. Reserve the selected pending amounts in a next-ledger auction and advance
+   the cursor to the next tier.
+
+Exactly 200 USDC qualifies; a smaller lot does not. A missing, nonpositive,
+invalid-decimal, or stale reserve or LP valuation fails closed. Omitted reserve
+assets remain uncheckpointed or pending and cannot be reassigned, but the
+bounded selection guarantee covers only the caller-supplied batch. A pool may
+have at most one active interest auction. Selection MUST be cyclic across the
+qualifying tiers rather than follow the loss waterfall, so a continuously
+qualifying tier cannot starve another qualifying tier.
+The persistent pending amount continues to include the reserved lot. This
+prevents simultaneous expiry of the matching temporary records from losing or
+reweighting its tier allocation; a later creation can reserve it again.
+
+The selected tier supplies the auction bid token:
+
+| Selected tier | Bid token donated on fill |
+| --- | --- |
+| BLND:USDC | BLND:USDC LP |
+| BLND:XLM | BLND:XLM LP |
+| Plain USDC | USDC |
+
+Each configured bid token MUST expose seven decimals. Interest-auction
+commitment fails closed if that invariant is not satisfied.
+
+The committed base bid MUST have a verified value equal to 120% of the selected
+reserve-asset lot's verified USDC value, rounded up in token units. The pool
+auction and backstop commitment MUST use the identical quote, identifier,
+selected tier, and fixed 46-day temporary lifetime. Only the registered pool
+may create, resize, settle, or release its commitment.
+
+Interest fills inherit v2's 400-ledger auction curve. During the first 200
+ledgers the bid is full while the lot ramps from zero to full; during the next
+200 ledgers the lot is full while the bid declines from full to zero.
+Percentage selection rounds the base bid up and base lot down. A partial fill
+removes the selected base amounts from the auction, transfers only their
+time-scaled amounts, releases any base-lot discount from the reservation, and
+leaves the pool auction and backstop commitment synchronized. Only reserve
+assets actually transferred from the pool are subtracted from both the
+persistent pending tier amount and accrued backstop credit.
+
+The filler MUST authorize the call, MUST NOT be the pool or backstop, transfers
+the actual tier-token bid directly to the backstop, and receives the actual
+reserve-asset lot directly from the pool. Every token movement MUST pass an
+exact source-balance-delta check. The donated bid increases the selected
+pool-tier's accounted assets without minting shares. Its common exchange rate
+therefore appreciates every active and queued share proportionally, with no
+per-user claim. Donated assets immediately participate in activation, future
+loss capacity, take-rate eligibility, and, for either BLND-bearing LP tier,
+ongoing BLND-emission weight.
+
+A complete fill deletes both temporary records. At or after 500 ledgers from
+the start, any caller may delete a stale auction, atomically release the
+backstop commitment, and leave every unfilled base lot in its original pending
+pool/reserve/tier accumulator. Stale deletion changes no persistent credit,
+token balance, or tier assets. Before that boundary deletion fails.
+
+The `5:5:4` ratio governs allocation of reserve-credit lots, not a guaranteed
+ratio of realized donated market value. The inherited time curve and different
+fill times can cause the market value ultimately donated to each tier to
+diverge from `5:5:4`. This execution-price effect MUST be observable and
+tested; no protocol fee, user claim, or compensating governance adjustment is
+applied.
 
 ## 10. BLND emissions and backfill
 
@@ -1426,8 +1508,6 @@ implemented:
 - Production LP price sources, averaging, staleness, and failure policy.
 - Production lending-reserve admission policy for issuer controls, clawback,
   deauthorization, rebasing, and other nonstandard token behavior.
-- Interest-auction entry points and settlement.
-- Exact take-rate accrual integration and distribution cadence.
 - Post-migration designated token.
 - Top-level BLND split between backstop depositors and pool supply/borrow
   positions.
@@ -1457,10 +1537,14 @@ implemented:
    liabilities, filler health, backstop commitments, tier-token transfer, and
    pool-tier exchange-rate impairment; then add permissionless next-tier
    sequencing and v2-style supplier residual settlement.
+9. Implement bounded tier-specific interest auctions that allocate accrued
+   reserve credit with the canonical `5:5:4` weighting, cycle across qualifying
+   tiers, donate the selected tier token without minting shares, and support
+   atomic partial fills and permissionless stale recovery.
 
 Milestones 1 through 5, the bounded-Q4W and canonical-loss-state-boundary
 portions of milestone 6, the reproducible deployment runner for the local
-portion of milestone 7, and milestone 8 are
+portion of milestone 7, and milestones 8 and 9 are
 represented by the frozen v2 baseline, isolated Protocol-27 backstop crate,
 cross-version legacy-emitter migration harness, the candidate's
 pool-attributed continuous BLND:USDC shares, time-weighted migration
@@ -1486,14 +1570,17 @@ complete single-tier fills using the inherited v2 curve, direct tier-token
 transfer with proportional active-and-queued exchange-rate impairment,
 permissionless bounded continuation that reuses each eligible tier before
 advancing, v2-style residual supplier loss after a verified no-tier quote, and
-a fail-closed pool callback derived from bounded canonical loss records.
+a fail-closed pool callback derived from bounded canonical loss records,
+pool-and-reserve-isolated pending interest credit and carry, canonical
+`5:5:4` credit allocation, cyclic single-tier interest-auction selection,
+120%-value tier-token bids, v2-curve partial fills, share-free bid donation,
+and permissionless stale-lot recovery.
 The local runner deploys independently issued assets, a
 coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
-local run, the public-testnet exercise, interest auctions, a production LP
-valuation source, take-rate realization, and ongoing BLND-emission accrual
-remain intentionally unimplemented.
+local run, the public-testnet exercise, a production LP valuation source, and
+ongoing BLND-emission accrual remain intentionally unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

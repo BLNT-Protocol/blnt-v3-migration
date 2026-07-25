@@ -46,9 +46,12 @@ floor-rounded claim per frozen position without iteration; remaining integer
 dust stays segregated in the backfill reserve. The backstop can reserve and
 settle a single-tier bad-debt auction by transferring the time-scaled tier
 token directly to the filler and impairing the pool-tier exchange rate by
-exactly that transferred amount. It intentionally does not yet implement
-interest auctions or ongoing-emission accrual. The pool implements next-step
-bad-debt continuation as a separate
+exactly that transferred amount. It also allocates accrued reserve credit with
+canonical `5:5:4` tier weighting and realizes it through one cyclic
+tier-specific interest auction per pool. A filler donates the selected tier
+token without receiving shares, so the common active-and-queued exchange rate
+appreciates automatically. Ongoing-emission accrual remains unimplemented. The
+pool implements next-step bad-debt continuation as a separate
 permissionless transaction: it either commits the next eligible strict-tier
 lot or, after a verified no-eligible-tier quote, reduces affected reserves'
 bToken exchange rates using Blend v2's supplier-default arithmetic.
@@ -105,9 +108,11 @@ backstop's liability record atomically. Bad-debt fills move their scaled dToken
 bid from the backstop to a healthy authenticated filler and synchronize those
 same records atomically. Permissionless bad-debt continuation either prepares
 the next strict-tier auction or clears all residual canonical liabilities
-atomically while applying their asset loss to suppliers. Future
-interest-auction entry points must update the other records with their real
-protocol transitions. The pool now implements permissionless v2-compatible
+atomically while applying their asset loss to suppliers. Interest commitments
+are gain processes rather than loss records; the backstop directly blocks
+deposits and actual withdrawals only in the selected tier until fill or
+permissionless stale recovery. The pool now implements permissionless
+v2-compatible
 user-liquidation creation and request-type-6 fills, including the inherited
 400-ledger auction curve, partial fills, status-gated request-type-9
 cancellation, and permissionless stale deletion. Active auctions block ordinary
@@ -136,8 +141,16 @@ next auction; a verified result that all tiers are below $200 defaults every
 remaining backstop liability through the affected reserves' supplier exchange
 rates. A pre-existing bad-debt auction is not resized when a later liquidation
 adds debt; permissionless continuation handles the canonical residual after
-that auction clears. Interest auctions remain unimplemented, so the current
-pool is not yet a complete lending market.
+that auction clears. Tier-specific interest auctions accept at most
+`min(max_positions - 1, 4)` reserve assets, checkpoint accrued backstop credit
+with isolated carry,
+select qualifying tiers cyclically at a $200 minimum, and commit a tier-token
+bid worth 120% of the reserve lot. Partial fills use the inherited 400-ledger
+curve and leave the time discount in persistent pending credit; stale deletion
+after 500 ledgers releases the unfilled reservation without rewriting that
+credit. Bid donation mints no shares and requires no depositor claim. Ongoing
+BLND-emission accrual is still required before the pool is a complete lending
+market.
 
 The v3 pool factory stores immutable backstop and pool-WASM configuration,
 deploys pools with explicit immutable operators, lending configuration, and
@@ -172,6 +185,9 @@ exception and cannot alter protocol-wide policy, migration, configuration,
 withdrawal safety, or WASM. Status storage, operator authorization, canonical
 valuation, and enforcement for the implemented lending requests are now
 integrated; future auction entry points must enforce the same predicate.
+Tier-specific interest-auction creation, filling, and stale recovery are direct
+entry points available in every stored status because they realize previously
+accrued credit without modifying lending positions.
 
 The pool-local operator is immutable and has no rotation or recovery path. A
 compromised operator can always select Admin Frozen; if the operator is

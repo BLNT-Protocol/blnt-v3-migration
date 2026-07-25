@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contractclient, contracterror, contractevent, contractimpl, contracttype,
-    panic_with_error, token::TokenClient, Address, BytesN, Env, Vec, I256,
+    panic_with_error, token::TokenClient, Address, BytesN, Env, Map, Vec, I256,
 };
 
 const DAY_IN_LEDGERS: u32 = 17_280;
@@ -46,6 +46,8 @@ const AUCTION_TTL_BUMP: u32 = 46 * DAY_IN_LEDGERS;
 const BAD_DEBT_LOT_PREMIUM_NUMERATOR: i128 = 6;
 const BAD_DEBT_LOT_PREMIUM_DENOMINATOR: i128 = 5;
 const BAD_DEBT_TIER_MINIMUM_VALUE_USDC: i128 = 200 * SCALAR_7;
+const INTEREST_LOT_PREMIUM_NUMERATOR: i128 = 6;
+const INTEREST_LOT_PREMIUM_DENOMINATOR: i128 = 5;
 
 /// The candidate's fixed three-tier backstop set in first-loss order.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -105,6 +107,7 @@ enum PersistentKey {
 #[contracttype]
 enum TemporaryKey {
     BadDebtCommitment(Address),
+    InterestCommitment(Address),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -162,6 +165,10 @@ pub enum BackstopError {
     BadDebtCommitmentExists = 1239,
     BadDebtCommitmentNotFound = 1240,
     NoBadDebtLossCapacity = 1241,
+    InterestCommitmentExists = 1242,
+    InterestCommitmentNotFound = 1243,
+    InvalidInterestLot = 1244,
+    InterestTierLocked = 1245,
 }
 
 #[derive(Clone)]
@@ -229,6 +236,31 @@ pub struct BadDebtLotQuote {
 struct BadDebtCommitment {
     auction_id: BytesN<32>,
     quote: BadDebtLotQuote,
+}
+
+/// Canonical tier-token bid for one pool interest auction.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct InterestLotQuote {
+    /// Token donated to the selected pool-tier by the filler.
+    pub bid_token: Address,
+    /// Remaining base tier-token amount before the auction time modifier.
+    pub bid_amount: i128,
+    /// Oracle-valued reserve-asset lot supplied by the registered pool.
+    pub lot_value: i128,
+    /// Tier whose token is donated by a successful filler.
+    pub tier: BackstopTier,
+    /// Creation-time 120% target, denominated in 7-decimal USDC.
+    pub target_value: i128,
+    /// Earliest expiry of the tier-token valuation used by the quote.
+    pub valid_until: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+struct InterestCommitment {
+    auction_id: BytesN<32>,
+    quote: InterestLotQuote,
 }
 
 /// Verified, pool-specific asset values denominated in 7-decimal USDC units.
@@ -473,6 +505,33 @@ pub struct BadDebtLotSettled {
     pub pool: Address,
     pub tier: BackstopTier,
     pub to: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InterestLotCommitted {
+    pub auction_id: BytesN<32>,
+    pub pool: Address,
+    pub quote: InterestLotQuote,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InterestLotReleased {
+    pub auction_id: BytesN<32>,
+    pub pool: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InterestLotSettled {
+    pub auction_id: BytesN<32>,
+    pub base_bid_amount: i128,
+    pub bid_amount: i128,
+    pub complete: bool,
+    pub from: Address,
+    pub pool: Address,
+    pub tier: BackstopTier,
 }
 
 #[contract]
@@ -815,6 +874,22 @@ impl BackstopContract {
         })
     }
 
+    /// Return one pool-authorized interest commitment, if present.
+    pub fn interest_commitment(
+        env: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+    ) -> Option<InterestLotQuote> {
+        extend_instance_ttl(&env);
+        get_interest_commitment(&env, &pool).and_then(|commitment| {
+            if commitment.auction_id == auction_id {
+                Some(commitment.quote)
+            } else {
+                None
+            }
+        })
+    }
+
     /// Return all queued shares in a fixed tier.
     pub fn total_tier_queued_shares(env: Env, tier: BackstopTier) -> i128 {
         extend_instance_ttl(&env);
@@ -1124,6 +1199,131 @@ impl BackstopContract {
         remaining
     }
 
+    /// Reserve the selected tier-token bid for one pool interest auction.
+    ///
+    /// Only the registered pool may authorize this state transition. The
+    /// reserve-asset lot remains in pool custody until a later atomic fill.
+    pub fn commit_interest_lot(
+        env: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        tier: BackstopTier,
+        lot_value: i128,
+    ) -> InterestLotQuote {
+        extend_instance_ttl(&env);
+        pool.require_auth();
+        require_registered_pool(&env, &pool);
+        if get_interest_commitment(&env, &pool).is_some() {
+            panic_with_error!(&env, BackstopError::InterestCommitmentExists);
+        }
+        if pool_shares(&env, tier, &pool) == 0 {
+            panic_with_error!(&env, BackstopError::InvalidInterestLot);
+        }
+
+        let quote = build_interest_lot_quote(&env, tier, lot_value);
+        set_interest_commitment(
+            &env,
+            &pool,
+            &InterestCommitment {
+                auction_id: auction_id.clone(),
+                quote: quote.clone(),
+            },
+        );
+        InterestLotCommitted {
+            auction_id,
+            pool,
+            quote: quote.clone(),
+        }
+        .publish(&env);
+        quote
+    }
+
+    /// Release a stale interest-auction bid without changing tier assets.
+    pub fn release_interest_lot(env: Env, pool: Address, auction_id: BytesN<32>) {
+        extend_instance_ttl(&env);
+        pool.require_auth();
+        require_registered_pool(&env, &pool);
+        let commitment = get_interest_commitment(&env, &pool)
+            .unwrap_or_else(|| panic_with_error!(&env, BackstopError::InterestCommitmentNotFound));
+        if commitment.auction_id != auction_id {
+            panic_with_error!(&env, BackstopError::InterestCommitmentNotFound);
+        }
+        remove_interest_commitment(&env, &pool);
+        InterestLotReleased { auction_id, pool }.publish(&env);
+    }
+
+    /// Donate a time-scaled tier-token bid into one pool-tier without shares.
+    pub fn settle_interest_lot(
+        env: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        base_bid_amount: i128,
+        bid_amount: i128,
+        from: Address,
+    ) -> Option<InterestLotQuote> {
+        extend_instance_ttl(&env);
+        pool.require_auth();
+        require_registered_pool(&env, &pool);
+        if base_bid_amount < 0
+            || bid_amount < 0
+            || bid_amount > base_bid_amount
+            || from == pool
+            || from == env.current_contract_address()
+        {
+            panic_with_error!(&env, BackstopError::InvalidInterestLot);
+        }
+
+        let mut commitment = get_interest_commitment(&env, &pool)
+            .unwrap_or_else(|| panic_with_error!(&env, BackstopError::InterestCommitmentNotFound));
+        if commitment.auction_id != auction_id || base_bid_amount > commitment.quote.bid_amount {
+            panic_with_error!(&env, BackstopError::InterestCommitmentNotFound);
+        }
+
+        let tier = commitment.quote.tier;
+        if bid_amount > 0 {
+            let token = TokenClient::new(&env, &tier_token(&env, tier));
+            let backstop = env.current_contract_address();
+            let from_before = token.balance(&from);
+            let backstop_before = token.balance(&backstop);
+            token.transfer(&from, &backstop, &bid_amount);
+            if token.balance(&from) != checked_sub_i128(&env, from_before, bid_amount)
+                || token.balance(&backstop) != checked_add_i128(&env, backstop_before, bid_amount)
+            {
+                panic_with_error!(&env, BackstopError::InvalidInterestLot);
+            }
+            apply_pool_tier_gain(&env, tier, &pool, bid_amount);
+        }
+
+        let previous_bid_amount = commitment.quote.bid_amount;
+        let remaining_bid_amount = checked_sub_i128(&env, previous_bid_amount, base_bid_amount);
+        let remaining = if remaining_bid_amount == 0 {
+            remove_interest_commitment(&env, &pool);
+            None
+        } else {
+            commitment.quote.lot_value = proportional_floor(
+                &env,
+                commitment.quote.lot_value,
+                remaining_bid_amount,
+                previous_bid_amount,
+            );
+            commitment.quote.bid_amount = remaining_bid_amount;
+            set_interest_commitment(&env, &pool, &commitment);
+            Some(commitment.quote)
+        };
+
+        InterestLotSettled {
+            auction_id,
+            base_bid_amount,
+            bid_amount,
+            complete: remaining.is_none(),
+            from,
+            pool,
+            tier,
+        }
+        .publish(&env);
+        remaining
+    }
+
     /// Quote activation from canonical pool accounting and immutable pricing.
     pub fn quote_pool_activation(
         env: Env,
@@ -1216,6 +1416,25 @@ impl BackstopContract {
     pub fn quote_take_rate(env: Env, distribution: i128, values: TakeRateValues) -> TakeRateQuote {
         extend_instance_ttl(&env);
         quote_take_rate_values(&env, distribution, &values)
+    }
+
+    /// Allocate a bounded reserve-credit batch from canonical pool-tier value.
+    pub fn quote_pool_take_rate_batch(
+        env: Env,
+        pool: Address,
+        distributions: Map<Address, i128>,
+    ) -> Map<Address, TakeRateQuote> {
+        extend_instance_ttl(&env);
+        require_registered_pool(&env, &pool);
+        if distributions.is_empty() || distributions.len() > 4 {
+            panic_with_error!(&env, BackstopError::InvalidTakeRateValue);
+        }
+        let values = build_take_rate_values(&env, &pool);
+        let mut quotes = Map::new(&env);
+        for (asset, distribution) in distributions.iter() {
+            quotes.set(asset, quote_take_rate_values(&env, distribution, &values));
+        }
+        quotes
     }
 
     /// Quote an active pool's share of the backstop-depositor BLND tranche.
@@ -2009,6 +2228,9 @@ fn deposit_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: i
     require_positive(env, amount);
     from.require_auth();
     require_compatible_pool(env, &pool);
+    if interest_tier_locked(env, BackstopTier::BlndUsdc, &pool) {
+        panic_with_error!(env, BackstopError::InterestTierLocked);
+    }
 
     let state = get_pool_tier_state(env, BackstopTier::BlndUsdc, &pool);
     let shares = shares_from_assets(env, amount, &state);
@@ -2077,6 +2299,9 @@ fn deposit_standard_tier(
     require_positive(env, amount);
     from.require_auth();
     require_compatible_pool(env, &pool);
+    if interest_tier_locked(env, tier, &pool) {
+        panic_with_error!(env, BackstopError::InterestTierLocked);
+    }
 
     let state = get_pool_tier_state(env, tier, &pool);
     let shares = shares_from_assets(env, amount, &state);
@@ -2206,7 +2431,8 @@ fn withdraw_standard_tier(
     from.require_auth();
 
     let backstop = env.current_contract_address();
-    if get_pool_bad_debt_commitment_count(env, &pool) != 0
+    if interest_tier_locked(env, tier, &pool)
+        || get_pool_bad_debt_commitment_count(env, &pool) != 0
         || !PoolLossClient::new(env, &pool).backstop_withdrawal_allowed(&backstop)
     {
         panic_with_error!(env, BackstopError::PoolWithdrawalBlocked);
@@ -2401,7 +2627,8 @@ fn withdraw_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: 
     from.require_auth();
 
     let backstop = env.current_contract_address();
-    if get_pool_bad_debt_commitment_count(env, &pool) != 0
+    if interest_tier_locked(env, BackstopTier::BlndUsdc, &pool)
+        || get_pool_bad_debt_commitment_count(env, &pool) != 0
         || !PoolLossClient::new(env, &pool).backstop_withdrawal_allowed(&backstop)
     {
         panic_with_error!(env, BackstopError::PoolWithdrawalBlocked);
@@ -2636,6 +2863,30 @@ fn remove_bad_debt_commitment(env: &Env, pool: &Address) {
         .remove(&TemporaryKey::BadDebtCommitment(pool.clone()));
 }
 
+fn get_interest_commitment(env: &Env, pool: &Address) -> Option<InterestCommitment> {
+    env.storage()
+        .temporary()
+        .get(&TemporaryKey::InterestCommitment(pool.clone()))
+}
+
+fn set_interest_commitment(env: &Env, pool: &Address, commitment: &InterestCommitment) {
+    let key = TemporaryKey::InterestCommitment(pool.clone());
+    env.storage().temporary().set(&key, commitment);
+    env.storage()
+        .temporary()
+        .extend_ttl(&key, AUCTION_TTL_THRESHOLD, AUCTION_TTL_BUMP);
+}
+
+fn remove_interest_commitment(env: &Env, pool: &Address) {
+    env.storage()
+        .temporary()
+        .remove(&TemporaryKey::InterestCommitment(pool.clone()));
+}
+
+fn interest_tier_locked(env: &Env, tier: BackstopTier, pool: &Address) -> bool {
+    get_interest_commitment(env, pool).is_some_and(|commitment| commitment.quote.tier == tier)
+}
+
 fn shares_from_assets(env: &Env, assets: i128, state: &PoolTierState) -> i128 {
     if assets < 0 {
         panic_with_error!(env, BackstopError::ArithmeticError);
@@ -2681,6 +2932,18 @@ fn apply_pool_tier_loss(env: &Env, tier: BackstopTier, pool: &Address, assets: i
     }
     set_pool_tier_assets(env, tier, pool, checked_sub_i128(env, state.assets, assets));
     add_to_instance_total(env, DataKey::TotalTierAssets(tier), -assets);
+}
+
+fn apply_pool_tier_gain(env: &Env, tier: BackstopTier, pool: &Address, assets: i128) {
+    if assets <= 0 {
+        panic_with_error!(env, BackstopError::InvalidAmount);
+    }
+    let state = get_pool_tier_state(env, tier, pool);
+    if state.shares == 0 {
+        panic_with_error!(env, BackstopError::InvalidInterestLot);
+    }
+    set_pool_tier_assets(env, tier, pool, checked_add_i128(env, state.assets, assets));
+    add_to_instance_total(env, DataKey::TotalTierAssets(tier), assets);
 }
 
 fn get_pool_blnd_usdc_shares(env: &Env, pool: &Address) -> i128 {
@@ -2925,6 +3188,54 @@ fn build_bad_debt_lot_quote(
     None
 }
 
+fn build_interest_lot_quote(env: &Env, tier: BackstopTier, lot_value: i128) -> InterestLotQuote {
+    require_positive(env, lot_value);
+    let bid_token = tier_token(env, tier);
+    if TokenClient::new(env, &bid_token).decimals() != 7 {
+        panic_with_error!(env, BackstopError::InvalidInterestLot);
+    }
+    let (unit_value, valid_until) = if tier == BackstopTier::Usdc {
+        (SCALAR_7, u64::MAX)
+    } else {
+        let adapter_address = valuation_adapter(env);
+        let adapter = ValuationAdapterClient::new(env, &adapter_address);
+        if adapter.version() != VALUATION_ADAPTER_VERSION {
+            panic_with_error!(env, BackstopError::InvalidValuationAdapter);
+        }
+        let valuation = quote_lp_amount(env, &adapter, tier, SCALAR_7);
+        if valuation.usdc_value <= 0 {
+            panic_with_error!(env, BackstopError::InvalidValuation);
+        }
+        (valuation.usdc_value, valuation.valid_until)
+    };
+    InterestLotQuote {
+        bid_token,
+        bid_amount: calculate_interest_bid_amount(env, lot_value, unit_value),
+        lot_value,
+        tier,
+        target_value: proportional_ceil(
+            env,
+            lot_value,
+            INTEREST_LOT_PREMIUM_NUMERATOR,
+            INTEREST_LOT_PREMIUM_DENOMINATOR,
+        ),
+        valid_until,
+    }
+}
+
+fn calculate_interest_bid_amount(env: &Env, lot_value: i128, unit_value: i128) -> i128 {
+    if lot_value <= 0 || unit_value <= 0 {
+        panic_with_error!(env, BackstopError::InvalidInterestLot);
+    }
+    let target_value = proportional_ceil(
+        env,
+        lot_value,
+        INTEREST_LOT_PREMIUM_NUMERATOR,
+        INTEREST_LOT_PREMIUM_DENOMINATOR,
+    );
+    proportional_ceil(env, target_value, SCALAR_7, unit_value)
+}
+
 fn allocate_bad_debt_tier(
     env: &Env,
     available_assets: i128,
@@ -3009,6 +3320,33 @@ fn build_pool_valuation(env: &Env, pool: &Address) -> PoolValuation {
             .min(blnd_usdc_queued_quote.valid_until)
             .min(blnd_xlm_active_quote.valid_until)
             .min(blnd_xlm_queued_quote.valid_until),
+    }
+}
+
+fn build_take_rate_values(env: &Env, pool: &Address) -> TakeRateValues {
+    require_registered_pool(env, pool);
+    let adapter_address = valuation_adapter(env);
+    let adapter = ValuationAdapterClient::new(env, &adapter_address);
+    if adapter.version() != VALUATION_ADAPTER_VERSION {
+        panic_with_error!(env, BackstopError::InvalidValuationAdapter);
+    }
+
+    let blnd_usdc = quote_lp_amount(
+        env,
+        &adapter,
+        BackstopTier::BlndUsdc,
+        get_pool_tier_assets(env, BackstopTier::BlndUsdc, pool),
+    );
+    let blnd_xlm = quote_lp_amount(
+        env,
+        &adapter,
+        BackstopTier::BlndXlm,
+        get_pool_tier_assets(env, BackstopTier::BlndXlm, pool),
+    );
+    TakeRateValues {
+        blnd_usdc: blnd_usdc.usdc_value,
+        blnd_xlm: blnd_xlm.usdc_value,
+        usdc: get_pool_tier_assets(env, BackstopTier::Usdc, pool),
     }
 }
 
@@ -3432,6 +3770,43 @@ mod tests {
                 &base_lot_amount,
                 &lot_amount,
                 &to,
+            )
+        }
+
+        pub fn commit_interest_lot(
+            env: Env,
+            backstop: Address,
+            auction_id: BytesN<32>,
+            tier: BackstopTier,
+            lot_value: i128,
+        ) -> InterestLotQuote {
+            BackstopContractClient::new(&env, &backstop).commit_interest_lot(
+                &env.current_contract_address(),
+                &auction_id,
+                &tier,
+                &lot_value,
+            )
+        }
+
+        pub fn release_interest_lot(env: Env, backstop: Address, auction_id: BytesN<32>) {
+            BackstopContractClient::new(&env, &backstop)
+                .release_interest_lot(&env.current_contract_address(), &auction_id);
+        }
+
+        pub fn settle_interest_lot(
+            env: Env,
+            backstop: Address,
+            auction_id: BytesN<32>,
+            base_bid_amount: i128,
+            bid_amount: i128,
+            from: Address,
+        ) -> Option<InterestLotQuote> {
+            BackstopContractClient::new(&env, &backstop).settle_interest_lot(
+                &env.current_contract_address(),
+                &auction_id,
+                &base_bid_amount,
+                &bid_amount,
+                &from,
             )
         }
     }
@@ -3985,6 +4360,127 @@ mod tests {
             candidate.pool_tier_assets(&BackstopTier::Usdc, &pool),
             320 * SCALAR_7
         );
+    }
+
+    #[test]
+    fn interest_commitment_donates_to_one_tier_without_minting_shares() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_000);
+        let incumbent = Address::generate(&env);
+        let blnd_token = Address::generate(&env);
+        let legacy_token = Address::generate(&env);
+        let next_token = Address::generate(&env);
+        let usdc_admin = Address::generate(&env);
+        let usdc_token = env
+            .register_stellar_asset_contract_v2(usdc_admin.clone())
+            .address();
+        let candidate_id = Address::generate(&env);
+        let pool_factory_id = env.register(MockPoolFactory, (&candidate_id,));
+        let pool = env.register(MockLossAwarePool, (&candidate_id,));
+        MockPoolFactoryClient::new(&env, &pool_factory_id).set_pool(&pool);
+        let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
+        let valuation_adapter = register_valuation_adapter(&env);
+        env.register_at(
+            &candidate_id,
+            BackstopContract,
+            (
+                &emitter_id,
+                &blnd_token,
+                &pool_factory_id,
+                &legacy_token,
+                &next_token,
+                &usdc_token,
+                &valuation_adapter,
+            ),
+        );
+        let candidate = BackstopContractClient::new(&env, &candidate_id);
+        let pool_client = MockLossAwarePoolClient::new(&env, &pool);
+        let initial = 500 * SCALAR_7;
+        env.as_contract(&candidate_id, || {
+            set_pool_tier_shares(&env, BackstopTier::Usdc, &pool, initial);
+            set_pool_tier_assets(&env, BackstopTier::Usdc, &pool, initial);
+            env.storage()
+                .instance()
+                .set(&DataKey::TotalTierShares(BackstopTier::Usdc), &initial);
+            env.storage()
+                .instance()
+                .set(&DataKey::TotalTierAssets(BackstopTier::Usdc), &initial);
+        });
+        StellarAssetClient::new(&env, &usdc_token)
+            .mock_all_auths()
+            .mint(&candidate_id, &initial);
+
+        let distributions = soroban_sdk::map![
+            &env,
+            (Address::generate(&env), 140_i128),
+            (Address::generate(&env), 141_i128)
+        ];
+        let weighted = candidate.quote_pool_take_rate_batch(&pool, &distributions);
+        for (asset, amount) in distributions.iter() {
+            let quote = weighted.get(asset).unwrap();
+            assert_eq!(
+                quote.blnd_usdc + quote.blnd_xlm + quote.usdc + quote.remainder,
+                amount
+            );
+        }
+
+        let auction_id = BytesN::from_array(&env, &[51; 32]);
+        assert!(candidate
+            .try_commit_interest_lot(&pool, &auction_id, &BackstopTier::Usdc, &(200 * SCALAR_7))
+            .is_err());
+        let quote = pool_client.commit_interest_lot(
+            &candidate_id,
+            &auction_id,
+            &BackstopTier::Usdc,
+            &(200 * SCALAR_7),
+        );
+        assert_eq!(quote.bid_token, usdc_token);
+        assert_eq!(quote.bid_amount, 240 * SCALAR_7);
+        assert_eq!(
+            candidate.interest_commitment(&pool, &auction_id),
+            Some(quote.clone())
+        );
+
+        let depositor = Address::generate(&env);
+        let filler = Address::generate(&env);
+        StellarAssetClient::new(&env, &usdc_token)
+            .mock_all_auths()
+            .mint(&depositor, &(10 * SCALAR_7));
+        StellarAssetClient::new(&env, &usdc_token)
+            .mock_all_auths()
+            .mint(&filler, &(120 * SCALAR_7));
+        env.mock_all_auths_allowing_non_root_auth();
+        assert!(candidate
+            .try_deposit_usdc(&depositor, &pool, &(10 * SCALAR_7))
+            .is_err());
+
+        assert_eq!(
+            pool_client.settle_interest_lot(
+                &candidate_id,
+                &auction_id,
+                &(240 * SCALAR_7),
+                &(120 * SCALAR_7),
+                &filler,
+            ),
+            None
+        );
+        assert_eq!(candidate.interest_commitment(&pool, &auction_id), None);
+        assert_eq!(
+            candidate.pool_tier_state(&BackstopTier::Usdc, &pool),
+            PoolTierState {
+                assets: 620 * SCALAR_7,
+                queued_shares: 0,
+                shares: initial,
+            }
+        );
+        assert_eq!(
+            candidate.total_tier_assets(&BackstopTier::Usdc),
+            620 * SCALAR_7
+        );
+        assert_eq!(TokenClient::new(&env, &usdc_token).balance(&filler), 0);
+
+        candidate.deposit_usdc(&depositor, &pool, &(10 * SCALAR_7));
+        assert!(candidate.tier_shares(&BackstopTier::Usdc, &depositor, &pool) < 10 * SCALAR_7);
     }
 
     #[test]
@@ -5340,6 +5836,22 @@ mod tests {
             )
         }));
         assert!(overflow.is_err());
+    }
+
+    #[test]
+    fn interest_bid_amount_rounds_up_to_the_120_percent_target() {
+        let env = Env::default();
+        let lot_value = 200 * SCALAR_7;
+        let unit_value = 2 * SCALAR_7;
+
+        assert_eq!(
+            calculate_interest_bid_amount(&env, lot_value, unit_value),
+            120 * SCALAR_7
+        );
+        assert_eq!(
+            calculate_interest_bid_amount(&env, lot_value + 1, unit_value),
+            120 * SCALAR_7 + 1
+        );
     }
 
     #[test]

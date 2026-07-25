@@ -499,29 +499,84 @@ The v3 tests must verify:
 
 - Tier weights are `2.5,2.5,2` for BLND:USDC LP, BLND:XLM LP, and USDC
   respectively, represented exactly on-chain as `5:5:4`.
-- Each tier receives take-rate assets in proportion to its verified
-  reward-eligible USDC value multiplied by its weight.
+- Each reserve asset's newly checkpointed backstop credit is allocated to
+  tier-specific pending lots in proportion to verified pool-tier USDC value
+  multiplied by its weight.
 - Equal-value tier positions receive relative allocations matching their
   weights, subject only to documented integer rounding.
 - Empty tiers contribute zero and are omitted from the effective denominator.
-- Adding or removing a reward-eligible position updates the denominator without
-  retroactively changing already accrued allocations.
-- Within a tier, depositors receive allocations proportional to their
-  reward-eligible shares.
-- Reward-eligible take-rate shares include active and queued shares exactly
-  once while they remain in custody.
-- Queueing, queue expiry, and dequeueing do not change take-rate eligibility;
-  actual withdrawal checkpoints accrued value and removes only the withdrawn
-  shares prospectively.
+- Canonical take-rate valuation includes all accounted pool-tier assets and
+  does not subtract a separately committed bad-debt lot.
+- The three floor-rounded pending amounts plus a pool-and-reserve-specific
+  carry conserve the exact checkpointed credit. Carries for different pools or
+  reserve assets remain isolated.
+- Adding or removing a tier position changes only later checkpoints and cannot
+  rewrite already pending allocations.
 - Take-rate allocation does not change activation value, loss priority, or BLND
   emissions.
-- Every distributed reserve asset is conserved, with integer remainder carried
-  forward in an accumulator keyed by pool and distributed reserve asset rather
-  than assigned to a tier.
-- Remainders belonging to different pools or reserve assets remain isolated
-  and can be applied only to a later distribution of the same reserve asset for
-  the same pool.
-- Accrual and claims use bounded accumulator/checkpoint accounting.
+- Creation accepts a duplicate-free batch of one through
+  `min(max_positions - 1, 4)` configured reserve assets, accrues them, and
+  rejects empty, oversized, duplicate, and unknown batches.
+- A pool can have at most one active interest auction. Creation scans the three
+  tiers cyclically from a stored cursor and selects the first supplied tier
+  whose verified pending lot is at least 200 USDC, advancing the cursor after
+  selection.
+- Exactly 200 USDC qualifies and 199.9999999 USDC does not. A continuously
+  qualifying tier cannot starve either later qualifying tier across successive
+  auctions.
+- A caller-supplied batch may omit pending assets without reallocating or
+  destroying them; the next creation can include and realize those assets.
+- Missing, nonpositive, invalid-decimal, or stale LP or reserve valuation fails
+  closed rather than skipping a tier or declaring that no qualifying lot
+  exists.
+- The selected tier commits a bid of its own tier token worth 120% of the
+  pending reserve-asset lot, rounded up. The pool auction and backstop
+  commitment have identical identifiers, tier, quote, and fixed 46-day
+  temporary lifetime.
+- A selected tier token that does not expose exactly seven decimals fails
+  commitment before any auction or reservation is persisted.
+- Only the registered pool can create, resize, settle, or release its interest
+  commitment. A direct user call fails authorization.
+- Fills cannot execute before the next-ledger start and inherit the v2
+  400-ledger curve: full bid with ramping lot for 200 ledgers, then full lot
+  with declining bid for 200 ledgers.
+- Percentage selection rounds base bid up and base lot down. Partial fills
+  transfer only the time-scaled amounts, release the base-lot discount while
+  leaving it pending in the same tier, and preserve exact synchronization
+  between the remaining pool auction and backstop commitment.
+- The filler authorizes the fill and cannot be the pool or backstop. Exact
+  source token-balance deltas are enforced for every bid and lot transfer.
+- The bid is donated to the selected pool-tier without minting shares. Active
+  and queued shares appreciate through one common exchange rate and no
+  depositor claim entry point exists.
+- Deposits into and actual withdrawals from the selected tier fail while its
+  interest commitment is active. Queue and dequeue operations, plus activity
+  in other tiers, remain available.
+- A completed fill removes both temporary records, decrements reserve
+  backstop-credit accounting by only the lot actually transferred, and makes
+  the donated tier assets immediately eligible for activation, loss capacity,
+  later take-rate weighting, and the applicable BLND-emission weight.
+- At, but not before, 500 ledgers any caller can delete a stale auction,
+  release its commitment, and leave all unfilled base lots in their original
+  pending pool/reserve/tier accumulators without changing token balances.
+- Simultaneous expiry of the fixed temporary auction and commitment cannot
+  erase or reweight the persistent pending tier allocation; a later creation
+  can reserve the same credit again.
+- Interest auction creation, fill, and stale recovery remain available under
+  every stored pool status and never create or alter a lending position or
+  pool loss record.
+- BLND:USDC, BLND:XLM, and USDC each execute as both the selected tier and bid
+  token. The USDC-selected case remains conserved when a reserve lot also uses
+  the same USDC token.
+- The `5:5:4` ratio controls base reserve-credit allocation; tests explicitly
+  show that different fill times can produce a different realized donated-
+  value ratio without invoking a protocol fee or corrective redistribution.
+- Failure in authorization, quoting, commitment, transfer, accounting,
+  synchronization, or exact-balance validation rolls back the credit,
+  pending-lot, auction, commitment, tier-asset, and token state.
+- Native and optimized-WASM tests exercise maximum four-asset creation,
+  partial fill, complete fill, stale recovery, all three tier tokens, and
+  resource use against SDK-27 mainnet invocation limits.
 
 ## Ongoing BLND-emission allocation
 

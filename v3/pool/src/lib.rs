@@ -1,7 +1,12 @@
 #![no_std]
 
+mod auction;
 mod lending;
 
+pub use auction::{
+    AuctionCreated, AuctionData, AuctionDeleted, AuctionFilled, ACTION_DELETE_LIQUIDATION,
+    ACTION_FILL_USER_LIQUIDATION,
+};
 pub use lending::{
     LendingAction, LendingConfig, PositionHealth, Positions, PriceQuote, Request, Reserve,
     ReserveConfig, ReserveData, ACTION_BORROW, ACTION_REPAY, ACTION_SUPPLY,
@@ -18,7 +23,6 @@ const INSTANCE_TTL_THRESHOLD: u32 = 89 * DAY_IN_LEDGERS;
 const INSTANCE_TTL_BUMP: u32 = 90 * DAY_IN_LEDGERS;
 const MAX_LOSS_RECORDS_PER_KIND: u32 = 30;
 const STATUS_SETUP: u32 = 6;
-const ACTION_DELETE_LIQUIDATION: u32 = 9;
 const MAX_ACTION_TYPE: u32 = ACTION_DELETE_LIQUIDATION;
 
 #[derive(Clone)]
@@ -53,6 +57,15 @@ pub enum PoolError {
     ArithmeticError = 1316,
     BadRequest = 1317,
     InvalidTokenBalance = 1318,
+    InvalidLiquidation = 1319,
+    AuctionInProgress = 1320,
+    InvalidAuctionBid = 1321,
+    InvalidAuctionLot = 1322,
+    InvalidLiquidationSize = 1323,
+    AuctionNotFound = 1324,
+    AuctionNotStarted = 1325,
+    AuctionNotStale = 1326,
+    BadDebtUnsupported = 1327,
 }
 
 /// Canonical status result returned by the configured backstop.
@@ -234,6 +247,31 @@ impl PoolContract {
     ) -> Positions {
         extend_instance_ttl(&env);
         lending::submit(&env, &from, &spender, &to, requests)
+    }
+
+    /// Create a permissionless v2-compatible user-liquidation auction.
+    pub fn new_liquidation_auction(
+        env: Env,
+        user: Address,
+        bid: Vec<Address>,
+        lot: Vec<Address>,
+        percent: u32,
+    ) -> AuctionData {
+        extend_instance_ttl(&env);
+        auction::create_user_liquidation(&env, &user, &bid, &lot, percent)
+    }
+
+    /// Return one active user-liquidation auction.
+    pub fn get_liquidation_auction(env: Env, user: Address) -> AuctionData {
+        extend_instance_ttl(&env);
+        auction::get_user_liquidation(&env, &user)
+    }
+
+    /// Permissionlessly delete a user-liquidation auction after its stale
+    /// boundary.
+    pub fn delete_stale_liquidation_auction(env: Env, user: Address) {
+        extend_instance_ttl(&env);
+        auction::delete_stale_user_liquidation(&env, &user);
     }
 
     /// Return counts derived from the canonical nonzero loss records.
@@ -450,6 +488,7 @@ mod tests {
     #[derive(Clone)]
     #[contracttype]
     enum MockOracleKey {
+        Calls(Address),
         Price(Address),
     }
 
@@ -506,10 +545,20 @@ mod tests {
         }
 
         pub fn price(env: Env, asset: Address) -> PriceQuote {
+            let calls_key = MockOracleKey::Calls(asset.clone());
+            let calls: u32 = env.storage().instance().get(&calls_key).unwrap_or(0);
+            env.storage().instance().set(&calls_key, &(calls + 1));
             env.storage()
                 .instance()
                 .get(&MockOracleKey::Price(asset))
                 .unwrap()
+        }
+
+        pub fn calls(env: Env, asset: Address) -> u32 {
+            env.storage()
+                .instance()
+                .get(&MockOracleKey::Calls(asset))
+                .unwrap_or(0)
         }
     }
 
@@ -624,6 +673,102 @@ mod tests {
         env.register(PoolContract, (backstop, operator, lending_config, reserves))
     }
 
+    fn setup_liquidation_pool(env: &Env) -> (Address, Address, Address, Address, Address, Address) {
+        env.mock_all_auths_allowing_non_root_auth();
+        env.ledger().set_timestamp(1_000);
+        let token_admin = Address::generate(env);
+        let collateral_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let borrowed_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let collateral_admin = StellarAssetClient::new(env, &collateral_asset);
+        let borrowed_admin = StellarAssetClient::new(env, &borrowed_asset);
+        let oracle_id = env.register(MockPriceOracle, ());
+        let oracle = MockPriceOracleClient::new(env, &oracle_id);
+        for asset in [collateral_asset.clone(), borrowed_asset.clone()] {
+            oracle.set_price(
+                &asset,
+                &PriceQuote {
+                    decimals: 7,
+                    price: lending::SCALAR_7,
+                    valid_until: u64::MAX,
+                },
+            );
+        }
+
+        let supplier = Address::generate(env);
+        let borrower = Address::generate(env);
+        let filler = Address::generate(env);
+        let pool_id = register_lending_pool(
+            env,
+            &filler,
+            &Address::generate(env),
+            &oracle_id,
+            &vec![env, collateral_asset.clone(), borrowed_asset.clone()],
+        );
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        let pool = PoolContractClient::new(env, &pool_id);
+        borrowed_admin.mint(&supplier, &(1_000 * lending::SCALAR_7));
+        collateral_admin.mint(&borrower, &(100 * lending::SCALAR_7));
+        collateral_admin.mint(&filler, &(100 * lending::SCALAR_7));
+        pool.submit(
+            &supplier,
+            &supplier,
+            &supplier,
+            &vec![
+                env,
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 1_000 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY,
+                },
+            ],
+        );
+        pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &vec![
+                env,
+                Request {
+                    address: collateral_asset.clone(),
+                    amount: 100 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY_COLLATERAL,
+                },
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 70 * lending::SCALAR_7,
+                    request_type: ACTION_BORROW,
+                },
+            ],
+        );
+        pool.submit(
+            &filler,
+            &filler,
+            &filler,
+            &vec![
+                env,
+                Request {
+                    address: collateral_asset.clone(),
+                    amount: 100 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY_COLLATERAL,
+                },
+            ],
+        );
+        (
+            pool_id,
+            oracle_id,
+            collateral_asset,
+            borrowed_asset,
+            borrower,
+            filler,
+        )
+    }
+
     #[test]
     fn stores_immutable_status_configuration_and_applies_canonical_quotes() {
         let env = Env::default();
@@ -723,6 +868,367 @@ mod tests {
             pool.test_require_action_allowed(&action);
         }
         assert!(pool.try_action_allowed(&(MAX_ACTION_TYPE + 1)).is_err());
+    }
+
+    #[test]
+    fn user_liquidation_auction_supports_partial_and_full_fills() {
+        let env = Env::default();
+        let (pool_id, oracle_id, collateral_asset, borrowed_asset, borrower, filler) =
+            setup_liquidation_pool(&env);
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let oracle = MockPriceOracleClient::new(&env, &oracle_id);
+        oracle.set_price(
+            &collateral_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: 9_000_000,
+                valid_until: u64::MAX,
+            },
+        );
+        assert!(!pool.position_health(&borrower).healthy);
+        let collateral_calls_before_creation = oracle.calls(&collateral_asset);
+        let liability_calls_before_creation = oracle.calls(&borrowed_asset);
+
+        let auction = pool.new_liquidation_auction(
+            &borrower,
+            &vec![&env, borrowed_asset.clone()],
+            &vec![&env, collateral_asset.clone()],
+            &50,
+        );
+        assert_eq!(
+            oracle.calls(&collateral_asset),
+            collateral_calls_before_creation + 1
+        );
+        assert_eq!(
+            oracle.calls(&borrowed_asset),
+            liability_calls_before_creation + 1
+        );
+        assert_eq!(auction.block, env.ledger().sequence() + 1);
+        assert_eq!(pool.get_liquidation_auction(&borrower), auction);
+        env.as_contract(&pool_id, || {
+            let ledgers_since_creation =
+                env.ledger().sequence() - auction.block.checked_sub(1).unwrap();
+            assert_eq!(
+                auction::user_liquidation_ttl(&env, &borrower),
+                46 * DAY_IN_LEDGERS - ledgers_since_creation
+            );
+        });
+
+        let borrower_before = pool.positions(&borrower);
+        let collateral_supply_before = pool.reserve(&collateral_asset).data.b_supply;
+        let liability_supply_before = pool.reserve(&borrowed_asset).data.d_supply;
+        let borrowed_token = TokenClient::new(&env, &borrowed_asset);
+        let borrower_balance = borrowed_token.balance(&borrower);
+        assert!(pool
+            .try_submit(
+                &borrower,
+                &borrower,
+                &borrower,
+                &vec![
+                    &env,
+                    Request {
+                        address: borrowed_asset.clone(),
+                        amount: lending::SCALAR_7,
+                        request_type: ACTION_REPAY,
+                    }
+                ],
+            )
+            .is_err());
+        assert_eq!(pool.positions(&borrower), borrower_before);
+        assert_eq!(borrowed_token.balance(&borrower), borrower_balance);
+
+        assert!(pool
+            .try_submit(
+                &filler,
+                &filler,
+                &filler,
+                &vec![
+                    &env,
+                    Request {
+                        address: borrower.clone(),
+                        amount: 50,
+                        request_type: ACTION_FILL_USER_LIQUIDATION,
+                    }
+                ],
+            )
+            .is_err());
+        env.ledger().set_sequence_number(auction.block + 200);
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &5_u32);
+        });
+        let collateral_calls_before_fill = oracle.calls(&collateral_asset);
+        let liability_calls_before_fill = oracle.calls(&borrowed_asset);
+
+        let after_partial = pool.submit(
+            &filler,
+            &filler,
+            &filler,
+            &vec![
+                &env,
+                Request {
+                    address: borrower.clone(),
+                    amount: 50,
+                    request_type: ACTION_FILL_USER_LIQUIDATION,
+                },
+            ],
+        );
+        assert_eq!(
+            oracle.calls(&collateral_asset),
+            collateral_calls_before_fill + 1
+        );
+        assert_eq!(
+            oracle.calls(&borrowed_asset),
+            liability_calls_before_fill + 1
+        );
+        let remaining = pool.get_liquidation_auction(&borrower);
+        env.as_contract(&pool_id, || {
+            let ledgers_since_creation =
+                env.ledger().sequence() - auction.block.checked_sub(1).unwrap();
+            assert_eq!(
+                auction::user_liquidation_ttl(&env, &borrower),
+                46 * DAY_IN_LEDGERS - ledgers_since_creation
+            );
+        });
+        assert!(
+            remaining.bid.get(borrowed_asset.clone()).unwrap()
+                < auction.bid.get(borrowed_asset.clone()).unwrap()
+        );
+        assert!(after_partial.liabilities.get(1).unwrap() > 0);
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        assert!(pool
+            .try_submit(
+                &borrower,
+                &borrower,
+                &borrower,
+                &vec![
+                    &env,
+                    Request {
+                        address: borrowed_asset.clone(),
+                        amount: lending::SCALAR_7,
+                        request_type: ACTION_REPAY,
+                    }
+                ],
+            )
+            .is_err());
+
+        let after_full = pool.submit(
+            &filler,
+            &filler,
+            &filler,
+            &vec![
+                &env,
+                Request {
+                    address: borrower.clone(),
+                    amount: 100,
+                    request_type: ACTION_FILL_USER_LIQUIDATION,
+                },
+            ],
+        );
+        assert!(pool.try_get_liquidation_auction(&borrower).is_err());
+        assert!(after_full.collateral.get(0).unwrap() > 100 * lending::SCALAR_7);
+        assert!(after_full.liabilities.get(1).unwrap() > 0);
+        assert!(pool.position_health(&filler).healthy);
+        assert_eq!(pool.backstop_loss_state().liability_entries, 1);
+        assert!(!pool.backstop_withdrawal_allowed(&filler));
+        assert!(pool.positions(&borrower).collateral.get(0).unwrap() < 100 * lending::SCALAR_7);
+        assert!(pool.positions(&borrower).liabilities.get(1).unwrap() < 70 * lending::SCALAR_7);
+        assert_eq!(
+            pool.reserve(&collateral_asset).data.b_supply,
+            collateral_supply_before
+        );
+        assert_eq!(
+            pool.reserve(&borrowed_asset).data.d_supply,
+            liability_supply_before
+        );
+    }
+
+    #[test]
+    fn liquidation_creation_rejects_healthy_duplicate_and_missing_positions() {
+        let env = Env::default();
+        let (pool_id, oracle_id, collateral_asset, borrowed_asset, borrower, _) =
+            setup_liquidation_pool(&env);
+        let pool = PoolContractClient::new(&env, &pool_id);
+        assert!(pool
+            .try_new_liquidation_auction(
+                &borrower,
+                &vec![&env, borrowed_asset.clone()],
+                &vec![&env, collateral_asset.clone()],
+                &50,
+            )
+            .is_err());
+
+        MockPriceOracleClient::new(&env, &oracle_id).set_price(
+            &collateral_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: 9_000_000,
+                valid_until: u64::MAX,
+            },
+        );
+        assert!(pool
+            .try_new_liquidation_auction(
+                &borrower,
+                &vec![&env, borrowed_asset.clone(), borrowed_asset.clone()],
+                &vec![&env, collateral_asset.clone()],
+                &50,
+            )
+            .is_err());
+        assert!(pool
+            .try_new_liquidation_auction(
+                &borrower,
+                &vec![&env, borrowed_asset.clone()],
+                &Vec::new(&env),
+                &50,
+            )
+            .is_err());
+        assert!(pool.try_get_liquidation_auction(&borrower).is_err());
+
+        pool.new_liquidation_auction(
+            &borrower,
+            &vec![&env, borrowed_asset],
+            &vec![&env, collateral_asset],
+            &50,
+        );
+        assert!(pool
+            .try_new_liquidation_auction(&borrower, &Vec::new(&env), &Vec::new(&env), &50,)
+            .is_err());
+    }
+
+    #[test]
+    fn liquidation_cancellation_obeys_status_and_stale_deletion_is_permissionless() {
+        let env = Env::default();
+        let (pool_id, oracle_id, collateral_asset, borrowed_asset, borrower, _) =
+            setup_liquidation_pool(&env);
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let oracle = MockPriceOracleClient::new(&env, &oracle_id);
+        oracle.set_price(
+            &collateral_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: 9_000_000,
+                valid_until: u64::MAX,
+            },
+        );
+        let auction = pool.new_liquidation_auction(
+            &borrower,
+            &vec![&env, borrowed_asset.clone()],
+            &vec![&env, collateral_asset.clone()],
+            &50,
+        );
+        oracle.set_price(
+            &collateral_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: lending::SCALAR_7,
+                valid_until: u64::MAX,
+            },
+        );
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &3_u32);
+        });
+        assert!(pool
+            .try_submit(
+                &borrower,
+                &borrower,
+                &borrower,
+                &vec![
+                    &env,
+                    Request {
+                        address: borrower.clone(),
+                        amount: 0,
+                        request_type: ACTION_DELETE_LIQUIDATION,
+                    }
+                ],
+            )
+            .is_err());
+        assert_eq!(pool.get_liquidation_auction(&borrower), auction);
+
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &vec![
+                &env,
+                Request {
+                    address: borrower.clone(),
+                    amount: 0,
+                    request_type: ACTION_DELETE_LIQUIDATION,
+                },
+            ],
+        );
+        assert!(pool.try_get_liquidation_auction(&borrower).is_err());
+
+        oracle.set_price(
+            &collateral_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: 9_000_000,
+                valid_until: u64::MAX,
+            },
+        );
+        let replacement = pool.new_liquidation_auction(
+            &borrower,
+            &vec![&env, borrowed_asset],
+            &vec![&env, collateral_asset],
+            &50,
+        );
+        env.ledger().set_sequence_number(replacement.block + 499);
+        assert!(pool
+            .try_delete_stale_liquidation_auction(&borrower)
+            .is_err());
+        env.ledger().set_sequence_number(replacement.block + 500);
+        pool.delete_stale_liquidation_auction(&borrower);
+        assert!(pool.try_get_liquidation_auction(&borrower).is_err());
+    }
+
+    #[test]
+    fn liquidation_fill_fails_closed_when_bad_debt_would_be_required() {
+        let env = Env::default();
+        let (pool_id, oracle_id, collateral_asset, borrowed_asset, borrower, filler) =
+            setup_liquidation_pool(&env);
+        let pool = PoolContractClient::new(&env, &pool_id);
+        MockPriceOracleClient::new(&env, &oracle_id).set_price(
+            &collateral_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: 5_000_000,
+                valid_until: u64::MAX,
+            },
+        );
+        let auction = pool.new_liquidation_auction(
+            &borrower,
+            &vec![&env, borrowed_asset],
+            &vec![&env, collateral_asset],
+            &100,
+        );
+        env.ledger().set_sequence_number(auction.block + 300);
+        let borrower_before = pool.positions(&borrower);
+        let filler_before = pool.positions(&filler);
+        for percent in [50_i128, 100] {
+            assert!(pool
+                .try_submit(
+                    &filler,
+                    &filler,
+                    &filler,
+                    &vec![
+                        &env,
+                        Request {
+                            address: borrower.clone(),
+                            amount: percent,
+                            request_type: ACTION_FILL_USER_LIQUIDATION,
+                        }
+                    ],
+                )
+                .is_err());
+        }
+        assert_eq!(pool.positions(&borrower), borrower_before);
+        assert_eq!(pool.positions(&filler), filler_before);
+        assert_eq!(pool.get_liquidation_auction(&borrower), auction);
     }
 
     #[test]

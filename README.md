@@ -77,7 +77,9 @@ it is not a production oracle. The candidate pool persists v2-compatible
 status transitions using that canonical boundary and an immutable pool-local
 operator. Its SDK-27 lending core executes the six non-auction v2 request
 types against immutable reserve configuration with checked interest, share,
-health, authorization, and token-transfer accounting.
+health, authorization, and token-transfer accounting. The pool also supports
+permissionless v2-compatible user-liquidation auctions and fails closed before
+any fill that would require the future bad-debt waterfall.
 
 Run both lanes:
 

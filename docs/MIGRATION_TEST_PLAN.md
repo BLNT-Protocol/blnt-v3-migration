@@ -307,6 +307,39 @@ The v3 tests must verify:
 - Persistent reserve and user entries renew their TTL within the documented
   bounds.
 
+## User-liquidation auctions
+
+The v3 tests must verify:
+
+- Auction creation is permissionless, accepts only an unhealthy non-pool,
+  non-backstop liquidatee, rejects duplicate or unsupported bid/lot assets, and
+  permits at most one active user-liquidation auction per account.
+- Bid and lot asset counts are bounded by the pool's immutable maximum-position
+  limit.
+- Quote construction inherits the v2 average-factor incentive, rounding, full
+  liquidation, and 1.03-through-1.15 post-liquidation repair constraints.
+- An auction cannot fill before its next-ledger start.
+- The first 200 ledgers scale the lot from 0% to 100% with a full bid, and the
+  next 200 scale the bid from 100% to 0% with a full lot.
+- Partial fills round the selected base bid up and base lot down, preserve the
+  unfilled base quote, and apply the temporary entry's 45-day renewal
+  threshold and 46-day bump.
+- Request type 6 transfers only bToken collateral and dToken liability shares,
+  conserves aggregate reserve shares, rejects self-fills, and leaves the filler
+  within ordinary health, minimum-collateral, and maximum-position limits.
+- An account with an active liquidation cannot complete another submission.
+  Request type 9 can cancel the auction only when status permits and the final
+  liquidatee position is healthy.
+- Fills remain available under On-Ice and Frozen status. Cancellation is
+  blocked under those statuses.
+- Any caller can delete an auction at, but not before, 500 ledgers after its
+  start.
+- Until bad-debt and waterfall execution is implemented, a fill that would
+  worsen the liquidatee's effective health or leave collateral-free liabilities
+  fails atomically and preserves the auction, liquidatee, and filler.
+- Native and optimized-WASM tests cover creation, partial or complete fills,
+  active-auction blocking, status enforcement, and rollback.
+
 ## Loss waterfall
 
 The v3 tests must verify:

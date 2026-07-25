@@ -44,8 +44,8 @@ through the published emitter's one-time drop. The immutable BLND token binding
 is used to verify the exact balance delta. Position owners can then direct one
 floor-rounded claim per frozen position without iteration; remaining integer
 dust stays segregated in the backfill reserve. It intentionally does not yet
-implement loss-waterfall execution, liquidation auctions, or ongoing-emission
-accrual.
+implement loss-waterfall execution, bad-debt or interest auctions, or
+ongoing-emission accrual.
 All three tier withdrawals use independent bounded 17-day queues with at most
 20 entries per user, pool, and tier, FIFO withdrawal, and LIFO dequeue.
 Withdrawal also requires an affirmative, read-only response from the attributed
@@ -86,10 +86,16 @@ amount unit. The withdrawal callback returns true only for its immutable
 backstop and only when all three maps are empty. Missing records trap rather
 than being treated as clear. There is no administrator-controlled withdrawal
 override. Ordinary borrow and repay operations synchronize the configured
-backstop's liability record atomically. Future liquidation, auction, and
+backstop's liability record atomically. Future bad-debt, interest-auction, and
 waterfall entry points must update the other records with their real protocol
-transitions. Those engines remain unimplemented, so the current pool is not yet
-a complete lending market.
+transitions. The pool now implements permissionless v2-compatible
+user-liquidation creation and request-type-6 fills, including the inherited
+400-ledger auction curve, partial fills, status-gated request-type-9
+cancellation, and permissionless stale deletion. Active auctions block ordinary
+liquidatee submissions. Until bad-debt handling exists, a fill that would leave
+collateral-free debt or worsen the liquidatee's effective health fails
+atomically. Bad-debt auctions, interest auctions, and the loss waterfall remain
+unimplemented, so the current pool is not yet a complete lending market.
 
 The v3 pool factory stores immutable backstop and pool-WASM configuration,
 deploys pools with explicit immutable operators, lending configuration, and

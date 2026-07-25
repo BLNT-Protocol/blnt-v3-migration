@@ -481,9 +481,9 @@ invalid, and replacing an existing nonzero amount does not change the count.
 Committed losses are presence-only records keyed by auction identifier because
 a multi-asset auction has no single amount unit. Monetary amounts from reserves
 with different units MUST NOT be combined. Borrow and repay synchronize the
-configured backstop's reserve liability record. Future liquidation, auction,
-and waterfall operations MUST update the remaining records atomically with the
-transition they represent.
+configured backstop's reserve liability record. Future bad-debt,
+interest-auction, and waterfall operations MUST update the remaining records
+atomically with the transition they represent.
 
 The callback MUST return false for an address other than the pool's immutable
 backstop or when any count is nonzero. Missing canonical loss records MUST fail
@@ -500,10 +500,10 @@ The withdrawal implementation MUST:
 
 The bounded Q4W accounting and Protocol-27 pool implement this fail-closed
 record and state boundary. Ordinary backstop borrow and repay now create and
-resolve liability records, but liquidation, auction, and loss-waterfall entry
-points remain unimplemented. Until those engines invoke their internal record
-transitions, these positions MUST NOT be treated as authoritative executable
-loss capacity.
+resolve liability records, but bad-debt, interest-auction, and loss-waterfall
+entry points remain unimplemented. Until those engines invoke their internal
+record transitions, these positions MUST NOT be treated as authoritative
+executable loss capacity.
 
 ## 8. Pool activation
 
@@ -696,7 +696,8 @@ authenticated deployer retains the deterministic salt domain. Permissionless
 refresh and operator requests call the immutable backstop, reject disallowed
 or invalid results, and store the returned status atomically. The pool exposes
 the centralized v2-compatible action predicate enforced by the implemented
-lending requests and required by future auction entry points.
+lending and user-liquidation requests and required by future bad-debt and
+interest-auction entry points.
 
 ### 8.2 Initial lending core
 
@@ -775,6 +776,64 @@ MUST update the corresponding canonical backstop-liability record atomically.
 The stored value is the nonzero dToken balance in that reserve's own units; the
 withdrawal callback uses only record presence and never sums values across
 reserves.
+
+### 8.3 User-liquidation auctions
+
+The initial auction engine implements only v2-compatible user-liquidation
+auctions. Auction creation is permissionless and accepts a liquidatee, unique
+reserve-asset lists for the dToken bid and bToken collateral lot, and a
+liquidation percentage from 1 through 100. The liquidatee cannot be the pool or
+its configured backstop and can have at most one active user-liquidation
+auction. The total bid-plus-lot asset count MUST NOT exceed the pool's immutable
+maximum-position limit.
+
+Creation MUST use current accrued reserve rates and current valid oracle quotes.
+The liquidatee must be economically unhealthy, every requested bid asset must
+contain a liability position, and every requested lot asset must contain a
+collateral position. Each asset's first validated oracle quote MUST be cached
+and reused throughout one creation or fill submission. The inherited v2 quote
+calculation:
+
+- estimates the liquidation incentive from the selected positions' average
+  collateral and inverse liability factors;
+- rounds dToken bid shares and bToken lot shares up when constructing the base
+  quote;
+- constrains a non-full liquidation's estimated post-liquidation health factor
+  to the inclusive 1.03-through-1.15 repair band; and
+- treats an all-position liquidation above 95% as a checked 100% liquidation.
+
+The auction begins on the ledger after creation. During its first 200 ledgers,
+the bid remains at 100% while the lot increases by 0.5% per ledger from zero to
+100%. During ledgers 201 through 400, the lot remains at 100% while the bid
+decreases by 0.5% per ledger to zero. A requested partial-fill percentage
+rounds the base bid up and base lot down before applying those ledger
+modifiers. Base amounts not selected by the partial fill remain in the auction;
+the time modifier affects only the positions transferred by that fill.
+
+Request type 6 fills a user-liquidation auction by transferring the scaled
+bToken collateral and dToken liability shares from the liquidatee to the
+filler. It does not transfer underlying tokens or change aggregate reserve
+bToken/dToken supply. The filler MUST NOT be the liquidatee and MUST finish the
+entire submission within the ordinary maximum-position, minimum-collateral, and
+health constraints. A configured-backstop filler MUST atomically update its
+canonical reserve-liability records.
+
+An account with an active user-liquidation auction cannot complete an ordinary
+submission. Request type 9 may remove its own auction only when the stored pool
+status permits auction cancellation and the resulting position is healthy.
+Auction fills remain available under On-Ice and Frozen statuses. Independently,
+any caller may delete an auction once 500 ledgers have elapsed from its start.
+Auction entries use temporary storage with a 45-day renewal threshold and a
+46-day bump. Creation and partial-fill writes apply that bounded TTL policy.
+
+V2 transfers collateral-free residual liabilities to its bad-debt engine after
+a full fill. That engine and the v3 multi-tier loss waterfall are not yet
+implemented. Until they are, any partial or full fill that would reduce the
+liquidatee's effective health factor, or remove all collateral while leaving a
+nonzero liability, MUST fail atomically with the auction and both accounts
+unchanged. This prevents the inherited bid-discount phase from manufacturing
+unhandled bad debt. The fail-closed boundary MUST be replaced only together
+with the specified bad-debt and waterfall implementation.
 
 ## 9. Loss waterfall
 
@@ -1180,7 +1239,7 @@ implemented:
 - Production LP price sources, averaging, staleness, and failure policy.
 - Production lending-reserve admission policy for issuer controls, clawback,
   deauthorization, rebasing, and other nonstandard token behavior.
-- Exact liquidation, auction, and waterfall entry points that invoke the
+- Exact bad-debt, interest-auction, and waterfall entry points that invoke the
   committed-loss and unresolved-bad-debt record transitions.
 - Exact take-rate accrual integration and distribution cadence.
 - Post-migration designated token.
@@ -1225,14 +1284,15 @@ Protocol-27 pool factory, immutable per-pool operator and stored status,
 canonical permissionless and operator status transitions, the v2-compatible
 action predicate, immutable lending and reserve configuration, the six
 non-auction v2 request types, v2-compatible reserve interest and share
-accounting, fail-closed oracle-valued health checks, and a fail-closed pool
-callback derived directly from three bounded canonical record maps. The local
-runner deploys independently issued assets, a coherent
+accounting, fail-closed oracle-valued health checks, v2-compatible
+user-liquidation creation and fills with an explicit pre-waterfall bad-debt
+boundary, and a fail-closed pool callback derived directly from three bounded
+canonical record maps. The local runner deploys independently issued assets, a
+coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
-local run, the public-testnet exercise, liquidation, auction, and waterfall
-entry points that invoke the remaining record transitions, a production LP
-valuation source, enforcement of stored status by future auction entry points,
+local run, the public-testnet exercise, bad-debt and interest-auction entry
+points, the multi-tier waterfall transitions, a production LP valuation source,
 take-rate realization, and ongoing BLND-emission accrual remain intentionally
 unimplemented.
 

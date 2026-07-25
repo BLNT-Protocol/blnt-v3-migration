@@ -679,6 +679,58 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
     assert_eq!(pool.update_pool_status(), 1);
     assert_eq!(pool.status(), 1);
     assert!(pool.action_allowed(&4));
+
+    let risky_borrower = Address::generate(&env);
+    legacy_token.mint(&risky_borrower, &(100 * SCALAR_7));
+    pool.submit(
+        &risky_borrower,
+        &risky_borrower,
+        &risky_borrower,
+        &soroban_sdk::vec![
+            &env,
+            v3_pool::Request {
+                address: legacy_token_id.clone(),
+                amount: 100 * SCALAR_7,
+                request_type: 2,
+            },
+            v3_pool::Request {
+                address: next_token_id.clone(),
+                amount: 70 * SCALAR_7,
+                request_type: 4,
+            }
+        ],
+    );
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + 2 * 31_536_000);
+    assert!(!pool.position_health(&risky_borrower).healthy);
+    let liquidation = pool.new_liquidation_auction(
+        &risky_borrower,
+        &soroban_sdk::vec![&env, next_token_id.clone()],
+        &soroban_sdk::vec![&env, legacy_token_id.clone()],
+        &30,
+    );
+    env.ledger().set_sequence_number(liquidation.block + 200);
+    let risky_before = pool.positions(&risky_borrower);
+    let filler_after = pool.submit(
+        &user,
+        &user,
+        &user,
+        &soroban_sdk::vec![
+            &env,
+            v3_pool::Request {
+                address: risky_borrower.clone(),
+                amount: 100,
+                request_type: 6,
+            }
+        ],
+    );
+    assert!(pool.try_get_liquidation_auction(&risky_borrower).is_err());
+    assert!(
+        pool.positions(&risky_borrower).liabilities.get(1).unwrap()
+            < risky_before.liabilities.get(1).unwrap()
+    );
+    assert!(filler_after.collateral.get(0).unwrap() > 99 * SCALAR_7);
+    assert!(pool.position_health(&user).healthy);
 }
 
 #[test]

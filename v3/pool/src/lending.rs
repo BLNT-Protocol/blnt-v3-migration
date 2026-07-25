@@ -3,7 +3,10 @@ use soroban_sdk::{
     I256,
 };
 
-use crate::{get_backstop, get_status, require_action_allowed, set_backstop_liability, PoolError};
+use crate::{
+    auction::{self, ACTION_DELETE_LIQUIDATION, ACTION_FILL_USER_LIQUIDATION},
+    get_backstop, get_status, require_action_allowed, set_backstop_liability, PoolError,
+};
 
 pub const SCALAR_7: i128 = 10_000_000;
 pub const SCALAR_12: i128 = 1_000_000_000_000;
@@ -81,7 +84,7 @@ pub struct Positions {
 }
 
 impl Positions {
-    fn empty(env: &Env) -> Self {
+    pub(crate) fn empty(env: &Env) -> Self {
         Self {
             collateral: Map::new(env),
             liabilities: Map::new(env),
@@ -89,7 +92,7 @@ impl Positions {
         }
     }
 
-    fn effective_count(&self) -> u32 {
+    pub(crate) fn effective_count(&self) -> u32 {
         self.collateral.len() + self.liabilities.len()
     }
 }
@@ -117,6 +120,51 @@ pub struct PositionHealth {
     pub healthy: bool,
     pub liability_base: i128,
     pub raw_collateral_base: i128,
+}
+
+pub(crate) struct PositionData {
+    pub collateral_base: i128,
+    pub liability_base: i128,
+    pub raw_collateral_base: i128,
+    pub raw_liability_base: i128,
+    pub scalar: i128,
+}
+
+impl PositionData {
+    pub(crate) fn health_factor(&self, env: &Env) -> i128 {
+        if self.liability_base == 0 {
+            return i128::MAX;
+        }
+        mul_div_floor(env, self.collateral_base, self.scalar, self.liability_base)
+    }
+
+    pub(crate) fn is_hf_lower_than(&self, env: &Env, other: &Self) -> bool {
+        if self.liability_base == 0 {
+            return false;
+        }
+        if other.liability_base == 0 {
+            return true;
+        }
+        I256::from_i128(env, self.collateral_base).mul(&I256::from_i128(env, other.liability_base))
+            < I256::from_i128(env, other.collateral_base)
+                .mul(&I256::from_i128(env, self.liability_base))
+    }
+
+    pub(crate) fn is_hf_over(&self, env: &Env, maximum: i128) -> bool {
+        if self.liability_base == 0 {
+            return true;
+        }
+        let threshold = mul_div_ceil(env, self.scalar, maximum, SCALAR_7);
+        self.health_factor(env) > threshold
+    }
+
+    pub(crate) fn is_hf_under(&self, env: &Env, minimum: i128) -> bool {
+        if self.liability_base == 0 {
+            return false;
+        }
+        let threshold = mul_div_floor(env, self.scalar, minimum, SCALAR_7);
+        self.health_factor(env) < threshold
+    }
 }
 
 #[contractclient(name = "PriceOracleClient")]
@@ -279,14 +327,55 @@ pub(crate) fn submit(
     let mut transfers = Transfers::new(env);
     let mut health_check = false;
     let mut liability_checks: Map<Address, bool> = Map::new(env);
+    let mut prices: Map<Address, PriceQuote> = Map::new(env);
     let mut utilization_checks: Map<Address, bool> = Map::new(env);
 
     for request in requests {
-        require_positive(env, request.amount);
+        if request.amount < 0
+            || (request.amount == 0 && request.request_type != ACTION_DELETE_LIQUIDATION)
+        {
+            panic_with_error!(env, PoolError::BadRequest);
+        }
+        require_action_allowed(env, get_status(env), request.request_type);
+        if request.request_type == ACTION_FILL_USER_LIQUIDATION {
+            let filled = auction::fill_user_liquidation(
+                env,
+                &request.address,
+                from,
+                &mut user,
+                &mut prices,
+                request.amount,
+            );
+            for (asset, _) in filled.bid {
+                liability_checks.set(asset, true);
+            }
+            health_check = true;
+            LendingAction {
+                action: request.request_type,
+                amount: request.amount,
+                asset: request.address,
+                owner: from.clone(),
+                position_delta: 0,
+            }
+            .publish(env);
+            continue;
+        }
+        if request.request_type == ACTION_DELETE_LIQUIDATION {
+            auction::cancel_user_liquidation(env, from);
+            health_check = true;
+            LendingAction {
+                action: request.request_type,
+                amount: 0,
+                asset: request.address,
+                owner: from.clone(),
+                position_delta: 0,
+            }
+            .publish(env);
+            continue;
+        }
         if request.request_type > ACTION_REPAY {
             panic_with_error!(env, PoolError::InvalidAction);
         }
-        require_action_allowed(env, get_status(env), request.request_type);
         let mut reserve = accrue_reserve(env, &request.address);
         if !reserve.config.enabled
             && (request.request_type == ACTION_SUPPLY
@@ -404,6 +493,9 @@ pub(crate) fn submit(
         .publish(env);
     }
 
+    if auction::has_user_liquidation(env, from) {
+        panic_with_error!(env, PoolError::AuctionInProgress);
+    }
     if user.effective_count() > lending_config.max_positions
         && user.effective_count() > previous_position_count
     {
@@ -416,7 +508,7 @@ pub(crate) fn submit(
         }
     }
     if health_check && !user.liabilities.is_empty() {
-        let result = calculate_health(env, &user);
+        let result = calculate_health_with_prices(env, &user, &mut prices);
         if !result.healthy {
             panic_with_error!(env, PoolError::InvalidHealthFactor);
         }
@@ -506,7 +598,7 @@ fn validate_reserve_config(env: &Env, config: &ReserveConfig) {
     }
 }
 
-fn set_positions(env: &Env, user: &Address, positions: &Positions) {
+pub(crate) fn set_positions(env: &Env, user: &Address, positions: &Positions) {
     let key = LendingPersistentKey::Positions(user.clone());
     env.storage().persistent().set(&key, positions);
     env.storage()
@@ -514,7 +606,7 @@ fn set_positions(env: &Env, user: &Address, positions: &Positions) {
         .extend_ttl(&key, USER_TTL_THRESHOLD, USER_TTL_BUMP);
 }
 
-fn reserve_config(env: &Env, asset: &Address) -> ReserveConfig {
+pub(crate) fn reserve_config(env: &Env, asset: &Address) -> ReserveConfig {
     env.storage()
         .instance()
         .get(&LendingDataKey::ReserveConfig(asset.clone()))
@@ -667,10 +759,34 @@ fn calculate_accrual(
 }
 
 fn calculate_health(env: &Env, positions: &Positions) -> PositionHealth {
+    let mut prices = Map::new(env);
+    calculate_health_with_prices(env, positions, &mut prices)
+}
+
+fn calculate_health_with_prices(
+    env: &Env,
+    positions: &Positions,
+    prices: &mut Map<Address, PriceQuote>,
+) -> PositionHealth {
+    let data = position_data_with_prices(env, positions, prices);
+    PositionHealth {
+        collateral_base: data.collateral_base,
+        healthy: !data.is_hf_under(env, MIN_HEALTH_FACTOR),
+        liability_base: data.liability_base,
+        raw_collateral_base: data.raw_collateral_base,
+    }
+}
+
+pub(crate) fn position_data_with_prices(
+    env: &Env,
+    positions: &Positions,
+    prices: &mut Map<Address, PriceQuote>,
+) -> PositionData {
     let lending_config = config(env);
     let mut collateral_base = 0_i128;
     let mut raw_collateral_base = 0_i128;
     let mut liability_base = 0_i128;
+    let mut raw_liability_base = 0_i128;
     let mut reserve_index = 0_u32;
     for asset in reserve_list(env) {
         let collateral = positions.collateral.get(reserve_index).unwrap_or(0);
@@ -682,13 +798,19 @@ fn calculate_health(env: &Env, positions: &Positions) -> PositionHealth {
             continue;
         }
         let reserve = accrue_reserve(env, &asset);
-        let quote = PriceOracleClient::new(env, &lending_config.oracle).price(&asset);
-        if quote.price <= 0
-            || quote.decimals != lending_config.price_decimals
-            || quote.valid_until < env.ledger().timestamp()
-        {
-            panic_with_error!(env, PoolError::InvalidPrice);
-        }
+        let quote = if let Some(quote) = prices.get(asset.clone()) {
+            quote
+        } else {
+            let quote = PriceOracleClient::new(env, &lending_config.oracle).price(&asset);
+            if quote.price <= 0
+                || quote.decimals != lending_config.price_decimals
+                || quote.valid_until < env.ledger().timestamp()
+            {
+                panic_with_error!(env, PoolError::InvalidPrice);
+            }
+            prices.set(asset.clone(), quote.clone());
+            quote
+        };
         let asset_scalar = pow10(env, reserve.config.decimals);
         if collateral > 0 {
             let assets = to_asset_from_b_tokens(env, &reserve, collateral);
@@ -704,6 +826,11 @@ fn calculate_health(env: &Env, positions: &Positions) -> PositionHealth {
         }
         if liabilities > 0 {
             let assets = to_asset_from_d_tokens(env, &reserve, liabilities);
+            raw_liability_base = checked_add(
+                env,
+                raw_liability_base,
+                mul_div_ceil(env, quote.price, assets, asset_scalar),
+            );
             let effective_assets =
                 mul_div_ceil(env, assets, SCALAR_7, i128::from(reserve.config.l_factor));
             liability_base = checked_add(
@@ -713,13 +840,12 @@ fn calculate_health(env: &Env, positions: &Positions) -> PositionHealth {
             );
         }
     }
-    let healthy = liability_base == 0
-        || mul_div_floor(env, collateral_base, SCALAR_7, liability_base) >= MIN_HEALTH_FACTOR;
-    PositionHealth {
+    PositionData {
         collateral_base,
-        healthy,
         liability_base,
         raw_collateral_base,
+        raw_liability_base,
+        scalar: pow10(env, lending_config.price_decimals),
     }
 }
 
@@ -794,12 +920,12 @@ fn to_d_tokens_up(env: &Env, reserve: &Reserve, amount: i128) -> i128 {
     mul_div_ceil(env, amount, SCALAR_12, reserve.data.d_rate)
 }
 
-fn checked_add(env: &Env, left: i128, right: i128) -> i128 {
+pub(crate) fn checked_add(env: &Env, left: i128, right: i128) -> i128 {
     left.checked_add(right)
         .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError))
 }
 
-fn checked_sub_nonnegative(env: &Env, left: i128, right: i128) -> i128 {
+pub(crate) fn checked_sub_nonnegative(env: &Env, left: i128, right: i128) -> i128 {
     let result = left
         .checked_sub(right)
         .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError));
@@ -821,7 +947,7 @@ fn pow10(env: &Env, decimals: u32) -> i128 {
         .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError))
 }
 
-fn mul_div_floor(env: &Env, left: i128, right: i128, denominator: i128) -> i128 {
+pub(crate) fn mul_div_floor(env: &Env, left: i128, right: i128, denominator: i128) -> i128 {
     if left < 0 || right < 0 || denominator <= 0 {
         panic_with_error!(env, PoolError::ArithmeticError);
     }
@@ -832,7 +958,7 @@ fn mul_div_floor(env: &Env, left: i128, right: i128, denominator: i128) -> i128 
         .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError))
 }
 
-fn mul_div_ceil(env: &Env, left: i128, right: i128, denominator: i128) -> i128 {
+pub(crate) fn mul_div_ceil(env: &Env, left: i128, right: i128, denominator: i128) -> i128 {
     if left < 0 || right < 0 || denominator <= 0 {
         panic_with_error!(env, PoolError::ArithmeticError);
     }
@@ -980,5 +1106,28 @@ mod tests {
             mul_div_floor(&env, i128::MAX, i128::MAX, 1);
         }))
         .is_err());
+    }
+
+    #[test]
+    fn exact_health_comparison_does_not_hide_low_precision_deterioration() {
+        let env = Env::default();
+        let before = PositionData {
+            collateral_base: 150,
+            liability_base: 100,
+            raw_collateral_base: 150,
+            raw_liability_base: 100,
+            scalar: 1,
+        };
+        let after = PositionData {
+            collateral_base: 140,
+            liability_base: 100,
+            raw_collateral_base: 140,
+            raw_liability_base: 100,
+            scalar: 1,
+        };
+
+        assert_eq!(before.health_factor(&env), after.health_factor(&env));
+        assert!(after.is_hf_lower_than(&env, &before));
+        assert!(!before.is_hf_lower_than(&env, &after));
     }
 }

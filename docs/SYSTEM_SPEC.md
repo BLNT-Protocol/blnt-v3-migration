@@ -1323,10 +1323,36 @@ are held by the top-level candidate.
 
 ### 10.1 Ongoing backstop-depositor emissions
 
-This policy applies only to the BLND tranche assigned to backstop depositors,
-\(E_{\mathrm{backstop}}\). Pool supply and borrow emissions remain a separate
-allocation. The inherited v2 70/30 split is not enforced by the emitter, and
-the top-level v3 split remains an open economic decision.
+Each amount of ongoing BLND actually received from the emitter, together with
+any top-level integer carry from the preceding split, MUST use the immutable
+inherited 70/30 allocation:
+
+\[
+E_{\mathrm{backstop}} =
+\left\lfloor E_{\mathrm{total}}\frac{7}{10}\right\rfloor
+\]
+
+\[
+E_{\mathrm{pool}} =
+\left\lfloor E_{\mathrm{total}}\frac{3}{10}\right\rfloor
+\]
+
+\[
+C_{\mathrm{next}} =
+E_{\mathrm{total}} - E_{\mathrm{backstop}} - E_{\mathrm{pool}}
+\]
+
+where \(E_{\mathrm{total}}\) includes the preceding top-level carry. The
+candidate MUST retain \(C_{\mathrm{next}}\) and include it in the next split;
+it MUST NOT assign split dust to a discretionary recipient. The ratio is
+hard-coded and has no operator, administrator, governance, or runtime
+configuration path.
+
+This section's pool and user weighting applies only to
+\(E_{\mathrm{backstop}}\). The 30% \(E_{\mathrm{pool}}\) tranche remains
+segregated for pool supply and borrow positions. Its reserve-level and
+supply-versus-borrow allocation requires a separately specified pool-side
+accounting rule and MUST NOT be claimable through the backstop-depositor path.
 
 Only active pools are eligible for ongoing backstop-depositor emissions. A
 pool's weight is the eligible underlying BLND held through its BLND:USDC and
@@ -1371,12 +1397,36 @@ BLND held through either eligible tier earns at the same rate per underlying
 BLND. The USDC or XLM component of an LP position does not contribute emission
 weight.
 
-The production implementation MUST derive underlying BLND with
-manipulation-resistant, checkpointed LP accounting. It MUST NOT use untrusted
-caller values or a same-transaction reserve ratio. Pool and user allocation
-MUST use bounded accumulator/checkpoint accounting rather than iteration over
-all pools or depositors. Integer remainder MUST be retained at its allocation
-scope and included in a later distribution at that same scope.
+At every emission-allocation checkpoint, the candidate MUST derive the current
+underlying BLND in each BLND-bearing tier directly from that Comet contract's
+same-invocation BLND reserve balance and total LP-token supply:
+
+\[
+B_t(A) =
+\left\lfloor
+A\frac{R_{\mathrm{BLND},t}}{S_t}
+\right\rfloor
+\]
+
+where \(A\) is the candidate-accounted active LP-token amount, \(R\) is the
+Comet contract's current BLND balance, and \(S\) is its current LP-token
+supply. A zero or negative supply, negative reserve balance, negative LP
+amount, or LP amount greater than total supply MUST fail closed. Plain USDC
+does not use this formula and contributes zero BLND weight. Direct LP-token
+transfers that did not mint candidate tier shares are excluded.
+
+This deliberately uses current Comet composition rather than a TWAP, delayed
+checkpoint, valuation adapter, or external price oracle. The same-transaction
+reserve ratio is canonical for this emission calculation. Consequently, a
+party able to move a Comet reserve ratio around the allocation checkpoint can
+change that checkpoint's emission weights. This manipulation exposure is an
+accepted economic policy of the candidate and MUST be documented in deployment
+and security review materials.
+
+Pool and user allocation MUST use bounded accumulator/checkpoint accounting
+rather than iteration over all pools or depositors. Integer remainder MUST be
+retained at its allocation scope and included in a later distribution at that
+same scope.
 
 Queued withdrawals receive zero ongoing BLND-emission weight immediately after
 their emissions are checkpointed at queue time. Dequeueing restores emission
@@ -1509,8 +1559,9 @@ implemented:
 - Production lending-reserve admission policy for issuer controls, clawback,
   deauthorization, rebasing, and other nonstandard token behavior.
 - Post-migration designated token.
-- Top-level BLND split between backstop depositors and pool supply/borrow
+- Pool-side allocation of the 30% ongoing BLND tranche among supply and borrow
   positions.
+- Ongoing-emission treatment of capital committed to a pending loss auction.
 - Protocol-fee existence and incidence.
 - Whether existing v2 pool positions remain isolated or receive an explicit
   position-migration mechanism.
@@ -1541,6 +1592,10 @@ implemented:
    reserve credit with the canonical `5:5:4` weighting, cycle across qualifying
    tiers, donate the selected tier token without minting shares, and support
    atomic partial fills and permissionless stale recovery.
+10. Implement the immutable ongoing-emission 70/30 split and canonical current
+    Comet-composition reads for BLND:USDC and BLND:XLM, then connect them to
+    bounded pool/user accrual after the 30% pool-side allocation and pending-loss
+    eligibility policies are resolved.
 
 Milestones 1 through 5, the bounded-Q4W and canonical-loss-state-boundary
 portions of milestone 6, the reproducible deployment runner for the local
@@ -1579,8 +1634,11 @@ The local runner deploys independently issued assets, a
 coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
-local run, the public-testnet exercise, a production LP valuation source, and
-ongoing BLND-emission accrual remain intentionally unimplemented.
+local run, the public-testnet exercise, a production LP valuation source for
+non-emission policy, and ongoing BLND-emission accrual remain intentionally
+unimplemented. Milestone 10's policy arithmetic and canonical spot-composition
+read boundary are implemented; emitter funding, accumulators, and claims remain
+blocked on the open decisions stated above.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

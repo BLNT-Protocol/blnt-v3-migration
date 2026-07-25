@@ -97,6 +97,15 @@ An existing bad-debt auction remains unchanged when a later user liquidation
 adds liabilities; permissionless continuation handles those residual
 liabilities after the auction clears.
 
+The candidate also fixes ongoing BLND at the inherited 70% backstop-depositor
+and 30% pool supply/borrow split, with deterministic top-level carry. Its
+emission quote boundary derives underlying BLND directly from the current
+BLND reserve and total supply of the BLND:USDC and BLND:XLM Comet contracts.
+That same-invocation composition is an intentional spot policy and therefore
+accepts reserve-ratio manipulation risk at a checkpoint. Emitter funding,
+bounded pool/user accrual, and claims remain unimplemented until the 30% pool
+allocation and pending-loss eligibility rules are specified.
+
 Run both lanes:
 
 ```bash

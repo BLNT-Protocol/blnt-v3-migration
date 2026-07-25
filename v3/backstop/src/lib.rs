@@ -48,6 +48,9 @@ const BAD_DEBT_LOT_PREMIUM_DENOMINATOR: i128 = 5;
 const BAD_DEBT_TIER_MINIMUM_VALUE_USDC: i128 = 200 * SCALAR_7;
 const INTEREST_LOT_PREMIUM_NUMERATOR: i128 = 6;
 const INTEREST_LOT_PREMIUM_DENOMINATOR: i128 = 5;
+const BACKSTOP_EMISSION_NUMERATOR: i128 = 7;
+const POOL_EMISSION_NUMERATOR: i128 = 3;
+const EMISSION_SPLIT_DENOMINATOR: i128 = 10;
 
 /// The candidate's fixed three-tier backstop set in first-loss order.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -350,6 +353,17 @@ pub struct BlndEmissionQuote {
     pub eligible_blnd: i128,
 }
 
+/// Immutable top-level split of ongoing BLND actually received from the
+/// emitter. `carry` remains at this scope for the next split.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct OngoingBlndSplit {
+    pub backstop: i128,
+    pub carry: i128,
+    pub pool: i128,
+    pub total: i128,
+}
+
 #[contractclient(name = "EmitterClient")]
 pub trait Emitter {
     fn drop(env: Env, list: Vec<(Address, i128)>);
@@ -379,6 +393,14 @@ pub trait PoolFactory {
 pub trait ValuationAdapter {
     fn version(env: Env) -> u32;
     fn quote(env: Env, token: Address, amount: i128) -> AssetValuation;
+}
+
+/// Minimal current-composition interface implemented by both approved Comet LP
+/// contracts.
+#[contractclient(name = "CometClient")]
+pub trait Comet {
+    fn get_balance(env: Env, token: Address) -> i128;
+    fn get_total_supply(env: Env) -> i128;
 }
 
 #[contractevent]
@@ -1440,8 +1462,9 @@ impl BackstopContract {
     /// Quote an active pool's share of the backstop-depositor BLND tranche.
     ///
     /// `total_active_blnd` is the eligible underlying BLND across every active
-    /// pool. Values and active status MUST come from canonical checkpointed
-    /// accounting before this arithmetic is used for accrual.
+    /// pool. This is an arithmetic-only diagnostic boundary. Production
+    /// accrual MUST obtain each tier's values from canonical candidate shares
+    /// and `spot_blnd_emission_values`, not untrusted caller input.
     pub fn quote_pool_blnd_emissions(
         env: Env,
         distribution: i128,
@@ -1456,8 +1479,9 @@ impl BackstopContract {
     /// Quote one user's share of an active pool's BLND-emission allocation.
     ///
     /// `pool_eligible_blnd` is the eligible underlying BLND held through both
-    /// BLND-bearing tiers for the pool. Values MUST come from canonical
-    /// checkpointed accounting before this arithmetic is used for accrual.
+    /// BLND-bearing tiers for the pool. This is an arithmetic-only diagnostic
+    /// boundary. Production accrual MUST obtain each tier's values from
+    /// canonical candidate shares and `spot_blnd_emission_values`.
     pub fn quote_user_blnd_emissions(
         env: Env,
         pool_distribution: i128,
@@ -1466,6 +1490,35 @@ impl BackstopContract {
     ) -> BlndEmissionQuote {
         extend_instance_ttl(&env);
         quote_user_blnd_emission_values(&env, pool_distribution, &values, pool_eligible_blnd)
+    }
+
+    /// Convert current BLND:USDC and BLND:XLM LP-token amounts to underlying
+    /// BLND using each Comet's same-invocation reserve composition.
+    ///
+    /// This is the canonical conversion boundary for ongoing emissions. The
+    /// caller-supplied amounts make this a quote only; production accrual MUST
+    /// supply candidate-accounted active amounts after checkpointing.
+    pub fn spot_blnd_emission_values(
+        env: Env,
+        blnd_usdc_lp: i128,
+        blnd_xlm_lp: i128,
+    ) -> BlndEmissionValues {
+        extend_instance_ttl(&env);
+        BlndEmissionValues {
+            blnd_usdc: spot_underlying_blnd(&env, BackstopTier::BlndUsdc, blnd_usdc_lp),
+            blnd_xlm: spot_underlying_blnd(&env, BackstopTier::BlndXlm, blnd_xlm_lp),
+        }
+    }
+
+    /// Quote the immutable 70% backstop / 30% pool split, including carry
+    /// retained from the preceding top-level split.
+    pub fn quote_ongoing_blnd_split(
+        env: Env,
+        distribution: i128,
+        prior_carry: i128,
+    ) -> OngoingBlndSplit {
+        extend_instance_ttl(&env);
+        quote_ongoing_blnd_split_values(&env, distribution, prior_carry)
     }
 
     pub fn migration_status(env: Env) -> MigrationStatus {
@@ -3568,6 +3621,54 @@ fn eligible_blnd(env: &Env, values: &BlndEmissionValues) -> i128 {
     checked_add_i128(env, values.blnd_usdc, values.blnd_xlm)
 }
 
+fn spot_underlying_blnd(env: &Env, tier: BackstopTier, lp_amount: i128) -> i128 {
+    if lp_amount < 0 {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    let lp_token = match tier {
+        BackstopTier::BlndUsdc | BackstopTier::BlndXlm => tier_token(env, tier),
+        BackstopTier::Usdc => panic_with_error!(env, BackstopError::InvalidTier),
+    };
+    let comet = CometClient::new(env, &lp_token);
+    let total_supply = comet.get_total_supply();
+    let blnd: Address = env.storage().instance().get(&DataKey::BlndToken).unwrap();
+    let blnd_reserve = comet.get_balance(&blnd);
+    if total_supply <= 0 || blnd_reserve < 0 || lp_amount > total_supply {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    proportional_floor(env, lp_amount, blnd_reserve, total_supply)
+}
+
+fn quote_ongoing_blnd_split_values(
+    env: &Env,
+    distribution: i128,
+    prior_carry: i128,
+) -> OngoingBlndSplit {
+    if distribution < 0 || prior_carry < 0 {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    let total = checked_add_i128(env, distribution, prior_carry);
+    let backstop = proportional_floor(
+        env,
+        total,
+        BACKSTOP_EMISSION_NUMERATOR,
+        EMISSION_SPLIT_DENOMINATOR,
+    );
+    let pool = proportional_floor(
+        env,
+        total,
+        POOL_EMISSION_NUMERATOR,
+        EMISSION_SPLIT_DENOMINATOR,
+    );
+    let allocated = checked_add_i128(env, backstop, pool);
+    OngoingBlndSplit {
+        backstop,
+        carry: checked_nonnegative_sub_i128(env, total, allocated),
+        pool,
+        total,
+    }
+}
+
 fn quote_pool_blnd_emission_values(
     env: &Env,
     distribution: i128,
@@ -3882,6 +3983,58 @@ mod tests {
 
     fn register_valuation_adapter(env: &Env) -> Address {
         env.register(MockValuationAdapter, ())
+    }
+
+    #[contract]
+    struct MockComet;
+
+    #[derive(Clone)]
+    #[contracttype]
+    enum MockCometKey {
+        Blnd,
+        BlndReserve,
+        TotalSupply,
+    }
+
+    #[contractimpl]
+    impl MockComet {
+        pub fn __constructor(env: Env, blnd: Address, total_supply: i128, blnd_reserve: i128) {
+            env.storage().instance().set(&MockCometKey::Blnd, &blnd);
+            env.storage()
+                .instance()
+                .set(&MockCometKey::TotalSupply, &total_supply);
+            env.storage()
+                .instance()
+                .set(&MockCometKey::BlndReserve, &blnd_reserve);
+        }
+
+        pub fn get_total_supply(env: Env) -> i128 {
+            env.storage()
+                .instance()
+                .get(&MockCometKey::TotalSupply)
+                .unwrap()
+        }
+
+        pub fn get_balance(env: Env, token: Address) -> i128 {
+            let blnd: Address = env.storage().instance().get(&MockCometKey::Blnd).unwrap();
+            if token == blnd {
+                env.storage()
+                    .instance()
+                    .get(&MockCometKey::BlndReserve)
+                    .unwrap()
+            } else {
+                0
+            }
+        }
+
+        pub fn set_composition(env: Env, total_supply: i128, blnd_reserve: i128) {
+            env.storage()
+                .instance()
+                .set(&MockCometKey::TotalSupply, &total_supply);
+            env.storage()
+                .instance()
+                .set(&MockCometKey::BlndReserve, &blnd_reserve);
+        }
     }
 
     #[contract]
@@ -5852,6 +6005,116 @@ mod tests {
             calculate_interest_bid_amount(&env, lot_value + 1, unit_value),
             120 * SCALAR_7 + 1
         );
+    }
+
+    #[test]
+    fn ongoing_blnd_split_is_immutable_and_conserves_top_level_carry() {
+        let env = Env::default();
+        let first = quote_ongoing_blnd_split_values(&env, 11, 0);
+        assert_eq!(
+            first,
+            OngoingBlndSplit {
+                backstop: 7,
+                carry: 1,
+                pool: 3,
+                total: 11,
+            }
+        );
+
+        let second = quote_ongoing_blnd_split_values(&env, 9, first.carry);
+        assert_eq!(
+            second,
+            OngoingBlndSplit {
+                backstop: 7,
+                carry: 0,
+                pool: 3,
+                total: 10,
+            }
+        );
+        assert_eq!(
+            checked_add_i128(
+                &env,
+                checked_add_i128(&env, second.backstop, second.pool),
+                second.carry,
+            ),
+            second.total
+        );
+
+        let negative = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            quote_ongoing_blnd_split_values(&env, -1, 0)
+        }));
+        assert!(negative.is_err());
+        let overflow = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            quote_ongoing_blnd_split_values(&env, i128::MAX, 1)
+        }));
+        assert!(overflow.is_err());
+    }
+
+    #[test]
+    fn ongoing_blnd_spot_values_use_current_comet_composition() {
+        let env = Env::default();
+        let incumbent = Address::generate(&env);
+        let blnd = Address::generate(&env);
+        let blnd_usdc = env.register(MockComet, (&blnd, &(1_000 * SCALAR_7), &(8_000 * SCALAR_7)));
+        let blnd_xlm = env.register(MockComet, (&blnd, &(500 * SCALAR_7), &(1_500 * SCALAR_7)));
+        let usdc = Address::generate(&env);
+        let candidate_id = Address::generate(&env);
+        let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
+        let emitter = env.register(MockEmitter, (&incumbent, &candidate_id, &blnd_xlm));
+        let valuation_adapter = register_valuation_adapter(&env);
+        env.register_at(
+            &candidate_id,
+            BackstopContract,
+            (
+                &emitter,
+                &blnd,
+                &pool_factory,
+                &blnd_usdc,
+                &blnd_xlm,
+                &usdc,
+                &valuation_adapter,
+            ),
+        );
+        let candidate = BackstopContractClient::new(&env, &candidate_id);
+
+        assert_eq!(
+            candidate.spot_blnd_emission_values(&(100 * SCALAR_7), &(200 * SCALAR_7),),
+            BlndEmissionValues {
+                blnd_usdc: 800 * SCALAR_7,
+                blnd_xlm: 600 * SCALAR_7,
+            }
+        );
+
+        MockCometClient::new(&env, &blnd_usdc)
+            .set_composition(&(1_000 * SCALAR_7), &(4_000 * SCALAR_7));
+        assert_eq!(
+            candidate.spot_blnd_emission_values(&(100 * SCALAR_7), &(200 * SCALAR_7),),
+            BlndEmissionValues {
+                blnd_usdc: 400 * SCALAR_7,
+                blnd_xlm: 600 * SCALAR_7,
+            }
+        );
+
+        MockCometClient::new(&env, &blnd_xlm).set_composition(&0, &(1_500 * SCALAR_7));
+        assert!(candidate
+            .try_spot_blnd_emission_values(&(100 * SCALAR_7), &(200 * SCALAR_7))
+            .is_err());
+        MockCometClient::new(&env, &blnd_xlm)
+            .set_composition(&(500 * SCALAR_7), &(1_500 * SCALAR_7));
+        assert!(candidate
+            .try_spot_blnd_emission_values(&(1_001 * SCALAR_7), &(200 * SCALAR_7))
+            .is_err());
+        MockCometClient::new(&env, &blnd_usdc).set_composition(&(1_000 * SCALAR_7), &-1);
+        assert!(candidate
+            .try_spot_blnd_emission_values(&(100 * SCALAR_7), &(200 * SCALAR_7))
+            .is_err());
+        MockCometClient::new(&env, &blnd_usdc).set_composition(&-1, &(4_000 * SCALAR_7));
+        assert!(candidate
+            .try_spot_blnd_emission_values(&(100 * SCALAR_7), &(200 * SCALAR_7))
+            .is_err());
+        assert!(candidate
+            .try_spot_blnd_emission_values(&-1, &(200 * SCALAR_7))
+            .is_err());
     }
 
     #[test]

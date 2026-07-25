@@ -90,6 +90,58 @@ impl MockPoolFactory {
 }
 
 #[contract]
+struct MockComet;
+
+#[derive(Clone)]
+#[contracttype]
+enum MockCometKey {
+    Blnd,
+    BlndReserve,
+    TotalSupply,
+}
+
+#[contractimpl]
+impl MockComet {
+    pub fn __constructor(env: Env, blnd: Address, total_supply: i128, blnd_reserve: i128) {
+        env.storage().instance().set(&MockCometKey::Blnd, &blnd);
+        env.storage()
+            .instance()
+            .set(&MockCometKey::TotalSupply, &total_supply);
+        env.storage()
+            .instance()
+            .set(&MockCometKey::BlndReserve, &blnd_reserve);
+    }
+
+    pub fn get_total_supply(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&MockCometKey::TotalSupply)
+            .unwrap()
+    }
+
+    pub fn get_balance(env: Env, token: Address) -> i128 {
+        let blnd: Address = env.storage().instance().get(&MockCometKey::Blnd).unwrap();
+        if token == blnd {
+            env.storage()
+                .instance()
+                .get(&MockCometKey::BlndReserve)
+                .unwrap()
+        } else {
+            0
+        }
+    }
+
+    pub fn set_composition(env: Env, total_supply: i128, blnd_reserve: i128) {
+        env.storage()
+            .instance()
+            .set(&MockCometKey::TotalSupply, &total_supply);
+        env.storage()
+            .instance()
+            .set(&MockCometKey::BlndReserve, &blnd_reserve);
+    }
+}
+
+#[contract]
 struct MockLossAwarePool;
 
 #[derive(Clone)]
@@ -232,6 +284,23 @@ const QUEUE_SECONDS: u64 = 31 * 24 * 60 * 60;
 const PREPARATION_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 const SYNC_GRACE_SECONDS: u64 = 7 * 24 * 60 * 60;
 const ABSOLUTE_MIGRATION_CEILING_SECONDS: u64 = 138 * 24 * 60 * 60;
+
+macro_rules! assert_mainnet_invocation_limits {
+    ($resources:expr) => {{
+        let resources = $resources;
+        assert!(resources.instructions <= 600_000_000);
+        assert!(resources.mem_bytes <= 41_943_040);
+        assert!(resources.disk_read_entries <= 100);
+        assert!(resources.write_entries <= 50);
+        assert!(
+            resources.disk_read_entries + resources.memory_read_entries + resources.write_entries
+                <= 90
+        );
+        assert!(resources.disk_read_bytes <= 200_000);
+        assert!(resources.write_bytes <= 132_096);
+        assert!(resources.contract_events_size_bytes <= 16_384);
+    }};
+}
 
 struct Fixture {
     env: Env,
@@ -1761,25 +1830,6 @@ enum InterestTierCase {
 }
 
 fn assert_optimized_interest_auction(case: InterestTierCase) {
-    macro_rules! assert_mainnet_invocation_limits {
-        ($resources:expr) => {{
-            let resources = $resources;
-            assert!(resources.instructions <= 600_000_000);
-            assert!(resources.mem_bytes <= 41_943_040);
-            assert!(resources.disk_read_entries <= 100);
-            assert!(resources.write_entries <= 50);
-            assert!(
-                resources.disk_read_entries
-                    + resources.memory_read_entries
-                    + resources.write_entries
-                    <= 90
-            );
-            assert!(resources.disk_read_bytes <= 200_000);
-            assert!(resources.write_bytes <= 132_096);
-            assert!(resources.contract_events_size_bytes <= 16_384);
-        }};
-    }
-
     let fixture = Fixture::create();
     let env = &fixture.env;
     let oracle = v3_test_valuation_adapter::Client::new(env, &fixture.valuation_adapter);
@@ -2041,6 +2091,15 @@ fn v3_wasm_exposes_weighted_take_rate_quote() {
 #[test]
 fn v3_wasm_exposes_blnd_weighted_emission_quotes() {
     let fixture = Fixture::create();
+    assert_eq!(
+        fixture.candidate.quote_ongoing_blnd_split(&11, &0),
+        v3_backstop::OngoingBlndSplit {
+            backstop: 7,
+            carry: 1,
+            pool: 3,
+            total: 11,
+        }
+    );
     let pool_values = v3_backstop::BlndEmissionValues {
         blnd_usdc: 60 * SCALAR_7,
         blnd_xlm: 40 * SCALAR_7,
@@ -2064,6 +2123,59 @@ fn v3_wasm_exposes_blnd_weighted_emission_quotes() {
     );
     assert_eq!(user_quote.eligible_blnd, 25 * SCALAR_7);
     assert_eq!(user_quote.allocation, 625_000_000);
+}
+
+#[test]
+fn v3_wasm_reads_current_comet_composition_for_emissions() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token_admin = Address::generate(&env);
+    let blnd = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let blnd_usdc = env.register(MockComet, (&blnd, &(1_000 * SCALAR_7), &(8_000 * SCALAR_7)));
+    let blnd_xlm = env.register(MockComet, (&blnd, &(500 * SCALAR_7), &(1_500 * SCALAR_7)));
+    let prefund = env
+        .register_stellar_asset_contract_v2(token_admin)
+        .address();
+    let candidate_id = Address::generate(&env);
+    let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
+    let valuation_adapter = env.register(v3_test_valuation_adapter::WASM, (&blnd_usdc, &blnd_xlm));
+    env.register_at(
+        &candidate_id,
+        v3_backstop::WASM,
+        (
+            &Address::generate(&env),
+            &blnd,
+            &pool_factory,
+            &blnd_usdc,
+            &blnd_xlm,
+            &prefund,
+            &valuation_adapter,
+        ),
+    );
+    let candidate = v3_backstop::Client::new(&env, &candidate_id);
+
+    env.cost_estimate().budget().reset_unlimited();
+    let values = candidate.spot_blnd_emission_values(&(100 * SCALAR_7), &(200 * SCALAR_7));
+    assert_mainnet_invocation_limits!(env.cost_estimate().resources());
+    assert_eq!(
+        values,
+        v3_backstop::BlndEmissionValues {
+            blnd_usdc: 800 * SCALAR_7,
+            blnd_xlm: 600 * SCALAR_7,
+        }
+    );
+
+    MockCometClient::new(&env, &blnd_usdc)
+        .set_composition(&(1_000 * SCALAR_7), &(4_000 * SCALAR_7));
+    assert_eq!(
+        candidate.spot_blnd_emission_values(&(100 * SCALAR_7), &(200 * SCALAR_7)),
+        v3_backstop::BlndEmissionValues {
+            blnd_usdc: 400 * SCALAR_7,
+            blnd_xlm: 600 * SCALAR_7,
+        }
+    );
 }
 
 #[test]

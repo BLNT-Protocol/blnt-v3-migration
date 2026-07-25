@@ -582,6 +582,10 @@ The v3 tests must verify:
 
 The v3 tests must verify:
 
+- Every ongoing BLND amount uses an immutable 70% backstop-depositor and 30%
+  pool supply/borrow split.
+- The two floor-rounded tranches plus top-level carry exactly conserve the
+  input, and the carry remains scoped to the next top-level split.
 - Only active pools receive the backstop-depositor BLND tranche.
 - Pool allocation is proportional to eligible underlying BLND across
   BLND:USDC and BLND:XLM backstop positions.
@@ -605,8 +609,15 @@ The v3 tests must verify:
   awarding emissions for the queued interval.
 - Capital committed to losses receives the explicitly selected eligibility
   treatment.
-- Underlying BLND values reject stale, caller-supplied, and same-transaction
-  manipulated LP data.
+- Underlying BLND is floor-rounded from each Comet's current BLND reserve and
+  total LP supply in the same invocation.
+- Zero or negative LP supply, negative reserve/LP amounts, an LP amount above
+  total supply, arithmetic overflow, and unregistered pools fail closed.
+- Same-transaction Comet composition changes affect only the checkpoint that
+  observes them; tests demonstrate this accepted manipulation exposure rather
+  than rejecting it as stale.
+- Direct LP-token transfers without candidate tier shares receive zero
+  emission weight.
 - Accrual and claims use bounded accumulator/checkpoint accounting.
 - Supply and borrow emissions remain separate from the backstop-depositor
   tranche.

@@ -44,8 +44,8 @@ through the published emitter's one-time drop. The immutable BLND token binding
 is used to verify the exact balance delta. Position owners can then direct one
 floor-rounded claim per frozen position without iteration; remaining integer
 dust stays segregated in the backfill reserve. It intentionally does not yet
-implement loss-waterfall execution, bad-debt or interest auctions, or
-ongoing-emission accrual.
+implement loss-waterfall settlement, bad-debt auction fills, interest auctions,
+or ongoing-emission accrual.
 Each pool and tier stores separate accounted assets and shares. Deposits mint
 shares with floor rounding at the current exchange rate, withdrawals redeem
 assets with floor rounding, and the final share sweeps residual conversion
@@ -101,9 +101,17 @@ transitions. The pool now implements permissionless v2-compatible
 user-liquidation creation and request-type-6 fills, including the inherited
 400-ledger auction curve, partial fills, status-gated request-type-9
 cancellation, and permissionless stale deletion. Active auctions block ordinary
-liquidatee submissions. Until bad-debt handling exists, a fill that would leave
-collateral-free debt or worsen the liquidatee's effective health fails
-atomically. Bad-debt auctions, interest auctions, and the loss waterfall remain
+liquidatee submissions. Until bad-debt settlement exists, a fill that would
+leave collateral-free debt or worsen the liquidatee's effective health fails
+atomically. The pool can prepare one v2-shaped bad-debt auction for liabilities
+already assigned to its backstop. Preparation atomically commits a
+120%-of-debt lot from currently uncommitted BLND:USDC LP, BLND:XLM LP, then
+plain USDC. Only the registered pool can commit or release the lot. The
+reservation is excluded from activation and later quotes without transferring
+tokens, burning shares, or changing an exchange rate. The pool auction and
+backstop commitment share one fixed 46-day temporary lifetime, and
+permissionless stale deletion after 500 ledgers releases the commitment.
+Bad-debt handoff and fills, interest auctions, and loss settlement remain
 unimplemented, so the current pool is not yet a complete lending market.
 
 The v3 pool factory stores immutable backstop and pool-WASM configuration,
@@ -147,14 +155,16 @@ release the pool and it remains frozen indefinitely. Repayment, ordinary safe
 withdrawals, and auction fills remain available under the v2 Frozen action
 matrix.
 
-The specified, but not yet implemented, loss waterfall consumes BLND:USDC LP,
-BLND:XLM LP, and plain USDC in that order. Pool suppliers absorb only a
-remaining shortfall after all three backstop tiers are exhausted. The tiers
-have take-rate weights `2.5,2.5,2`, represented exactly on-chain as `5:5:4`;
-each tier's allocation is proportional to its reward-eligible USDC value
-multiplied by its weight. This priority and weighting do not change equal-USDC
-activation accounting. Per-tier auction, take-rate accrual, and disposal
-mechanics remain implementation work.
+The loss-waterfall preparation boundary selects BLND:USDC LP, BLND:XLM LP, and
+plain USDC in that order. The implemented quote and commitment stop before
+token disposal or share impairment. The specified settlement will make pool
+suppliers absorb only a remaining shortfall after all three backstop tiers are
+exhausted. The tiers have take-rate weights `2.5,2.5,2`, represented exactly
+on-chain as `5:5:4`; each tier's allocation is proportional to its
+reward-eligible USDC value multiplied by its weight. This priority and
+weighting do not change equal-USDC activation accounting. Per-tier auction
+fills, settlement, take-rate accrual, and disposal mechanics remain
+implementation work.
 
 The backstop also exposes arithmetic-only ongoing BLND-emission quotes for the
 backstop-depositor tranche. Active pools are weighted by eligible underlying

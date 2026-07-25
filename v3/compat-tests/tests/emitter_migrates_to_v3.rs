@@ -5,7 +5,7 @@ use soroban_sdk::{
     contract, contractclient, contractimpl, contracttype,
     testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
     token::{StellarAssetClient, TokenClient},
-    Address, Env, IntoVal,
+    Address, BytesN, Env, IntoVal,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -130,6 +130,22 @@ impl MockLossAwarePool {
             &MockLossAwarePoolKey::WithdrawalAllowed,
             &withdrawal_allowed,
         );
+    }
+
+    pub fn commit_bad_debt_lot(
+        env: Env,
+        backstop: Address,
+        auction_id: BytesN<32>,
+        debt_value: i128,
+    ) -> i128 {
+        v3_backstop::Client::new(&env, &backstop)
+            .commit_bad_debt_lot(&env.current_contract_address(), &auction_id, &debt_value)
+            .committed_value
+    }
+
+    pub fn release_bad_debt_lot(env: Env, backstop: Address, auction_id: BytesN<32>) {
+        v3_backstop::Client::new(&env, &backstop)
+            .release_bad_debt_lot(&env.current_contract_address(), &auction_id);
     }
 }
 
@@ -425,6 +441,69 @@ fn v3_wasm_derives_canonical_pool_valuation_from_accounted_shares() {
         .candidate
         .try_pool_valuation(&Address::generate(&fixture.env))
         .is_err());
+}
+
+#[test]
+fn v3_wasm_commits_strict_pool_authorized_bad_debt_lot() {
+    let fixture = Fixture::create();
+    let pool_client = fixture.loss_aware_pool(true);
+    let pool = pool_client.address.clone();
+    let depositor = Address::generate(&fixture.env);
+    let next_token = StellarAssetClient::new(&fixture.env, &fixture.next_token);
+    let usdc = StellarAssetClient::new(&fixture.env, &fixture.prefund_token);
+    fixture.legacy_token.mint(&depositor, &(100 * SCALAR_7));
+    next_token.mint(&depositor, &(100 * SCALAR_7));
+    usdc.mint(&depositor, &(100 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_blnd_usdc(&depositor, &pool, &(100 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_blnd_xlm(&depositor, &pool, &(100 * SCALAR_7));
+    fixture
+        .candidate
+        .deposit_usdc(&depositor, &pool, &(100 * SCALAR_7));
+
+    let debt_value = 200 * SCALAR_7;
+    let auction_id = BytesN::from_array(&fixture.env, &[3; 32]);
+    let quote = fixture.candidate.quote_bad_debt_lot(&pool, &debt_value);
+    assert_eq!(quote.target_value, 240 * SCALAR_7);
+    assert_eq!(quote.committed_value, 240 * SCALAR_7);
+    assert_eq!(quote.lot.blnd_usdc, 100 * SCALAR_7);
+    assert_eq!(quote.lot.blnd_xlm, 100 * SCALAR_7);
+    assert_eq!(quote.lot.usdc, 40 * SCALAR_7);
+    assert_eq!(quote.unfilled_target_value, 0);
+
+    assert_eq!(
+        pool_client.commit_bad_debt_lot(&fixture.candidate.address, &auction_id, &debt_value,),
+        240 * SCALAR_7
+    );
+    assert_eq!(fixture.candidate.pool_bad_debt_commitment_count(&pool), 1);
+    assert_eq!(
+        fixture
+            .candidate
+            .pool_tier_committed_assets(&v3_backstop::BackstopTier::BlndUsdc, &pool),
+        100 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.candidate.pool_valuation(&pool).active_values,
+        v3_backstop::ActivationValues {
+            blnd_usdc: 0,
+            blnd_xlm: 0,
+            usdc: 60 * SCALAR_7,
+        }
+    );
+
+    pool_client.release_bad_debt_lot(&fixture.candidate.address, &auction_id);
+    assert_eq!(fixture.candidate.pool_bad_debt_commitment_count(&pool), 0);
+    assert_eq!(
+        fixture.candidate.pool_valuation(&pool).active_values,
+        v3_backstop::ActivationValues {
+            blnd_usdc: 100 * SCALAR_7,
+            blnd_xlm: 100 * SCALAR_7,
+            usdc: 100 * SCALAR_7,
+        }
+    );
 }
 
 #[test]

@@ -510,17 +510,18 @@ record sets:
 - Capital committed to an active loss or auction.
 - Unresolved bad-debt records.
 
-The initial Protocol-27 pool stores these as three bounded canonical record
-maps in instance state and derives each count directly from its map length. Each
-map may contain at most 30 records. Liability and unresolved-bad-debt maps are
-keyed by reserve: a zero amount removes its record, negative amounts are
-invalid, and replacing an existing nonzero amount does not change the count.
-Committed losses are presence-only records keyed by auction identifier because
-a multi-asset auction has no single amount unit. Monetary amounts from reserves
-with different units MUST NOT be combined. Borrow and repay synchronize the
-configured backstop's reserve liability record. Future bad-debt,
-interest-auction, and waterfall operations MUST update the remaining records
-atomically with the transition they represent.
+The initial Protocol-27 pool stores bounded liability, committed-loss, and
+unresolved-bad-debt maps in instance state. Liability and unresolved-bad-debt
+maps are keyed by reserve: a zero amount removes its record, negative amounts
+are invalid, and replacing an existing nonzero amount does not change the
+count. General committed losses are presence-only records keyed by auction
+identifier because a multi-asset auction has no single amount unit. The one
+prepared bad-debt auction is an additional canonical singleton commitment
+whose temporary lifetime exactly matches the backstop's reserved lot; its
+presence contributes one committed-loss entry without duplicating its
+identifier in the general map. Monetary amounts from reserves with different
+units MUST NOT be combined. Borrow and repay synchronize the configured
+backstop's reserve liability record.
 
 The callback MUST return false for an address other than the pool's immutable
 backstop or when any count is nonzero. Missing canonical loss records MUST fail
@@ -536,11 +537,11 @@ The withdrawal implementation MUST:
   assets.
 
 The bounded Q4W accounting and Protocol-27 pool implement this fail-closed
-record and state boundary. Ordinary backstop borrow and repay now create and
-resolve liability records, but bad-debt, interest-auction, and loss-waterfall
-entry points remain unimplemented. Until those engines invoke their internal
-record transitions, these positions MUST NOT be treated as authoritative
-executable loss capacity.
+record and state boundary. Ordinary backstop borrow and repay create and
+resolve liability records. Bad-debt auction preparation now creates the
+canonical singleton commitment atomically with the backstop reservation, but
+bad-debt handoff, auction fills, interest auctions, and loss settlement remain
+unimplemented.
 
 ## 8. Pool activation
 
@@ -863,13 +864,13 @@ Auction entries use temporary storage with a 45-day renewal threshold and a
 46-day bump. Creation and partial-fill writes apply that bounded TTL policy.
 
 V2 transfers collateral-free residual liabilities to its bad-debt engine after
-a full fill. That engine and the v3 multi-tier loss waterfall are not yet
-implemented. Until they are, any partial or full fill that would reduce the
-liquidatee's effective health factor, or remove all collateral while leaving a
-nonzero liability, MUST fail atomically with the auction and both accounts
-unchanged. This prevents the inherited bid-discount phase from manufacturing
-unhandled bad debt. The fail-closed boundary MUST be replaced only together
-with the specified bad-debt and waterfall implementation.
+a full fill. V3 can now prepare one bad-debt auction only for liabilities
+already assigned to its configured backstop, but no fill or liquidation
+handoff uses it yet. Until settlement is complete, any user-liquidation fill
+that would reduce the liquidatee's effective health factor, or remove all
+collateral while leaving a nonzero liability, MUST fail atomically with the
+auction and both accounts unchanged. This prevents the inherited bid-discount
+phase from manufacturing unhandled bad debt.
 
 ## 9. Loss waterfall
 
@@ -909,10 +910,28 @@ For every tier, the implementation MUST define:
 - Behavior when an oracle or market is unavailable.
 - When supplier balances absorb losses after backstop exhaustion.
 
-The auction, transfer, or disposal mechanism used to realize each tier's value
-remains an open implementation decision. A failed or unavailable disposal path
-MUST NOT silently skip a tier or charge a later tier without behavior
-explicitly defined and tested.
+The implemented preparation boundary retains v2's one-bad-debt-auction-per-pool
+shape and 120%-of-debt target. It reserves a single multi-asset lot from
+currently uncommitted capital in strict waterfall order. The pool converts its
+oracle-valued reserve debt to seven-decimal USDC, and only the registered pool
+contract can authorize the backstop commitment. LP selection uses the immutable
+valuation adapter and rounds the last tier's token amount up so its proportional
+value cannot underfill the remaining target. Production adapters MUST guarantee
+that a quote's per-share value is linear across the selected LP amount.
+
+Commitment does not transfer assets, burn shares, or change the pool-tier
+exchange rate. Reserved assets are excluded from activation value and later
+loss quotes so they cannot be counted twice. The pool auction and backstop
+commitment are created atomically with identical fixed 46-day temporary
+lifetimes; reads do not renew either entry. A stale auction can be deleted
+permissionlessly after 500 ledgers, atomically releasing its lot. If both
+temporary entries expire, the backstop liability records still keep
+withdrawals blocked until the underlying debt is resolved.
+
+Auction fill, tier-token transfer, exchange-rate impairment, supplier residual
+loss, and exact failure behavior for an unavailable disposal market remain
+implementation work. A failed or unavailable path MUST NOT silently skip a tier
+or charge a later tier without behavior explicitly defined and tested.
 
 Emission weights do not need to follow loss priority. Any difference MUST be
 explicit and tested.
@@ -1275,8 +1294,9 @@ implemented:
 - Production LP price sources, averaging, staleness, and failure policy.
 - Production lending-reserve admission policy for issuer controls, clawback,
   deauthorization, rebasing, and other nonstandard token behavior.
-- Exact bad-debt, interest-auction, and waterfall entry points that invoke the
-  committed-loss and unresolved-bad-debt record transitions.
+- Exact bad-debt handoff and fill, interest-auction, and loss-settlement entry
+  points that invoke the remaining committed-loss and unresolved-bad-debt
+  transitions.
 - Exact take-rate accrual integration and distribution cadence.
 - Post-migration designated token.
 - Top-level BLND split between backstop depositors and pool supply/borrow
@@ -1325,15 +1345,16 @@ action predicate, immutable lending and reserve configuration, the six
 non-auction v2 request types, v2-compatible reserve interest and share
 accounting, fail-closed oracle-valued health checks, v2-compatible
 user-liquidation creation and fills with an explicit pre-waterfall bad-debt
-boundary, and a fail-closed pool callback derived directly from three bounded
-canonical record maps. The local runner deploys independently issued assets, a
+boundary, pool-authorized preparation of one strict three-tier bad-debt lot,
+and a fail-closed pool callback derived from bounded canonical loss records.
+The local runner deploys independently issued assets, a
 coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
-local run, the public-testnet exercise, bad-debt and interest-auction entry
-points, the multi-tier waterfall transitions, a production LP valuation source,
-take-rate realization, and ongoing BLND-emission accrual remain intentionally
-unimplemented.
+local run, the public-testnet exercise, bad-debt handoff and auction fills,
+interest auctions, the multi-tier settlement transitions, a production LP
+valuation source, take-rate realization, and ongoing BLND-emission accrual
+remain intentionally unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

@@ -1,13 +1,13 @@
-use soroban_sdk::{contractevent, contracttype, panic_with_error, Address, Env, Map, Vec};
+use soroban_sdk::{contractevent, contracttype, panic_with_error, Address, BytesN, Env, Map, Vec};
 
 use crate::{
-    get_backstop,
+    get_backstop, get_backstop_liability,
     lending::{
         checked_add, checked_sub_nonnegative, config, mul_div_ceil, mul_div_floor,
         position_data_with_prices, positions, reserve_config, set_positions, Positions, PriceQuote,
         SCALAR_7,
     },
-    PoolError,
+    BackstopClient, PoolError,
 };
 
 pub const ACTION_FILL_USER_LIQUIDATION: u32 = 6;
@@ -31,6 +31,39 @@ pub struct AuctionData {
     pub lot: Map<Address, i128>,
     /// Ledger on which fills may begin.
     pub block: u32,
+}
+
+/// Token base units selected from the fixed backstop waterfall.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct TierAssetAmounts {
+    pub blnd_usdc: i128,
+    pub blnd_xlm: i128,
+    pub usdc: i128,
+}
+
+/// Canonical lot quote returned by the configured backstop.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BadDebtLotQuote {
+    pub committed_value: i128,
+    pub debt_value: i128,
+    pub lot: TierAssetAmounts,
+    pub unfilled_target_value: i128,
+    pub target_value: i128,
+    pub valid_until: u64,
+}
+
+/// Prepared bad-debt auction data. No fill path is exposed yet.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BadDebtAuctionData {
+    pub auction_id: BytesN<32>,
+    /// dToken shares a future filler will assume, keyed by reserve asset.
+    pub bid: Map<Address, i128>,
+    /// Ledger on which a future fill may begin.
+    pub block: u32,
+    pub lot_quote: BadDebtLotQuote,
 }
 
 #[contractevent]
@@ -57,10 +90,138 @@ pub struct AuctionDeleted {
     pub user: Address,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BadDebtAuctionCreated {
+    pub auction: BadDebtAuctionData,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BadDebtAuctionDeleted {
+    pub auction_id: BytesN<32>,
+    pub stale: bool,
+}
+
 #[derive(Clone)]
 #[contracttype]
 enum AuctionDataKey {
     UserLiquidation(Address),
+    BadDebt,
+}
+
+pub(crate) fn create_bad_debt_auction(
+    env: &Env,
+    auction_id: &BytesN<32>,
+    bid: &Vec<Address>,
+) -> BadDebtAuctionData {
+    if has_bad_debt_auction(env) {
+        panic_with_error!(env, PoolError::AuctionInProgress);
+    }
+    if bid.is_empty() || bid.len() >= config(env).max_positions {
+        panic_with_error!(env, PoolError::InvalidAuctionBid);
+    }
+    require_unique_addresses(env, bid);
+
+    let backstop = get_backstop(env);
+    let backstop_positions = positions(env, &backstop);
+    let mut included = Positions::empty(env);
+    let mut bid_amounts = Map::new(env);
+    for asset in bid {
+        let reserve = reserve_config(env, &asset);
+        let amount = backstop_positions
+            .liabilities
+            .get(reserve.index)
+            .unwrap_or(0);
+        if amount <= 0 {
+            panic_with_error!(env, PoolError::InvalidAuctionBid);
+        }
+        if get_backstop_liability(env, &asset) != amount {
+            panic_with_error!(env, PoolError::InvalidAuctionBid);
+        }
+        included.liabilities.set(reserve.index, amount);
+        bid_amounts.set(asset, amount);
+    }
+    let mut prices = Map::new(env);
+    let debt_data = position_data_with_prices(env, &included, &mut prices);
+    let debt_value = mul_div_ceil(
+        env,
+        debt_data.raw_liability_base,
+        SCALAR_7,
+        debt_data.scalar,
+    );
+    if debt_value <= 0 {
+        panic_with_error!(env, PoolError::InvalidAuctionBid);
+    }
+
+    let pool = env.current_contract_address();
+    let lot_quote =
+        BackstopClient::new(env, &backstop).commit_bad_debt_lot(&pool, auction_id, &debt_value);
+    if lot_quote.debt_value != debt_value
+        || lot_quote.committed_value <= 0
+        || lot_quote.valid_until < env.ledger().timestamp()
+    {
+        panic_with_error!(env, PoolError::InvalidAuctionLot);
+    }
+    let block = env
+        .ledger()
+        .sequence()
+        .checked_add(1)
+        .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError));
+    let auction = BadDebtAuctionData {
+        auction_id: auction_id.clone(),
+        bid: bid_amounts,
+        block,
+        lot_quote,
+    };
+    set_bad_debt_auction(env, &auction);
+    BadDebtAuctionCreated {
+        auction: auction.clone(),
+    }
+    .publish(env);
+    auction
+}
+
+pub(crate) fn get_bad_debt_auction(env: &Env) -> BadDebtAuctionData {
+    env.storage()
+        .temporary()
+        .get(&AuctionDataKey::BadDebt)
+        .unwrap_or_else(|| panic_with_error!(env, PoolError::AuctionNotFound))
+}
+
+pub(crate) fn delete_stale_bad_debt_auction(env: &Env) {
+    let auction = get_bad_debt_auction(env);
+    let stale_at = auction
+        .block
+        .checked_add(AUCTION_STALE_LEDGERS)
+        .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError));
+    if env.ledger().sequence() < stale_at {
+        panic_with_error!(env, PoolError::AuctionNotStale);
+    }
+    let backstop = get_backstop(env);
+    BackstopClient::new(env, &backstop)
+        .release_bad_debt_lot(&env.current_contract_address(), &auction.auction_id);
+    env.storage().temporary().remove(&AuctionDataKey::BadDebt);
+    BadDebtAuctionDeleted {
+        auction_id: auction.auction_id,
+        stale: true,
+    }
+    .publish(env);
+}
+
+pub(crate) fn has_bad_debt_auction(env: &Env) -> bool {
+    env.storage().temporary().has(&AuctionDataKey::BadDebt)
+}
+
+fn set_bad_debt_auction(env: &Env, auction: &BadDebtAuctionData) {
+    env.storage()
+        .temporary()
+        .set(&AuctionDataKey::BadDebt, auction);
+    env.storage().temporary().extend_ttl(
+        &AuctionDataKey::BadDebt,
+        AUCTION_TTL_THRESHOLD,
+        AUCTION_TTL_BUMP,
+    );
 }
 
 pub(crate) fn create_user_liquidation(
@@ -493,6 +654,13 @@ pub(crate) fn user_liquidation_ttl(env: &Env, user: &Address) -> u32 {
     use soroban_sdk::testutils::storage::Temporary as _;
 
     env.storage().temporary().get_ttl(&auction_key(user))
+}
+
+#[cfg(test)]
+pub(crate) fn bad_debt_auction_ttl(env: &Env) -> u32 {
+    use soroban_sdk::testutils::storage::Temporary as _;
+
+    env.storage().temporary().get_ttl(&AuctionDataKey::BadDebt)
 }
 
 #[cfg(test)]

@@ -125,13 +125,16 @@ The v3 tests must verify:
 - Missing canonical pool loss records fail closed.
 - Each canonical loss-record map is bounded to 30 entries. Reserve-keyed
   amounts reject negatives, remove zeroes, and preserve their count on
-  replacement; committed-loss auctions use presence-only identifiers.
+  replacement; general committed-loss auctions use presence-only identifiers.
+- The one prepared bad-debt auction contributes one committed-loss count from
+  its canonical singleton record without duplicating its identifier in the
+  general committed-loss map.
 - A failed multi-record loss transition rolls back every record change.
 - Canonical loss-state mutation has no administrator or governance override and
   is not exposed as a public boolean setter.
-- Once the lending, auction, and waterfall engines are implemented, native and
-  WASM tests MUST prove each real record transition updates the corresponding
-  aggregate count atomically and blocks withdrawals until resolution.
+- Native and WASM tests MUST prove each implemented lending, auction, and
+  waterfall transition updates the corresponding aggregate count atomically
+  and blocks withdrawals until resolution.
 - BLND:USDC migration deposits and the BLND:USDC first-loss tier use the same
   token contract, user shares, pool totals, and global totals.
 - BLND:USDC shares continue across migration without conversion, reissuance, or
@@ -363,6 +366,23 @@ The v3 tests must verify:
 
 The v3 tests must verify:
 
+- Bad-debt auction preparation accepts only canonical liabilities already
+  assigned to the configured backstop and permits at most one active bad-debt
+  auction per pool.
+- Only the registered pool contract can commit or release its bad-debt lot;
+  direct user calls fail authorization.
+- The prepared lot targets 120% of the pool's oracle-valued debt, normalized
+  to seven-decimal USDC.
+- Lot construction consumes uncommitted capital in strict BLND:USDC LP,
+  BLND:XLM LP, then plain-USDC order and rounds a partially selected final
+  tier's asset amount up so it does not underfill the remaining target.
+- A commitment is pool-local, changes neither shares nor exchange rates, and
+  is excluded from activation value and subsequent bad-debt quotes.
+- The pool auction and backstop commitment have identical fixed 46-day
+  temporary lifetimes, and reads renew neither entry.
+- Any caller may delete a prepared auction at, but not before, 500 ledgers,
+  atomically releasing its backstop lot. The canonical liability remains and
+  continues to block withdrawal until the debt is resolved.
 - BLND:USDC LP absorbs losses before BLND:XLM LP.
 - BLND:XLM LP absorbs losses only after eligible BLND:USDC LP is exhausted.
 - Plain USDC absorbs losses only after both LP tiers are exhausted.

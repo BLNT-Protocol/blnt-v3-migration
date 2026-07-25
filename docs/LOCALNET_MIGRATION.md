@@ -19,8 +19,16 @@ reproduce Comet pricing or liquidity behavior.
 
 The runner also deploys a test-only immutable valuation adapter. It values
 each configured LP token one-for-one in both USDC and underlying BLND so the
-canonical valuation call path can be exercised deterministically. This
-fixture is not an oracle and MUST NOT be used as a production pricing source.
+canonical valuation call path can be exercised deterministically, and exposes
+the same one-USDC fixture price through the lending-oracle interface. This
+fixture is not a production oracle and MUST NOT be used as a production pricing
+source.
+
+The migration runner deploys its registered pool with an empty immutable
+reserve list because this lane tests migration operations rather than lending.
+Optimized-WASM compatibility tests separately deploy a configured two-reserve
+pool and exercise supply, collateral supply, borrow, health, and status
+enforcement.
 
 The classic-asset issuer/operator and candidate depositor use separate local
 identities. The runner creates the depositor's `BLNDUSDC` trustline explicitly

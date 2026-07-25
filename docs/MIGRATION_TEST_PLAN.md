@@ -268,6 +268,45 @@ The v3 tests must verify:
 - Pool-status enforcement and BLND reward eligibility use the same canonical
   result.
 
+## Initial lending core
+
+The v3 tests must verify:
+
+- Factory deployment fixes the complete pool and ordered reserve configuration;
+  no operator or other post-deployment entry point can mutate it.
+- Supply, withdraw, collateral supply, collateral withdraw, borrow, and repay
+  execute against native and optimized pool WASM.
+- Every request enforces the stored status before changing reserve or position
+  accounting. On-Ice rejects borrow; Frozen rejects supply and collateral
+  supply while repayment and ordinary safe withdrawals remain available.
+- `spender` authorization is always required, and a distinct position owner
+  must also authorize. No pure debt-reduction exception permits
+  unauthenticated repay-on-behalf.
+- bToken minting rounds down, bToken withdrawal burns round up, dToken borrowing
+  rounds up, and partial dToken repayment rounds down.
+- Repayment at or above live debt clears the complete position and returns the
+  exact excess token input to `to`.
+- The adaptive interest curve matches inherited v2 reference vectors, increases
+  dRate, allocates the immutable take-rate portion to accrued backstop credit,
+  and allocates the remainder through bRate.
+- Health calculation rounds collateral down and liabilities up, rejects a
+  result below 1.00001 or below minimum effective collateral, and fails closed
+  for nonpositive, expired, or wrong-decimal oracle quotes.
+- Disabled reserves, supply caps, maximum utilization, maximum positions,
+  request-count bounds, unknown reserves, invalid constructor configuration,
+  and arithmetic overflow fail atomically.
+- A failed health, status, authorization, price, token transfer, or arithmetic
+  check leaves token balances, reserve state, user positions, loss records, and
+  events unchanged.
+- Every successful submission matches the exact expected pool token-balance
+  delta for each touched reserve; fee-on-transfer or other in-call balance
+  mismatches roll back.
+- Borrow and repay by the configured backstop atomically create and clear its
+  canonical reserve-liability record, changing withdrawal eligibility without
+  combining units across reserves.
+- Persistent reserve and user entries renew their TTL within the documented
+  bounds.
+
 ## Loss waterfall
 
 The v3 tests must verify:

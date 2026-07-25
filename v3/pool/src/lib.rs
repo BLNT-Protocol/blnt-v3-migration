@@ -1,8 +1,16 @@
 #![no_std]
 
+mod lending;
+
+pub use lending::{
+    LendingAction, LendingConfig, PositionHealth, Positions, PriceQuote, Request, Reserve,
+    ReserveConfig, ReserveData, ACTION_BORROW, ACTION_REPAY, ACTION_SUPPLY,
+    ACTION_SUPPLY_COLLATERAL, ACTION_WITHDRAW, ACTION_WITHDRAW_COLLATERAL,
+};
+
 use soroban_sdk::{
     contract, contractclient, contracterror, contractevent, contractimpl, contracttype,
-    panic_with_error, Address, BytesN, Env, Map,
+    panic_with_error, Address, BytesN, Env, Map, Vec,
 };
 
 const DAY_IN_LEDGERS: u32 = 17_280;
@@ -10,9 +18,6 @@ const INSTANCE_TTL_THRESHOLD: u32 = 89 * DAY_IN_LEDGERS;
 const INSTANCE_TTL_BUMP: u32 = 90 * DAY_IN_LEDGERS;
 const MAX_LOSS_RECORDS_PER_KIND: u32 = 30;
 const STATUS_SETUP: u32 = 6;
-const ACTION_SUPPLY: u32 = 0;
-const ACTION_SUPPLY_COLLATERAL: u32 = 2;
-const ACTION_BORROW: u32 = 4;
 const ACTION_DELETE_LIQUIDATION: u32 = 9;
 const MAX_ACTION_TYPE: u32 = ACTION_DELETE_LIQUIDATION;
 
@@ -34,6 +39,20 @@ pub enum PoolError {
     StatusTransitionNotAllowed = 1302,
     InvalidPoolStatus = 1303,
     InvalidAction = 1304,
+    InvalidLendingConfig = 1305,
+    InvalidReserveConfig = 1306,
+    TooManyReserves = 1307,
+    UnknownReserve = 1308,
+    ReserveDisabled = 1309,
+    SupplyCapExceeded = 1310,
+    InvalidUtilization = 1311,
+    TooManyPositions = 1312,
+    InvalidHealthFactor = 1313,
+    MinimumCollateralNotMet = 1314,
+    InvalidPrice = 1315,
+    ArithmeticError = 1316,
+    BadRequest = 1317,
+    InvalidTokenBalance = 1318,
 }
 
 /// Canonical status result returned by the configured backstop.
@@ -104,7 +123,13 @@ pub struct PoolContract;
 
 #[contractimpl]
 impl PoolContract {
-    pub fn __constructor(env: Env, backstop: Address, operator: Address) {
+    pub fn __constructor(
+        env: Env,
+        backstop: Address,
+        operator: Address,
+        lending_config: LendingConfig,
+        reserves: Vec<ReserveConfig>,
+    ) {
         extend_instance_ttl(&env);
         env.storage().instance().set(&DataKey::Backstop, &backstop);
         env.storage().instance().set(&DataKey::Operator, &operator);
@@ -114,6 +139,7 @@ impl PoolContract {
         env.storage()
             .instance()
             .set(&DataKey::LossRecords, &empty_loss_records(&env));
+        lending::initialize(&env, &lending_config, &reserves);
     }
 
     pub fn backstop(env: Env) -> Address {
@@ -160,12 +186,54 @@ impl PoolContract {
 
     /// Return whether the stored status permits one v2 request type.
     ///
-    /// Future lending and auction entry points must call the same internal
-    /// predicate before performing their accounting transition.
+    /// Implemented lending and future auction entry points use the same
+    /// internal predicate before performing an accounting transition.
     pub fn action_allowed(env: Env, action_type: u32) -> bool {
         extend_instance_ttl(&env);
         require_valid_action(&env, action_type);
         action_allowed_for_status(get_status(&env), action_type)
+    }
+
+    /// Return immutable pool-level lending configuration.
+    pub fn lending_config(env: Env) -> LendingConfig {
+        extend_instance_ttl(&env);
+        lending::config(&env)
+    }
+
+    /// Return the immutable reserve list in reserve-index order.
+    pub fn reserve_list(env: Env) -> Vec<Address> {
+        extend_instance_ttl(&env);
+        lending::reserve_list(&env)
+    }
+
+    /// Return one reserve with interest accrued through the current timestamp.
+    pub fn reserve(env: Env, asset: Address) -> Reserve {
+        extend_instance_ttl(&env);
+        lending::reserve(&env, &asset)
+    }
+
+    /// Return one account's stored supply, collateral, and liability shares.
+    pub fn positions(env: Env, user: Address) -> Positions {
+        extend_instance_ttl(&env);
+        lending::positions(&env, &user)
+    }
+
+    /// Return one account's current oracle-valued health result.
+    pub fn position_health(env: Env, user: Address) -> PositionHealth {
+        extend_instance_ttl(&env);
+        lending::health(&env, &user)
+    }
+
+    /// Execute an atomic v2-compatible set of non-auction lending requests.
+    pub fn submit(
+        env: Env,
+        from: Address,
+        spender: Address,
+        to: Address,
+        requests: Vec<Request>,
+    ) -> Positions {
+        extend_instance_ttl(&env);
+        lending::submit(&env, &from, &spender, &to, requests)
     }
 
     /// Return counts derived from the canonical nonzero loss records.
@@ -236,7 +304,6 @@ fn action_allowed_for_status(status: u32, action_type: u32) -> bool {
             && (action_type == ACTION_SUPPLY || action_type == ACTION_SUPPLY_COLLATERAL)))
 }
 
-#[allow(dead_code)]
 fn require_action_allowed(env: &Env, status: u32, action_type: u32) {
     require_valid_action(env, action_type);
     if !action_allowed_for_status(status, action_type) {
@@ -359,18 +426,37 @@ mod tests {
     use super::*;
     use soroban_sdk::{
         contract, contractimpl,
-        testutils::{Address as _, Events, MockAuth, MockAuthInvoke},
-        IntoVal,
+        testutils::{Address as _, Events, Ledger, MockAuth, MockAuthInvoke},
+        token::{StellarAssetClient, TokenClient},
+        vec, IntoVal,
     };
 
     #[contract]
     struct MockBackstop;
+
+    #[contract]
+    struct MockPriceOracle;
+
+    #[contract]
+    struct MockFeeToken;
 
     #[derive(Clone)]
     #[contracttype]
     enum MockBackstopKey {
         SetQuote,
         UpdateQuote,
+    }
+
+    #[derive(Clone)]
+    #[contracttype]
+    enum MockOracleKey {
+        Price(Address),
+    }
+
+    #[derive(Clone)]
+    #[contracttype]
+    enum MockFeeTokenKey {
+        Balance(Address),
     }
 
     #[contractimpl]
@@ -411,6 +497,53 @@ mod tests {
         }
     }
 
+    #[contractimpl]
+    impl MockPriceOracle {
+        pub fn set_price(env: Env, asset: Address, quote: PriceQuote) {
+            env.storage()
+                .instance()
+                .set(&MockOracleKey::Price(asset), &quote);
+        }
+
+        pub fn price(env: Env, asset: Address) -> PriceQuote {
+            env.storage()
+                .instance()
+                .get(&MockOracleKey::Price(asset))
+                .unwrap()
+        }
+    }
+
+    #[contractimpl]
+    impl MockFeeToken {
+        pub fn mint(env: Env, to: Address, amount: i128) {
+            let key = MockFeeTokenKey::Balance(to);
+            let balance: i128 = env.storage().instance().get(&key).unwrap_or(0);
+            env.storage().instance().set(&key, &(balance + amount));
+        }
+
+        pub fn balance(env: Env, id: Address) -> i128 {
+            env.storage()
+                .instance()
+                .get(&MockFeeTokenKey::Balance(id))
+                .unwrap_or(0)
+        }
+
+        pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+            from.require_auth();
+            let from_key = MockFeeTokenKey::Balance(from);
+            let to_key = MockFeeTokenKey::Balance(to);
+            let from_balance: i128 = env.storage().instance().get(&from_key).unwrap_or(0);
+            assert!(amount > 1 && from_balance >= amount);
+            let to_balance: i128 = env.storage().instance().get(&to_key).unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&from_key, &(from_balance - amount));
+            env.storage()
+                .instance()
+                .set(&to_key, &(to_balance + amount - 1));
+        }
+    }
+
     fn status_quote(status: u32, transition_allowed: bool) -> PoolStatusQuote {
         PoolStatusQuote {
             eligible_value: 12_500 * 10_000_000,
@@ -422,13 +555,82 @@ mod tests {
         }
     }
 
+    fn register_pool(env: &Env, backstop: &Address, operator: &Address) -> Address {
+        let lending_config = LendingConfig {
+            backstop_take_rate: 0,
+            max_positions: 4,
+            min_collateral: 0,
+            oracle: Address::generate(env),
+            price_decimals: 7,
+        };
+        env.register(
+            PoolContract,
+            (
+                backstop,
+                operator,
+                &lending_config,
+                Vec::<ReserveConfig>::new(env),
+            ),
+        )
+    }
+
+    fn reserve_config(asset: &Address, index: u32) -> ReserveConfig {
+        ReserveConfig {
+            asset: asset.clone(),
+            c_factor: 8_000_000,
+            decimals: 7,
+            enabled: true,
+            index,
+            l_factor: 9_000_000,
+            max_util: 9_500_000,
+            r_base: 100_000,
+            r_one: 500_000,
+            r_three: 15_000_000,
+            r_two: 5_000_000,
+            reactivity: 20,
+            supply_cap: 1_000_000_000_000_000,
+            util: 7_500_000,
+        }
+    }
+
+    fn register_lending_pool(
+        env: &Env,
+        backstop: &Address,
+        operator: &Address,
+        oracle: &Address,
+        assets: &Vec<Address>,
+    ) -> Address {
+        let lending_config = LendingConfig {
+            backstop_take_rate: 2_000_000,
+            max_positions: 6,
+            min_collateral: 10_000_000,
+            oracle: oracle.clone(),
+            price_decimals: 7,
+        };
+        let mut reserves = Vec::new(env);
+        for (index, asset) in assets.iter().enumerate() {
+            reserves.push_back(reserve_config(&asset, index as u32));
+        }
+        register_custom_lending_pool(env, backstop, operator, &lending_config, &reserves)
+    }
+
+    fn register_custom_lending_pool(
+        env: &Env,
+        backstop: &Address,
+        operator: &Address,
+        lending_config: &LendingConfig,
+        reserves: &Vec<ReserveConfig>,
+    ) -> Address {
+        env.register(PoolContract, (backstop, operator, lending_config, reserves))
+    }
+
     #[test]
     fn stores_immutable_status_configuration_and_applies_canonical_quotes() {
         let env = Env::default();
         let backstop_id = env.register(MockBackstop, ());
         let backstop = MockBackstopClient::new(&env, &backstop_id);
         let operator = Address::generate(&env);
-        let pool_id = env.register(PoolContract, (&backstop_id, &operator));
+        let pool_id = register_pool(&env, &backstop_id, &operator);
         let pool = PoolContractClient::new(&env, &pool_id);
 
         assert_eq!(pool.backstop(), backstop_id);
@@ -460,7 +662,7 @@ mod tests {
         let backstop_id = env.register(MockBackstop, ());
         let backstop = MockBackstopClient::new(&env, &backstop_id);
         let operator = Address::generate(&env);
-        let pool_id = env.register(PoolContract, (&backstop_id, &operator));
+        let pool_id = register_pool(&env, &backstop_id, &operator);
         let pool = PoolContractClient::new(&env, &pool_id);
         backstop.set_set_quote(&status_quote(0, true));
 
@@ -488,7 +690,7 @@ mod tests {
         let env = Env::default();
         let backstop_id = env.register(MockBackstop, ());
         let operator = Address::generate(&env);
-        let pool_id = env.register(PoolContract, (&backstop_id, &operator));
+        let pool_id = register_pool(&env, &backstop_id, &operator);
         let pool = PoolContractClient::new(&env, &pool_id);
 
         env.as_contract(&pool_id, || {
@@ -524,12 +726,706 @@ mod tests {
     }
 
     #[test]
+    fn lending_core_executes_atomic_supply_borrow_repay_and_withdraw() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        env.ledger().set_timestamp(1_000);
+
+        let token_admin = Address::generate(&env);
+        let collateral_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let borrowed_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let collateral_admin = StellarAssetClient::new(&env, &collateral_asset);
+        let borrowed_admin = StellarAssetClient::new(&env, &borrowed_asset);
+        let collateral_token = TokenClient::new(&env, &collateral_asset);
+        let borrowed_token = TokenClient::new(&env, &borrowed_asset);
+
+        let oracle_id = env.register(MockPriceOracle, ());
+        let oracle = MockPriceOracleClient::new(&env, &oracle_id);
+        oracle.set_price(
+            &collateral_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: 20_000_000,
+                valid_until: u64::MAX,
+            },
+        );
+        oracle.set_price(
+            &borrowed_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: 10_000_000,
+                valid_until: u64::MAX,
+            },
+        );
+
+        let backstop = Address::generate(&env);
+        let operator = Address::generate(&env);
+        let pool_id = register_lending_pool(
+            &env,
+            &backstop,
+            &operator,
+            &oracle_id,
+            &vec![&env, collateral_asset.clone(), borrowed_asset.clone()],
+        );
+        let pool = PoolContractClient::new(&env, &pool_id);
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+
+        let liquidity_provider = Address::generate(&env);
+        let borrower = backstop.clone();
+        borrowed_admin.mint(&liquidity_provider, &1_000_000_000);
+        collateral_admin.mint(&borrower, &1_000_000_000);
+        borrowed_admin.mint(&borrower, &250_000_000);
+
+        pool.submit(
+            &liquidity_provider,
+            &liquidity_provider,
+            &liquidity_provider,
+            &vec![
+                &env,
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 1_000_000_000,
+                    request_type: lending::ACTION_SUPPLY,
+                },
+            ],
+        );
+        let opened = pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &vec![
+                &env,
+                Request {
+                    address: collateral_asset.clone(),
+                    amount: 1_000_000_000,
+                    request_type: lending::ACTION_SUPPLY_COLLATERAL,
+                },
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 200_000_000,
+                    request_type: lending::ACTION_BORROW,
+                },
+            ],
+        );
+        assert_eq!(opened.collateral.get(0), Some(1_000_000_000));
+        assert_eq!(opened.liabilities.get(1), Some(200_000_000));
+        assert_eq!(borrowed_token.balance(&borrower), 450_000_000);
+        assert_eq!(
+            pool.position_health(&borrower),
+            PositionHealth {
+                collateral_base: 1_600_000_000,
+                healthy: true,
+                liability_base: 222_222_223,
+                raw_collateral_base: 2_000_000_000,
+            }
+        );
+        assert_eq!(pool.backstop_loss_state().liability_entries, 1);
+        assert!(!pool.backstop_withdrawal_allowed(&backstop));
+
+        let repaid = pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &vec![
+                &env,
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 250_000_000,
+                    request_type: lending::ACTION_REPAY,
+                },
+            ],
+        );
+        assert!(repaid.liabilities.is_empty());
+        assert_eq!(borrowed_token.balance(&borrower), 250_000_000);
+        assert_eq!(pool.backstop_loss_state().liability_entries, 0);
+        assert!(pool.backstop_withdrawal_allowed(&backstop));
+
+        let closed = pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &vec![
+                &env,
+                Request {
+                    address: collateral_asset.clone(),
+                    amount: 1_000_000_000,
+                    request_type: lending::ACTION_WITHDRAW_COLLATERAL,
+                },
+            ],
+        );
+        assert!(closed.collateral.is_empty());
+        assert_eq!(collateral_token.balance(&borrower), 1_000_000_000);
+
+        let remaining_supply = pool.submit(
+            &liquidity_provider,
+            &liquidity_provider,
+            &liquidity_provider,
+            &vec![
+                &env,
+                Request {
+                    address: borrowed_asset,
+                    amount: 500_000_000,
+                    request_type: lending::ACTION_WITHDRAW,
+                },
+            ],
+        );
+        assert_eq!(remaining_supply.supply.get(1), Some(500_000_000));
+        assert_eq!(borrowed_token.balance(&liquidity_provider), 500_000_000);
+        assert_eq!(pool.reserve_list().len(), 2);
+        assert_eq!(pool.lending_config().oracle, oracle_id);
+    }
+
+    #[test]
+    fn lending_core_enforces_status_auth_health_prices_and_interest() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_000);
+        let token_admin = Address::generate(&env);
+        let collateral_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let borrowed_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let collateral_admin = StellarAssetClient::new(&env, &collateral_asset);
+        let borrowed_admin = StellarAssetClient::new(&env, &borrowed_asset);
+        let oracle_id = env.register(MockPriceOracle, ());
+        let oracle = MockPriceOracleClient::new(&env, &oracle_id);
+        env.mock_all_auths_allowing_non_root_auth();
+        for asset in [collateral_asset.clone(), borrowed_asset.clone()] {
+            oracle.set_price(
+                &asset,
+                &PriceQuote {
+                    decimals: 7,
+                    price: 10_000_000,
+                    valid_until: u64::MAX,
+                },
+            );
+        }
+        let backstop = Address::generate(&env);
+        let operator = Address::generate(&env);
+        let pool_id = register_lending_pool(
+            &env,
+            &backstop,
+            &operator,
+            &oracle_id,
+            &vec![&env, collateral_asset.clone(), borrowed_asset.clone()],
+        );
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let supplier = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        borrowed_admin.mint(&supplier, &1_000_000_000);
+        collateral_admin.mint(&borrower, &1_000_000_000);
+
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        pool.submit(
+            &supplier,
+            &supplier,
+            &supplier,
+            &vec![
+                &env,
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 1_000_000_000,
+                    request_type: lending::ACTION_SUPPLY,
+                },
+            ],
+        );
+        pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &vec![
+                &env,
+                Request {
+                    address: collateral_asset.clone(),
+                    amount: 1_000_000_000,
+                    request_type: lending::ACTION_SUPPLY_COLLATERAL,
+                },
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 100_000_000,
+                    request_type: lending::ACTION_BORROW,
+                },
+            ],
+        );
+
+        env.ledger().set_timestamp(1_000 + 31_536_000);
+        let accrued = pool.reserve(&borrowed_asset);
+        assert!(accrued.data.d_rate > lending::SCALAR_12);
+        assert!(accrued.data.b_rate > lending::SCALAR_12);
+        assert!(accrued.data.backstop_credit > 0);
+
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &3_u32);
+        });
+        assert!(pool
+            .try_submit(
+                &borrower,
+                &borrower,
+                &borrower,
+                &vec![
+                    &env,
+                    Request {
+                        address: borrowed_asset.clone(),
+                        amount: 1,
+                        request_type: lending::ACTION_BORROW,
+                    }
+                ],
+            )
+            .is_err());
+
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        let before_failed_health = pool.positions(&borrower);
+        for invalid_quote in [
+            PriceQuote {
+                decimals: 7,
+                price: 10_000_000,
+                valid_until: env.ledger().timestamp() - 1,
+            },
+            PriceQuote {
+                decimals: 6,
+                price: 10_000_000,
+                valid_until: u64::MAX,
+            },
+            PriceQuote {
+                decimals: 7,
+                price: 0,
+                valid_until: u64::MAX,
+            },
+        ] {
+            oracle.set_price(&collateral_asset, &invalid_quote);
+            assert!(pool
+                .try_submit(
+                    &borrower,
+                    &borrower,
+                    &borrower,
+                    &vec![
+                        &env,
+                        Request {
+                            address: collateral_asset.clone(),
+                            amount: 1,
+                            request_type: lending::ACTION_WITHDRAW_COLLATERAL,
+                        }
+                    ],
+                )
+                .is_err());
+            assert_eq!(pool.positions(&borrower), before_failed_health);
+        }
+        oracle.set_price(
+            &collateral_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: 1,
+                valid_until: u64::MAX,
+            },
+        );
+        assert!(pool
+            .try_submit(
+                &borrower,
+                &borrower,
+                &borrower,
+                &vec![
+                    &env,
+                    Request {
+                        address: collateral_asset.clone(),
+                        amount: 1,
+                        request_type: lending::ACTION_WITHDRAW_COLLATERAL,
+                    }
+                ],
+            )
+            .is_err());
+
+        assert_eq!(pool.status(), 1);
+    }
+
+    #[test]
+    fn lending_submit_requires_spender_and_position_owner_authorization() {
+        let env = Env::default();
+        let backstop = Address::generate(&env);
+        let operator = Address::generate(&env);
+        let pool_id = register_pool(&env, &backstop, &operator);
+        let pool = PoolContractClient::new(&env, &pool_id);
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        let from = Address::generate(&env);
+        let spender = Address::generate(&env);
+        let to = Address::generate(&env);
+        let requests = vec![
+            &env,
+            Request {
+                address: Address::generate(&env),
+                amount: 1,
+                request_type: lending::ACTION_SUPPLY,
+            },
+        ];
+
+        assert!(pool.try_submit(&from, &spender, &to, &requests).is_err());
+        assert!(pool
+            .mock_auths(&[MockAuth {
+                address: &spender,
+                invoke: &MockAuthInvoke {
+                    contract: &pool_id,
+                    fn_name: "submit",
+                    args: (&from, &spender, &to, requests.clone()).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_submit(&from, &spender, &to, &requests)
+            .is_err());
+    }
+
+    #[test]
+    fn lending_failures_roll_back_caps_transfers_and_disabled_reserves() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let token_admin = Address::generate(&env);
+        let asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let asset_admin = StellarAssetClient::new(&env, &asset);
+        let asset_token = TokenClient::new(&env, &asset);
+        let oracle_id = env.register(MockPriceOracle, ());
+        MockPriceOracleClient::new(&env, &oracle_id).set_price(
+            &asset,
+            &PriceQuote {
+                decimals: 7,
+                price: 10_000_000,
+                valid_until: u64::MAX,
+            },
+        );
+        let backstop = Address::generate(&env);
+        let operator = Address::generate(&env);
+        let lending_config = LendingConfig {
+            backstop_take_rate: 0,
+            max_positions: 2,
+            min_collateral: 0,
+            oracle: oracle_id,
+            price_decimals: 7,
+        };
+        let mut capped_reserve = reserve_config(&asset, 0);
+        capped_reserve.supply_cap = 50 * lending::SCALAR_7;
+        let capped_pool_id = register_custom_lending_pool(
+            &env,
+            &backstop,
+            &operator,
+            &lending_config,
+            &vec![&env, capped_reserve],
+        );
+        let capped_pool = PoolContractClient::new(&env, &capped_pool_id);
+        env.as_contract(&capped_pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        let user = Address::generate(&env);
+        asset_admin.mint(&user, &(100 * lending::SCALAR_7));
+        assert!(capped_pool
+            .try_submit(
+                &user,
+                &user,
+                &user,
+                &vec![
+                    &env,
+                    Request {
+                        address: asset.clone(),
+                        amount: 60 * lending::SCALAR_7,
+                        request_type: lending::ACTION_SUPPLY,
+                    }
+                ],
+            )
+            .is_err());
+        assert_eq!(asset_token.balance(&user), 100 * lending::SCALAR_7);
+        assert_eq!(asset_token.balance(&capped_pool_id), 0);
+        assert!(capped_pool.positions(&user).supply.is_empty());
+        assert_eq!(capped_pool.reserve(&asset).data.b_supply, 0);
+        assert_eq!(env.events().all().events().len(), 0);
+
+        let mut enabled_reserve = reserve_config(&asset, 0);
+        enabled_reserve.supply_cap = 1_000 * lending::SCALAR_7;
+        let transfer_pool_id = register_custom_lending_pool(
+            &env,
+            &backstop,
+            &operator,
+            &lending_config,
+            &vec![&env, enabled_reserve],
+        );
+        let transfer_pool = PoolContractClient::new(&env, &transfer_pool_id);
+        env.as_contract(&transfer_pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        assert!(transfer_pool
+            .try_submit(
+                &user,
+                &user,
+                &user,
+                &vec![
+                    &env,
+                    Request {
+                        address: asset.clone(),
+                        amount: 101 * lending::SCALAR_7,
+                        request_type: lending::ACTION_SUPPLY,
+                    }
+                ],
+            )
+            .is_err());
+        assert!(transfer_pool.positions(&user).supply.is_empty());
+        assert_eq!(transfer_pool.reserve(&asset).data.b_supply, 0);
+        let mut too_many_requests = Vec::new(&env);
+        for _ in 0..=60 {
+            too_many_requests.push_back(Request {
+                address: asset.clone(),
+                amount: 1,
+                request_type: lending::ACTION_SUPPLY,
+            });
+        }
+        assert!(transfer_pool
+            .try_submit(&user, &user, &user, &too_many_requests)
+            .is_err());
+        assert!(transfer_pool.positions(&user).supply.is_empty());
+
+        let fee_token_id = env.register(MockFeeToken, ());
+        let fee_token = MockFeeTokenClient::new(&env, &fee_token_id);
+        let fee_pool_id = register_custom_lending_pool(
+            &env,
+            &backstop,
+            &operator,
+            &lending_config,
+            &vec![&env, reserve_config(&fee_token_id, 0)],
+        );
+        let fee_pool = PoolContractClient::new(&env, &fee_pool_id);
+        env.as_contract(&fee_pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        fee_token.mint(&user, &(10 * lending::SCALAR_7));
+        assert!(fee_pool
+            .try_submit(
+                &user,
+                &user,
+                &user,
+                &vec![
+                    &env,
+                    Request {
+                        address: fee_token_id,
+                        amount: 10 * lending::SCALAR_7,
+                        request_type: lending::ACTION_SUPPLY,
+                    }
+                ],
+            )
+            .is_err());
+        assert_eq!(fee_token.balance(&user), 10 * lending::SCALAR_7);
+        assert_eq!(fee_token.balance(&fee_pool_id), 0);
+        assert!(fee_pool.positions(&user).supply.is_empty());
+
+        let mut disabled_reserve = reserve_config(&asset, 0);
+        disabled_reserve.enabled = false;
+        let disabled_pool_id = register_custom_lending_pool(
+            &env,
+            &backstop,
+            &operator,
+            &lending_config,
+            &vec![&env, disabled_reserve],
+        );
+        let disabled_pool = PoolContractClient::new(&env, &disabled_pool_id);
+        env.as_contract(&disabled_pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        assert!(disabled_pool
+            .try_submit(
+                &user,
+                &user,
+                &user,
+                &vec![
+                    &env,
+                    Request {
+                        address: asset,
+                        amount: lending::SCALAR_7,
+                        request_type: lending::ACTION_SUPPLY,
+                    }
+                ],
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn lending_enforces_maximum_utilization_boundary_atomically() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let token_admin = Address::generate(&env);
+        let collateral_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let borrowed_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let collateral_admin = StellarAssetClient::new(&env, &collateral_asset);
+        let borrowed_admin = StellarAssetClient::new(&env, &borrowed_asset);
+        let oracle_id = env.register(MockPriceOracle, ());
+        let oracle = MockPriceOracleClient::new(&env, &oracle_id);
+        oracle.set_price(
+            &collateral_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: 100 * lending::SCALAR_7,
+                valid_until: u64::MAX,
+            },
+        );
+        oracle.set_price(
+            &borrowed_asset,
+            &PriceQuote {
+                decimals: 7,
+                price: lending::SCALAR_7,
+                valid_until: u64::MAX,
+            },
+        );
+        let backstop = Address::generate(&env);
+        let operator = Address::generate(&env);
+        let pool_id = register_lending_pool(
+            &env,
+            &backstop,
+            &operator,
+            &oracle_id,
+            &vec![&env, collateral_asset.clone(), borrowed_asset.clone()],
+        );
+        let pool = PoolContractClient::new(&env, &pool_id);
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        let supplier = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        borrowed_admin.mint(&supplier, &(100 * lending::SCALAR_7));
+        collateral_admin.mint(&borrower, &(10 * lending::SCALAR_7));
+        pool.submit(
+            &supplier,
+            &supplier,
+            &supplier,
+            &vec![
+                &env,
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 100 * lending::SCALAR_7,
+                    request_type: lending::ACTION_SUPPLY,
+                },
+            ],
+        );
+        pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &vec![
+                &env,
+                Request {
+                    address: collateral_asset,
+                    amount: 10 * lending::SCALAR_7,
+                    request_type: lending::ACTION_SUPPLY_COLLATERAL,
+                },
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 95 * lending::SCALAR_7,
+                    request_type: lending::ACTION_BORROW,
+                },
+            ],
+        );
+        let before = pool.positions(&borrower);
+        assert!(pool
+            .try_submit(
+                &borrower,
+                &borrower,
+                &borrower,
+                &vec![
+                    &env,
+                    Request {
+                        address: borrowed_asset,
+                        amount: 1,
+                        request_type: lending::ACTION_BORROW,
+                    }
+                ],
+            )
+            .is_err());
+        assert_eq!(pool.positions(&borrower), before);
+    }
+
+    #[test]
+    fn lending_enforces_maximum_positions_atomically() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let token_admin = Address::generate(&env);
+        let mut assets = Vec::new(&env);
+        for _ in 0..3 {
+            assets.push_back(
+                env.register_stellar_asset_contract_v2(token_admin.clone())
+                    .address(),
+            );
+        }
+        let oracle = Address::generate(&env);
+        let lending_config = LendingConfig {
+            backstop_take_rate: 0,
+            max_positions: 2,
+            min_collateral: 0,
+            oracle,
+            price_decimals: 7,
+        };
+        let mut reserves = Vec::new(&env);
+        for asset in assets.iter() {
+            reserves.push_back(reserve_config(&asset, reserves.len()));
+        }
+        let backstop = Address::generate(&env);
+        let operator = Address::generate(&env);
+        let pool_id =
+            register_custom_lending_pool(&env, &backstop, &operator, &lending_config, &reserves);
+        let pool = PoolContractClient::new(&env, &pool_id);
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        let user = Address::generate(&env);
+        let mut requests = Vec::new(&env);
+        for asset in assets {
+            StellarAssetClient::new(&env, &asset).mint(&user, &lending::SCALAR_7);
+            requests.push_back(Request {
+                address: asset,
+                amount: lending::SCALAR_7,
+                request_type: lending::ACTION_SUPPLY_COLLATERAL,
+            });
+        }
+        assert!(pool.try_submit(&user, &user, &user, &requests).is_err());
+        assert!(pool.positions(&user).collateral.is_empty());
+        for asset in pool.reserve_list() {
+            assert_eq!(TokenClient::new(&env, &asset).balance(&pool_id), 0);
+            assert_eq!(pool.reserve(&asset).data.b_supply, 0);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1305)")]
+    fn lending_constructor_rejects_invalid_immutable_configuration() {
+        let env = Env::default();
+        let backstop = Address::generate(&env);
+        let operator = Address::generate(&env);
+        let lending_config = LendingConfig {
+            backstop_take_rate: 0,
+            max_positions: 1,
+            min_collateral: 0,
+            oracle: Address::generate(&env),
+            price_decimals: 7,
+        };
+        register_custom_lending_pool(&env, &backstop, &operator, &lending_config, &Vec::new(&env));
+    }
+
+    #[test]
     fn withdrawal_gate_tracks_each_canonical_record_kind() {
         let env = Env::default();
         let backstop = Address::generate(&env);
         let operator = Address::generate(&env);
         let other = Address::generate(&env);
-        let pool_id = env.register(PoolContract, (&backstop, &operator));
+        let pool_id = register_pool(&env, &backstop, &operator);
         let pool = PoolContractClient::new(&env, &pool_id);
 
         assert!(pool.backstop_withdrawal_allowed(&backstop));
@@ -589,7 +1485,7 @@ mod tests {
         let env = Env::default();
         let backstop = Address::generate(&env);
         let operator = Address::generate(&env);
-        let pool_id = env.register(PoolContract, (&backstop, &operator));
+        let pool_id = register_pool(&env, &backstop, &operator);
         let pool = PoolContractClient::new(&env, &pool_id);
 
         env.as_contract(&pool_id, || {
@@ -604,7 +1500,7 @@ mod tests {
         let env = Env::default();
         let backstop = Address::generate(&env);
         let operator = Address::generate(&env);
-        let pool_id = env.register(PoolContract, (&backstop, &operator));
+        let pool_id = register_pool(&env, &backstop, &operator);
         let pool = PoolContractClient::new(&env, &pool_id);
         let reserve = Address::generate(&env);
 
@@ -621,7 +1517,7 @@ mod tests {
         let env = Env::default();
         let backstop = Address::generate(&env);
         let operator = Address::generate(&env);
-        let pool_id = env.register(PoolContract, (&backstop, &operator));
+        let pool_id = register_pool(&env, &backstop, &operator);
         let pool = PoolContractClient::new(&env, &pool_id);
         let reserve = Address::generate(&env);
         let auction = BytesN::from_array(&env, &[8; 32]);
@@ -655,7 +1551,7 @@ mod tests {
         let env = Env::default();
         let backstop = Address::generate(&env);
         let operator = Address::generate(&env);
-        let pool_id = env.register(PoolContract, (&backstop, &operator));
+        let pool_id = register_pool(&env, &backstop, &operator);
         let reserve = Address::generate(&env);
 
         env.as_contract(&pool_id, || {
@@ -669,7 +1565,7 @@ mod tests {
         let env = Env::default();
         let backstop = Address::generate(&env);
         let operator = Address::generate(&env);
-        let pool_id = env.register(PoolContract, (&backstop, &operator));
+        let pool_id = register_pool(&env, &backstop, &operator);
 
         env.as_contract(&pool_id, || {
             for _ in 0..MAX_LOSS_RECORDS_PER_KIND {

@@ -14,6 +14,14 @@ pub struct AssetValuation {
     pub valid_until: u64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PriceQuote {
+    pub decimals: u32,
+    pub price: i128,
+    pub valid_until: u64,
+}
+
 #[derive(Clone)]
 #[contracttype]
 enum DataKey {
@@ -59,6 +67,21 @@ impl TestValuationAdapter {
         AssetValuation {
             underlying_blnd: amount,
             usdc_value: amount,
+            valid_until: u64::MAX,
+        }
+    }
+
+    /// Return a deterministic one-USDC lending price for either configured
+    /// fixture asset. This test-only interface is not a production oracle.
+    pub fn price(env: Env, asset: Address) -> PriceQuote {
+        let blnd_usdc: Address = env.storage().instance().get(&DataKey::BlndUsdc).unwrap();
+        let blnd_xlm: Address = env.storage().instance().get(&DataKey::BlndXlm).unwrap();
+        if asset != blnd_usdc && asset != blnd_xlm {
+            panic_with_error!(&env, TestAdapterError::UnsupportedAsset);
+        }
+        PriceQuote {
+            decimals: 7,
+            price: 10_000_000,
             valid_until: u64::MAX,
         }
     }

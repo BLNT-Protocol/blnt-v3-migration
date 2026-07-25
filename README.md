@@ -75,7 +75,9 @@ complete legacy-emitter migration into the v3 candidate on a Protocol-27
 host. The deterministic adapter exercises the immutable valuation boundary;
 it is not a production oracle. The candidate pool persists v2-compatible
 status transitions using that canonical boundary and an immutable pool-local
-operator.
+operator. Its SDK-27 lending core executes the six non-auction v2 request
+types against immutable reserve configuration with checked interest, share,
+health, authorization, and token-transfer accounting.
 
 Run both lanes:
 
@@ -86,7 +88,7 @@ make test-all
 ## Releases
 
 Automated tag-triggered releases are intentionally disabled while the v3
-backstop remains an experimental migration skeleton. Add a v3-specific release
+candidate remains experimental and incomplete. Add a v3-specific release
 workflow only after deployable v3 contract packages and their artifact checks
 exist. The repository must not publish the root SDK-22 contracts as v3
 artifacts.

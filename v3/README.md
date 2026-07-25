@@ -44,8 +44,8 @@ through the published emitter's one-time drop. The immutable BLND token binding
 is used to verify the exact balance delta. Position owners can then direct one
 floor-rounded claim per frozen position without iteration; remaining integer
 dust stays segregated in the backfill reserve. It intentionally does not yet
-implement authoritative pool-status activation, loss execution, or
-ongoing-emission accrual.
+implement loss-waterfall execution, liquidation auctions, or ongoing-emission
+accrual.
 All three tier withdrawals use independent bounded 17-day queues with at most
 20 entries per user, pool, and tier, FIFO withdrawal, and LIFO dequeue.
 Withdrawal also requires an affirmative, read-only response from the attributed
@@ -64,7 +64,19 @@ loss execution is implemented, their deposits and withdrawals use exact
 one-token/one-share accounting. A future loss engine must introduce checked
 share-to-asset conversion before it can change redemption value.
 
-The v3 pool stores bounded canonical record maps for backstop liabilities,
+The v3 pool stores immutable lending and reserve configuration, v2-compatible
+reserve interest accounting, bToken and dToken positions, oracle-valued health
+checks, and atomic supply, withdraw, collateral-supply, collateral-withdraw,
+borrow, and repay requests. The immutable pool-local operator has no lending
+configuration authority. The request path requires spender authorization and,
+when distinct, position-owner authorization; a repayment at or above live debt
+clears the position and returns excess input to the designated recipient.
+Stored status is enforced before accounting mutations. The lending price
+boundary requires positive, unexpired quotes at the pool's immutable decimal
+scale. The included adapter is deterministic test infrastructure, not a
+production oracle.
+
+The v3 pool also stores bounded canonical record maps for backstop liabilities,
 committed losses or auctions, and unresolved bad debt. It derives aggregate
 counts directly from those maps without combining reserve-denominated amounts.
 Each map permits at most 30 records. Reserve-keyed amounts reject negatives,
@@ -73,13 +85,15 @@ presence-only auction identifiers because multi-asset auctions have no single
 amount unit. The withdrawal callback returns true only for its immutable
 backstop and only when all three maps are empty. Missing records trap rather
 than being treated as clear. There is no administrator-controlled withdrawal
-override. The mutation boundary is internal: future lending, auction, and
-waterfall entry points must update these records atomically with real protocol
-transitions. Those engines are not yet implemented, so the current pool is an
-integration boundary rather than a complete lending pool.
+override. Ordinary borrow and repay operations synchronize the configured
+backstop's liability record atomically. Future liquidation, auction, and
+waterfall entry points must update the other records with their real protocol
+transitions. Those engines remain unimplemented, so the current pool is not yet
+a complete lending market.
 
 The v3 pool factory stores immutable backstop and pool-WASM configuration,
-deploys pools with that backstop, and maintains the registry consumed by the
+deploys pools with explicit immutable operators, lending configuration, and
+ordered reserve configuration, and maintains the registry consumed by the
 backstop deposit path. Compatibility tests exercise the deterministic
 candidate-address deployment order needed to configure the factory before the
 candidate constructor validates it.
@@ -88,11 +102,11 @@ The backstop exposes the canonical Milestone-5 activation arithmetic for
 verified, pool-specific values of BLND:XLM LP, BLND:USDC LP, and plain USDC.
 Each USDC of eligible value counts equally. An
 inactive pool qualifies at or above 12,500 USDC, while an active pool remains
-qualified at or above 10,000 USDC. The public entry point returns a
-non-authoritative quote. This arithmetic is not yet wired to pool status: a
+qualified at or above 10,000 USDC. The public entry point returns a quote, and
+stored pool-status transitions use the same canonical adapter boundary. A
 production valuation adapter and loss-eligible position accounting are still
-required, and untrusted caller inputs or instantaneous Comet reserve ratios
-must not be used as authoritative values.
+required; untrusted caller inputs or instantaneous Comet reserve ratios must
+not be used as authoritative values.
 
 The backstop also exposes non-authoritative arithmetic for the v2-compatible
 pool statuses `0` through `6`. Multi-asset Q4W percentage uses verified USDC
@@ -107,9 +121,9 @@ controls. On-Ice blocks borrowing and auction cancellation. Frozen additionally
 blocks both supply and collateral supply, matching the v2 action matrix. This
 status authority is the sole continuing privileged operating-authority
 exception and cannot alter protocol-wide policy, migration, configuration,
-withdrawal safety, or WASM. The production pool-status storage, operator
-authorization, action enforcement, and canonical valuation integration remain
-implementation work.
+withdrawal safety, or WASM. Status storage, operator authorization, canonical
+valuation, and enforcement for the implemented lending requests are now
+integrated; future auction entry points must enforce the same predicate.
 
 The pool-local operator is immutable and has no rotation or recovery path. A
 compromised operator can always select Admin Frozen; if the operator is

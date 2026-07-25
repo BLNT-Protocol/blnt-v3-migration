@@ -486,7 +486,7 @@ Deployment:
   2. Issue local BLND, BLNDUSDC, BLNDXLM, and USDC assets.
   3. Deploy the legacy emitter and a coherent SDK-22 incumbent stack.
   4. Predict the candidate address, bind its immutable factory, and deploy it.
-  5. Deploy a registered v3 pool with an immutable local operator and deposit ${CANDIDATE_BALANCE} BLNDUSDC units.
+  5. Deploy a registered v3 pool with an immutable local operator, an empty migration-fixture reserve list, and deposit ${CANDIDATE_BALANCE} BLNDUSDC units.
   6. Fund the incumbent with ${INCUMBENT_BALANCE} BLNDUSDC units.
   7. Assert strict candidate qualification and call begin_migration.
 
@@ -635,6 +635,8 @@ command_deploy() {
     pool_raw="$(invoke_transaction "deploy-v3-pool" "${v3_factory_id}" deploy \
         --deployer "${operator}" \
         --operator "${operator}" \
+        --lending_config "{\"backstop_take_rate\":0,\"max_positions\":4,\"min_collateral\":\"0\",\"oracle\":\"${valuation_adapter_id}\",\"price_decimals\":7}" \
+        --reserves '[]' \
         --salt "${POOL_SALT}")"
     pool_id="$(normalize_scalar "${pool_raw}")"
     require_contract_id "${pool_id}" "deployed v3 pool"

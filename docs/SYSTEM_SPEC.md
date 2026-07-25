@@ -1,7 +1,7 @@
 # Blend V3 Candidate System Specification
 
 Status: Draft 0.1  
-Implementation status: Baseline and migration harness only
+Implementation status: Experimental migration, backstop, status, and lending core
 
 ## 1. Purpose
 
@@ -480,9 +480,10 @@ keyed by reserve: a zero amount removes its record, negative amounts are
 invalid, and replacing an existing nonzero amount does not change the count.
 Committed losses are presence-only records keyed by auction identifier because
 a multi-asset auction has no single amount unit. Monetary amounts from reserves
-with different units MUST NOT be combined. Future lending, auction, and
-waterfall operations MUST update the records atomically with the transition
-they represent.
+with different units MUST NOT be combined. Borrow and repay synchronize the
+configured backstop's reserve liability record. Future liquidation, auction,
+and waterfall operations MUST update the remaining records atomically with the
+transition they represent.
 
 The callback MUST return false for an address other than the pool's immutable
 backstop or when any count is nonzero. Missing canonical loss records MUST fail
@@ -498,10 +499,11 @@ The withdrawal implementation MUST:
   assets.
 
 The bounded Q4W accounting and Protocol-27 pool implement this fail-closed
-record and state boundary, but the lending, auction, and loss-waterfall entry
-points that create and resolve records during real protocol operations remain
-unimplemented. Until those engines invoke the internal record transitions,
-these positions MUST NOT be treated as authoritative executable loss capacity.
+record and state boundary. Ordinary backstop borrow and repay now create and
+resolve liability records, but liquidation, auction, and loss-waterfall entry
+points remain unimplemented. Until those engines invoke their internal record
+transitions, these positions MUST NOT be treated as authoritative executable
+loss capacity.
 
 ## 8. Pool activation
 
@@ -693,8 +695,86 @@ The factory accepts the operator as an explicit deployment argument while the
 authenticated deployer retains the deterministic salt domain. Permissionless
 refresh and operator requests call the immutable backstop, reject disallowed
 or invalid results, and store the returned status atomically. The pool exposes
-the centralized v2-compatible action predicate that future lending and auction
-entry points MUST enforce.
+the centralized v2-compatible action predicate enforced by the implemented
+lending requests and required by future auction entry points.
+
+### 8.2 Initial lending core
+
+The pool factory fixes the complete pool-level lending configuration and
+ordered reserve configuration when it deploys a pool. Those values are
+immutable. In particular, the pool-local operator has no authority to add,
+remove, enable, disable, or reconfigure reserves; change the oracle; alter
+interest parameters, collateral factors, liability factors, supply caps,
+minimum collateral, maximum positions, or the backstop take rate; or replace
+the pool WASM.
+
+The initial lending core implements request types 0 through 5:
+
+| Code | Request |
+| ---: | --- |
+| 0 | Supply |
+| 1 | Withdraw |
+| 2 | Supply collateral |
+| 3 | Withdraw collateral |
+| 4 | Borrow |
+| 5 | Repay |
+
+Auction request types remain reserved for the future auction engine. Each
+submitted request MUST enforce the stored v2-compatible status before changing
+accounting. Disabled reserves reject supply, collateral supply, and borrow but
+continue to permit withdrawal and repayment.
+
+The request owner is `from`, the account providing incoming tokens is
+`spender`, and outgoing tokens are sent to `to`. `spender` MUST authorize every
+submission. If `from` and `spender` differ, `from` MUST also authorize it.
+There is no unauthenticated repay-on-behalf path in this initial core. Contract
+addresses MAY own positions and use their ordinary Soroban authorization logic.
+
+Reserve accounting retains the v2 bToken/dToken model and interest curve:
+
+- Supply and collateral mint bTokens by rounding down.
+- Withdrawal burns bTokens by rounding up, capped by the position balance.
+- Borrow mints dTokens by rounding up.
+- Partial repayment burns dTokens by rounding down.
+- A repayment amount at or above current live debt burns the complete debt
+  position and returns excess input to `to`.
+- Interest increases dRate, assigns the immutable take-rate portion to the
+  reserve's accrued backstop credit, and assigns the remainder to suppliers
+  through bRate.
+- All intermediate multiplication uses checked I256 fixed-point arithmetic;
+  results that do not fit i128 fail the transaction.
+
+Accrued backstop credit is accounting state only until the take-rate realization
+and distribution cadence is specified. This milestone MUST NOT introduce an
+ad hoc distribution path.
+
+Each submission MUST verify the pool's exact per-asset token-balance delta
+across its transfers. Fee-on-transfer behavior, a downward rebase during the
+call, or any other mismatch fails the entire transaction. This check does not
+make later issuer clawback, deauthorization, or an out-of-band negative rebase
+safe; production reserve-admission policy for those asset controls remains an
+explicit deployment and risk decision.
+
+Each pool supports at most 30 reserves, at most 60 effective collateral and
+liability positions per account, and at most 60 requests per submission.
+Reserve and user state use bounded persistent entries with explicit TTL
+renewal. A submission that fails authorization, status, reserve, utilization,
+health, price, cap, arithmetic, token-transfer, or position-count validation
+MUST roll back all reserve, position, event, loss-record, and transfer effects.
+
+Health checks consume an immutable oracle interface returning a positive price,
+an exact decimal scale, and an inclusive validity timestamp. A quote with the
+wrong decimals, a nonpositive price, or an expired validity timestamp fails
+closed. Collateral value rounds down after its collateral factor; liability
+value rounds up before division by its liability factor. Borrow and collateral
+withdrawal require a health factor of at least 1.00001 and the immutable minimum
+effective collateral value.
+
+When the configured backstop itself borrows or repays, the lending transition
+MUST update the corresponding canonical backstop-liability record atomically.
+The stored value is the nonzero dToken balance in that reserve's own units; the
+withdrawal callback uses only record presence and never sums values across
+reserves.
 
 ## 9. Loss waterfall
 
@@ -1098,8 +1178,10 @@ implemented:
 - Per-tier auction, transfer, and disposal mechanisms.
 - Behavior when a tier's oracle or disposal market is unavailable.
 - Production LP price sources, averaging, staleness, and failure policy.
-- Exact lending, auction, and waterfall entry points that invoke each canonical
-  pool loss-record transition.
+- Production lending-reserve admission policy for issuer controls, clawback,
+  deauthorization, rebasing, and other nonstandard token behavior.
+- Exact liquidation, auction, and waterfall entry points that invoke the
+  committed-loss and unresolved-bad-debt record transitions.
 - Exact take-rate accrual integration and distribution cadence.
 - Post-migration designated token.
 - Top-level BLND split between backstop depositors and pool supply/borrow
@@ -1141,15 +1223,18 @@ and 17-day bounded withdrawal queues for all three tiers, exact one-time
 backfill funding and owner-authorized constant-time claims, an immutable
 Protocol-27 pool factory, immutable per-pool operator and stored status,
 canonical permissionless and operator status transitions, the v2-compatible
-action predicate, and a fail-closed pool callback derived directly from three
-bounded canonical record maps. The local runner deploys independently issued
-assets, a coherent
+action predicate, immutable lending and reserve configuration, the six
+non-auction v2 request types, v2-compatible reserve interest and share
+accounting, fail-closed oracle-valued health checks, and a fail-closed pool
+callback derived directly from three bounded canonical record maps. The local
+runner deploys independently issued assets, a coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
-local run, the public-testnet exercise, the lending, auction, and waterfall
-entry points that invoke those record transitions, a production LP valuation
-source, enforcement of stored status by future lending and auction entry
-points, and ongoing BLND-emission accrual remain intentionally unimplemented.
+local run, the public-testnet exercise, liquidation, auction, and waterfall
+entry points that invoke the remaining record transitions, a production LP
+valuation source, enforcement of stored status by future auction entry points,
+take-rate realization, and ongoing BLND-emission accrual remain intentionally
+unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

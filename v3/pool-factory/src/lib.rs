@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractevent, contractimpl, contracttype, Address, Bytes, BytesN, Env, IntoVal,
+    contract, contractevent, contractimpl, contracttype, Address, Bytes, BytesN, Env, IntoVal, Vec,
 };
 
 const DAY_IN_LEDGERS: u32 = 17_280;
@@ -21,6 +21,37 @@ enum DataKey {
 #[contracttype]
 enum PersistentKey {
     Pool(Address),
+}
+
+/// Structural mirror of the immutable pool-level lending configuration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct LendingConfig {
+    pub backstop_take_rate: u32,
+    pub max_positions: u32,
+    pub min_collateral: i128,
+    pub oracle: Address,
+    pub price_decimals: u32,
+}
+
+/// Structural mirror of one immutable reserve configuration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct ReserveConfig {
+    pub asset: Address,
+    pub c_factor: u32,
+    pub decimals: u32,
+    pub enabled: bool,
+    pub index: u32,
+    pub l_factor: u32,
+    pub max_util: u32,
+    pub r_base: u32,
+    pub r_one: u32,
+    pub r_three: u32,
+    pub r_two: u32,
+    pub reactivity: u32,
+    pub supply_cap: i128,
+    pub util: u32,
 }
 
 #[contractevent]
@@ -57,10 +88,17 @@ impl PoolFactoryContract {
             .unwrap()
     }
 
-    /// Deploy a pool whose immutable backstop is this factory's configured
-    /// candidate and whose local operator is fixed at construction. The
+    /// Deploy a pool whose backstop, local operator, lending configuration,
+    /// and ordered reserve configuration are all fixed at construction. The
     /// deployer authorizes use of its deterministic salt domain.
-    pub fn deploy(env: Env, deployer: Address, operator: Address, salt: BytesN<32>) -> Address {
+    pub fn deploy(
+        env: Env,
+        deployer: Address,
+        operator: Address,
+        lending_config: LendingConfig,
+        reserves: Vec<ReserveConfig>,
+        salt: BytesN<32>,
+    ) -> Address {
         extend_instance_ttl(&env);
         deployer.require_auth();
 
@@ -78,7 +116,10 @@ impl PoolFactoryContract {
         let pool = env
             .deployer()
             .with_current_contract(effective_salt)
-            .deploy_v2(pool_wasm_hash, (&backstop, &operator));
+            .deploy_v2(
+                pool_wasm_hash,
+                (&backstop, &operator, &lending_config, &reserves),
+            );
         let key = PersistentKey::Pool(pool.clone());
         env.storage().persistent().set(&key, &true);
         env.storage()

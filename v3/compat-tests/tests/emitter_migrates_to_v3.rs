@@ -134,6 +134,35 @@ impl MockLossAwarePool {
 }
 
 const SCALAR_7: i128 = 10_000_000;
+
+fn test_lending_config(oracle: &Address) -> v3_pool_factory::LendingConfig {
+    v3_pool_factory::LendingConfig {
+        backstop_take_rate: 0,
+        max_positions: 4,
+        min_collateral: 0,
+        oracle: oracle.clone(),
+        price_decimals: 7,
+    }
+}
+
+fn lending_reserve_config(asset: &Address, index: u32) -> v3_pool_factory::ReserveConfig {
+    v3_pool_factory::ReserveConfig {
+        asset: asset.clone(),
+        c_factor: 8_000_000,
+        decimals: 7,
+        enabled: true,
+        index,
+        l_factor: 9_000_000,
+        max_util: 9_500_000,
+        r_base: 100_000,
+        r_one: 500_000,
+        r_three: 15_000_000,
+        r_two: 5_000_000,
+        reactivity: 20,
+        supply_cap: 1_000_000_000_000_000,
+        util: 7_500_000,
+    }
+}
 const QUEUE_SECONDS: u64 = 31 * 24 * 60 * 60;
 const PREPARATION_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 const SYNC_GRACE_SECONDS: u64 = 7 * 24 * 60 * 60;
@@ -410,20 +439,31 @@ fn v3_factory_deploys_registered_loss_aware_pool_wasm() {
     let factory = v3_pool_factory::Client::new(&env, &factory_id);
     let deployer = Address::generate(&env);
     let operator = Address::generate(&env);
+    let lending_config = test_lending_config(&backstop);
+    let reserves = soroban_sdk::Vec::<v3_pool_factory::ReserveConfig>::new(&env);
     let salt = soroban_sdk::BytesN::from_array(&env, &[11; 32]);
 
-    assert!(factory.try_deploy(&deployer, &operator, &salt).is_err());
+    assert!(factory
+        .try_deploy(&deployer, &operator, &lending_config, &reserves, &salt)
+        .is_err());
     let pool_id = factory
         .mock_auths(&[MockAuth {
             address: &deployer,
             invoke: &MockAuthInvoke {
                 contract: &factory_id,
                 fn_name: "deploy",
-                args: (&deployer, &operator, salt.clone()).into_val(&env),
+                args: (
+                    &deployer,
+                    &operator,
+                    &lending_config,
+                    &reserves,
+                    salt.clone(),
+                )
+                    .into_val(&env),
                 sub_invokes: &[],
             },
         }])
-        .deploy(&deployer, &operator, &salt);
+        .deploy(&deployer, &operator, &lending_config, &reserves, &salt);
     let pool = v3_pool::Client::new(&env, &pool_id);
 
     assert!(factory.is_pool(&pool_id));
@@ -498,9 +538,17 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
     );
 
     let factory = v3_pool_factory::Client::new(&env, &factory_id);
+    let lending_config = test_lending_config(&valuation_adapter_id);
+    let reserves = soroban_sdk::vec![
+        &env,
+        lending_reserve_config(&legacy_token_id, 0),
+        lending_reserve_config(&next_token_id, 1)
+    ];
     let pool_id = factory.deploy(
         &deployer,
         &deployer,
+        &lending_config,
+        &reserves,
         &soroban_sdk::BytesN::from_array(&env, &[22; 32]),
     );
     let pool = v3_pool::Client::new(&env, &pool_id);
@@ -524,12 +572,108 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
     assert_eq!(pool.status(), 0);
     assert!(pool.action_allowed(&4));
 
+    let lender = Address::generate(&env);
+    let next_token = StellarAssetClient::new(&env, &next_token_id);
+    next_token.mint(&lender, &(1_000 * SCALAR_7));
+    legacy_token.mint(&user, &(100 * SCALAR_7));
+    pool.submit(
+        &lender,
+        &lender,
+        &lender,
+        &soroban_sdk::vec![
+            &env,
+            v3_pool::Request {
+                address: next_token_id.clone(),
+                amount: 1_000 * SCALAR_7,
+                request_type: 0,
+            }
+        ],
+    );
+    let borrower_positions = pool.submit(
+        &user,
+        &user,
+        &user,
+        &soroban_sdk::vec![
+            &env,
+            v3_pool::Request {
+                address: legacy_token_id.clone(),
+                amount: 100 * SCALAR_7,
+                request_type: 2,
+            },
+            v3_pool::Request {
+                address: next_token_id.clone(),
+                amount: 20 * SCALAR_7,
+                request_type: 4,
+            }
+        ],
+    );
+    assert_eq!(borrower_positions.collateral.get(0), Some(100 * SCALAR_7));
+    assert_eq!(borrower_positions.liabilities.get(1), Some(20 * SCALAR_7));
+    assert!(pool.position_health(&user).healthy);
+    let repaid_positions = pool.submit(
+        &user,
+        &user,
+        &user,
+        &soroban_sdk::vec![
+            &env,
+            v3_pool::Request {
+                address: next_token_id.clone(),
+                amount: 5 * SCALAR_7,
+                request_type: 5,
+            }
+        ],
+    );
+    assert_eq!(repaid_positions.liabilities.get(1), Some(15 * SCALAR_7));
+    let reduced_collateral = pool.submit(
+        &user,
+        &user,
+        &user,
+        &soroban_sdk::vec![
+            &env,
+            v3_pool::Request {
+                address: legacy_token_id.clone(),
+                amount: SCALAR_7,
+                request_type: 3,
+            }
+        ],
+    );
+    assert_eq!(reduced_collateral.collateral.get(0), Some(99 * SCALAR_7));
+    let reduced_supply = pool.submit(
+        &lender,
+        &lender,
+        &lender,
+        &soroban_sdk::vec![
+            &env,
+            v3_pool::Request {
+                address: next_token_id.clone(),
+                amount: 10 * SCALAR_7,
+                request_type: 1,
+            }
+        ],
+    );
+    assert_eq!(reduced_supply.supply.get(1), Some(990 * SCALAR_7));
+
     candidate.queue_blnd_usdc_withdrawal(&user, &pool_id, &(6_250 * SCALAR_7));
     assert_eq!(pool.update_pool_status(), 3);
     assert_eq!(pool.status(), 3);
     assert!(!pool.action_allowed(&4));
     assert!(!pool.action_allowed(&9));
     assert!(pool.action_allowed(&0));
+    assert!(pool
+        .try_submit(
+            &user,
+            &user,
+            &user,
+            &soroban_sdk::vec![
+                &env,
+                v3_pool::Request {
+                    address: next_token_id.clone(),
+                    amount: SCALAR_7,
+                    request_type: 4,
+                }
+            ],
+        )
+        .is_err());
 
     candidate.dequeue_blnd_usdc_withdrawal(&user, &pool_id, &(6_250 * SCALAR_7));
     assert_eq!(pool.update_pool_status(), 1);

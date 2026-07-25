@@ -373,9 +373,15 @@ The v3 tests must verify:
   direct user calls fail authorization.
 - The prepared lot targets 120% of the pool's oracle-valued debt, normalized
   to seven-decimal USDC.
-- Lot construction consumes uncommitted capital in strict BLND:USDC LP,
-  BLND:XLM LP, then plain-USDC order and rounds a partially selected final
-  tier's asset amount up so it does not underfill the remaining target.
+- Each prepared lot contains assets from exactly one tier and selects the first
+  tier with at least 200 USDC of verified, uncommitted value in strict
+  BLND:USDC LP, BLND:XLM LP, then plain-USDC order.
+- Exactly 200 USDC qualifies; 199.9999999 USDC does not.
+- A tier below the minimum is skipped even when it alone could satisfy the
+  current 120% target. No solve-the-debt exception combines or revives smaller
+  tiers.
+- A partial tier selection rounds its asset amount up so its proportional
+  value does not underfill the target.
 - A commitment is pool-local, changes neither shares nor exchange rates, and
   is excluded from activation value and subsequent bad-debt quotes.
 - The pool auction and backstop commitment have identical fixed 46-day
@@ -383,11 +389,16 @@ The v3 tests must verify:
 - Any caller may delete a prepared auction at, but not before, 500 ledgers,
   atomically releasing its backstop lot. The canonical liability remains and
   continues to block withdrawal until the debt is resolved.
-- BLND:USDC LP absorbs losses before BLND:XLM LP.
-- BLND:XLM LP absorbs losses only after eligible BLND:USDC LP is exhausted.
-- Plain USDC absorbs losses only after both LP tiers are exhausted.
+- BLND:USDC LP is auctioned before BLND:XLM LP whenever its available verified
+  value is at least 200 USDC.
+- BLND:XLM LP is selected only after BLND:USDC LP is below 200 USDC or has
+  otherwise been exhausted by completed settlement.
+- Plain USDC is selected only after both LP tiers are below 200 USDC or have
+  otherwise been exhausted by completed settlement.
 - Supplier balances absorb only the residual loss after all three backstop
-  tiers are exhausted.
+  tiers are each below 200 USDC or otherwise exhausted.
+- Aggregate backstop value skipped solely because of the per-tier minimum is
+  strictly less than 600 USDC and remains attributed to depositors.
 - A partial loss contained by one tier does not modify later tiers.
 - Losses crossing one or both backstop-tier boundaries are conserved exactly,
   subject to explicitly documented rounding.
@@ -400,8 +411,11 @@ The v3 tests must verify:
   first or preserve the queued position's pre-loss value.
 - A queued withdrawal remains blocked while the loss is committed or
   unresolved and, once permitted, redeems at the post-loss exchange rate.
-- An unavailable oracle or disposal path follows the explicitly selected
-  failure policy and does not silently skip a tier.
+- An unavailable, invalid, or stale oracle result fails closed and is not
+  treated as a tier below the minimum. An unavailable disposal path follows
+  the explicitly selected failure policy and does not silently skip a tier.
+- Once a qualifying tier lot is committed, later price movement below the
+  minimum does not cancel the commitment.
 - Activation value remains independent of loss priority.
 
 ## Take-rate allocation

@@ -4,8 +4,8 @@ mod auction;
 mod lending;
 
 pub use auction::{
-    AuctionCreated, AuctionData, AuctionDeleted, AuctionFilled, BadDebtAuctionCreated,
-    BadDebtAuctionData, BadDebtAuctionDeleted, BadDebtLotQuote, TierAssetAmounts,
+    AuctionCreated, AuctionData, AuctionDeleted, AuctionFilled, BackstopTier,
+    BadDebtAuctionCreated, BadDebtAuctionData, BadDebtAuctionDeleted, BadDebtLotQuote,
     ACTION_DELETE_LIQUIDATION, ACTION_FILL_USER_LIQUIDATION,
 };
 pub use lending::{
@@ -1325,11 +1325,8 @@ mod tests {
         backstop.set_bad_debt_quote(&BadDebtLotQuote {
             committed_value: 60 * lending::SCALAR_7,
             debt_value: 0,
-            lot: TierAssetAmounts {
-                blnd_usdc: 40 * lending::SCALAR_7,
-                blnd_xlm: 20 * lending::SCALAR_7,
-                usdc: 0,
-            },
+            tier: BackstopTier::BlndUsdc,
+            lot_amount: 60 * lending::SCALAR_7,
             target_value: 60 * lending::SCALAR_7,
             unfilled_target_value: 0,
             valid_until: u64::MAX,

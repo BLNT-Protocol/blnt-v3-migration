@@ -879,8 +879,8 @@ The candidate uses the following strict first-loss order:
 1. BLND:USDC LP.
 2. BLND:XLM LP.
 3. Plain USDC.
-4. Pool suppliers for any residual loss after all eligible backstop capital is
-   exhausted.
+4. Pool suppliers for any residual loss after every backstop tier is
+   operationally exhausted under the minimum-value policy below.
 
 Each backstop asset occupies its own tier. A loss MUST exhaust the eligible,
 uncommitted capital in a tier before consuming capital from the next tier.
@@ -910,14 +910,32 @@ For every tier, the implementation MUST define:
 - Behavior when an oracle or market is unavailable.
 - When supplier balances absorb losses after backstop exhaustion.
 
-The implemented preparation boundary retains v2's one-bad-debt-auction-per-pool
-shape and 120%-of-debt target. It reserves a single multi-asset lot from
-currently uncommitted capital in strict waterfall order. The pool converts its
-oracle-valued reserve debt to seven-decimal USDC, and only the registered pool
-contract can authorize the backstop commitment. LP selection uses the immutable
-valuation adapter and rounds the last tier's token amount up so its proportional
-value cannot underfill the remaining target. Production adapters MUST guarantee
-that a quote's per-share value is linear across the selected LP amount.
+The implemented preparation boundary retains v2's
+one-bad-debt-auction-per-pool shape and 120%-of-debt target, but each auction
+MUST sell assets from only one tier. It examines currently uncommitted capital
+in strict waterfall order and selects the first tier whose available capital
+has at least 200 USDC of verified value. Exactly 200 USDC qualifies. A tier
+below 200 USDC is skipped even if it could satisfy the current 120% target;
+there is no solve-the-debt exception. Because the comparison is per tier, at
+most just under 600 USDC of aggregate backstop value can be skipped before
+supplier loss begins.
+
+The 200-USDC threshold is an operational auction minimum, not a risk weight or
+an activation threshold. Capital below it remains attributed to its
+depositors, is not consumed by the current auction, and can become eligible
+again if its verified value returns to the threshold before supplier
+settlement. Unavailable, invalid, or stale valuation is not evidence that a
+tier is below the minimum and MUST fail closed rather than advancing the
+waterfall. Plain USDC is valued one-for-one.
+
+The pool converts its oracle-valued reserve debt to seven-decimal USDC, and
+only the registered pool contract can authorize the backstop commitment. The
+selected lot is the smaller of the tier's available token amount and the token
+amount needed for the 120% target. LP selection uses the immutable valuation
+adapter and rounds a partially selected tier's token amount up so its
+proportional value cannot underfill the target. Production adapters MUST
+guarantee that a quote's per-share value is linear across the selected LP
+amount.
 
 Commitment does not transfer assets, burn shares, or change the pool-tier
 exchange rate. Reserved assets are excluded from activation value and later
@@ -926,12 +944,17 @@ commitment are created atomically with identical fixed 46-day temporary
 lifetimes; reads do not renew either entry. A stale auction can be deleted
 permissionlessly after 500 ledgers, atomically releasing its lot. If both
 temporary entries expire, the backstop liability records still keep
-withdrawals blocked until the underlying debt is resolved.
+withdrawals blocked until the underlying debt is resolved. Once a tier lot is
+committed, subsequent price movement below 200 USDC does not cancel or shrink
+that commitment.
 
 Auction fill, tier-token transfer, exchange-rate impairment, supplier residual
 loss, and exact failure behavior for an unavailable disposal market remain
-implementation work. A failed or unavailable path MUST NOT silently skip a tier
-or charge a later tier without behavior explicitly defined and tested.
+implementation work. Future settlement MUST complete or otherwise resolve the
+current tier auction before preparing a later tier. Suppliers MUST NOT absorb a
+residual until all three tiers have been successfully valued below 200 USDC or
+have otherwise been exhausted by completed settlement. A failed or unavailable
+path MUST NOT silently skip a tier or charge a later tier.
 
 Emission weights do not need to follow loss priority. Any difference MUST be
 explicit and tested.
@@ -1345,8 +1368,9 @@ action predicate, immutable lending and reserve configuration, the six
 non-auction v2 request types, v2-compatible reserve interest and share
 accounting, fail-closed oracle-valued health checks, v2-compatible
 user-liquidation creation and fills with an explicit pre-waterfall bad-debt
-boundary, pool-authorized preparation of one strict three-tier bad-debt lot,
-and a fail-closed pool callback derived from bounded canonical loss records.
+boundary, pool-authorized preparation of one single-tier,
+200-USDC-minimum bad-debt lot in strict waterfall order, and a fail-closed pool
+callback derived from bounded canonical loss records.
 The local runner deploys independently issued assets, a
 coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource

@@ -33,13 +33,13 @@ pub struct AuctionData {
     pub block: u32,
 }
 
-/// Token base units selected from the fixed backstop waterfall.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// The candidate's fixed three-tier backstop set in first-loss order.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[contracttype]
-pub struct TierAssetAmounts {
-    pub blnd_usdc: i128,
-    pub blnd_xlm: i128,
-    pub usdc: i128,
+pub enum BackstopTier {
+    BlndUsdc,
+    BlndXlm,
+    Usdc,
 }
 
 /// Canonical lot quote returned by the configured backstop.
@@ -48,7 +48,8 @@ pub struct TierAssetAmounts {
 pub struct BadDebtLotQuote {
     pub committed_value: i128,
     pub debt_value: i128,
-    pub lot: TierAssetAmounts,
+    pub tier: BackstopTier,
+    pub lot_amount: i128,
     pub unfilled_target_value: i128,
     pub target_value: i128,
     pub valid_until: u64,
@@ -159,6 +160,7 @@ pub(crate) fn create_bad_debt_auction(
         BackstopClient::new(env, &backstop).commit_bad_debt_lot(&pool, auction_id, &debt_value);
     if lot_quote.debt_value != debt_value
         || lot_quote.committed_value <= 0
+        || lot_quote.lot_amount <= 0
         || lot_quote.valid_until < env.ledger().timestamp()
     {
         panic_with_error!(env, PoolError::InvalidAuctionLot);

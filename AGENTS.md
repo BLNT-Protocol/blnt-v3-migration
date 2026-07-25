@@ -71,6 +71,14 @@ side effect of work in this repository.
   losses absorbed by their tier.
 - Assets counted as backstop capital must be available to the specified loss
   waterfall.
+- Bad-debt auctions use at most one backstop tier at a time in strict
+  BLND:USDC, BLND:XLM, then plain-USDC order. A tier is auction-eligible only
+  when its available capital has at least 200 USDC of verified value; equality
+  qualifies and there is no exception for a smaller tier that could cover the
+  current debt. A successfully valued smaller tier is skipped, but a failed or
+  unavailable valuation is not exhaustion. Supplier loss begins only after all
+  three tiers are below that threshold. Once a lot is committed, later price
+  movement across the threshold does not cancel it.
 - Legacy migration qualification uses the candidate contract's direct balance
   of the incumbent emitter-designated token and requires a strictly greater
   balance.

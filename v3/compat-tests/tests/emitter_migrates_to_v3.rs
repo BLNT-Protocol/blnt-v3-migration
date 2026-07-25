@@ -451,27 +451,29 @@ fn v3_wasm_commits_strict_pool_authorized_bad_debt_lot() {
     let depositor = Address::generate(&fixture.env);
     let next_token = StellarAssetClient::new(&fixture.env, &fixture.next_token);
     let usdc = StellarAssetClient::new(&fixture.env, &fixture.prefund_token);
-    fixture.legacy_token.mint(&depositor, &(100 * SCALAR_7));
+    fixture.legacy_token.mint(&depositor, &(50 * SCALAR_7));
     next_token.mint(&depositor, &(100 * SCALAR_7));
-    usdc.mint(&depositor, &(100 * SCALAR_7));
+    usdc.mint(&depositor, &(500 * SCALAR_7));
     fixture
         .candidate
-        .deposit_blnd_usdc(&depositor, &pool, &(100 * SCALAR_7));
+        .deposit_blnd_usdc(&depositor, &pool, &(50 * SCALAR_7));
     fixture
         .candidate
         .deposit_blnd_xlm(&depositor, &pool, &(100 * SCALAR_7));
     fixture
         .candidate
-        .deposit_usdc(&depositor, &pool, &(100 * SCALAR_7));
+        .deposit_usdc(&depositor, &pool, &(500 * SCALAR_7));
 
     let debt_value = 200 * SCALAR_7;
     let auction_id = BytesN::from_array(&fixture.env, &[3; 32]);
-    let quote = fixture.candidate.quote_bad_debt_lot(&pool, &debt_value);
+    let quote = fixture
+        .candidate
+        .quote_bad_debt_lot(&pool, &debt_value)
+        .unwrap();
     assert_eq!(quote.target_value, 240 * SCALAR_7);
     assert_eq!(quote.committed_value, 240 * SCALAR_7);
-    assert_eq!(quote.lot.blnd_usdc, 100 * SCALAR_7);
-    assert_eq!(quote.lot.blnd_xlm, 100 * SCALAR_7);
-    assert_eq!(quote.lot.usdc, 40 * SCALAR_7);
+    assert_eq!(quote.tier, v3_backstop::BackstopTier::Usdc);
+    assert_eq!(quote.lot_amount, 240 * SCALAR_7);
     assert_eq!(quote.unfilled_target_value, 0);
 
     assert_eq!(
@@ -483,14 +485,26 @@ fn v3_wasm_commits_strict_pool_authorized_bad_debt_lot() {
         fixture
             .candidate
             .pool_tier_committed_assets(&v3_backstop::BackstopTier::BlndUsdc, &pool),
-        100 * SCALAR_7
+        0
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .pool_tier_committed_assets(&v3_backstop::BackstopTier::BlndXlm, &pool),
+        0
+    );
+    assert_eq!(
+        fixture
+            .candidate
+            .pool_tier_committed_assets(&v3_backstop::BackstopTier::Usdc, &pool),
+        240 * SCALAR_7
     );
     assert_eq!(
         fixture.candidate.pool_valuation(&pool).active_values,
         v3_backstop::ActivationValues {
-            blnd_usdc: 0,
-            blnd_xlm: 0,
-            usdc: 60 * SCALAR_7,
+            blnd_usdc: 50 * SCALAR_7,
+            blnd_xlm: 100 * SCALAR_7,
+            usdc: 260 * SCALAR_7,
         }
     );
 
@@ -499,9 +513,9 @@ fn v3_wasm_commits_strict_pool_authorized_bad_debt_lot() {
     assert_eq!(
         fixture.candidate.pool_valuation(&pool).active_values,
         v3_backstop::ActivationValues {
-            blnd_usdc: 100 * SCALAR_7,
+            blnd_usdc: 50 * SCALAR_7,
             blnd_xlm: 100 * SCALAR_7,
-            usdc: 100 * SCALAR_7,
+            usdc: 500 * SCALAR_7,
         }
     );
 }

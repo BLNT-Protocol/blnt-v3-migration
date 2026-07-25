@@ -105,14 +105,16 @@ liquidatee submissions. Until bad-debt settlement exists, a fill that would
 leave collateral-free debt or worsen the liquidatee's effective health fails
 atomically. The pool can prepare one v2-shaped bad-debt auction for liabilities
 already assigned to its backstop. Preparation atomically commits a
-120%-of-debt lot from currently uncommitted BLND:USDC LP, BLND:XLM LP, then
-plain USDC. Only the registered pool can commit or release the lot. The
-reservation is excluded from activation and later quotes without transferring
-tokens, burning shares, or changing an exchange rate. The pool auction and
-backstop commitment share one fixed 46-day temporary lifetime, and
-permissionless stale deletion after 500 ledgers releases the commitment.
-Bad-debt handoff and fills, interest auctions, and loss settlement remain
-unimplemented, so the current pool is not yet a complete lending market.
+single-tier, 120%-of-debt lot from the first tier with at least $200 of verified
+value in strict BLND:USDC LP, BLND:XLM LP, then plain-USDC order. A smaller tier
+is skipped without a solve-the-debt exception. Only the registered pool can
+commit or release the lot. The reservation is excluded from activation and
+later quotes without transferring tokens, burning shares, or changing an
+exchange rate. The pool auction and backstop commitment share one fixed 46-day
+temporary lifetime, and permissionless stale deletion after 500 ledgers
+releases the commitment. Bad-debt handoff and fills, interest auctions, and
+loss settlement remain unimplemented, so the current pool is not yet a
+complete lending market.
 
 The v3 pool factory stores immutable backstop and pool-WASM configuration,
 deploys pools with explicit immutable operators, lending configuration, and
@@ -155,11 +157,12 @@ release the pool and it remains frozen indefinitely. Repayment, ordinary safe
 withdrawals, and auction fills remain available under the v2 Frozen action
 matrix.
 
-The loss-waterfall preparation boundary selects BLND:USDC LP, BLND:XLM LP, and
-plain USDC in that order. The implemented quote and commitment stop before
-token disposal or share impairment. The specified settlement will make pool
-suppliers absorb only a remaining shortfall after all three backstop tiers are
-exhausted. The tiers have take-rate weights `2.5,2.5,2`, represented exactly
+The loss-waterfall preparation boundary selects at most one of BLND:USDC LP,
+BLND:XLM LP, and plain USDC in that order. A tier must have at least $200 of
+verified value to be auctioned; suppliers absorb a future residual only after
+all three tiers are below that operational minimum or otherwise exhausted. The
+implemented quote and commitment stop before token disposal or share
+impairment. The tiers have take-rate weights `2.5,2.5,2`, represented exactly
 on-chain as `5:5:4`; each tier's allocation is proportional to its
 reward-eligible USDC value multiplied by its weight. This priority and
 weighting do not change equal-USDC activation accounting. Per-tier auction

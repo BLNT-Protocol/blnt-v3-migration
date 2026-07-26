@@ -82,13 +82,15 @@ neither qualifies the incumbent emitter or earns migration backfill. Canonical
 pool valuation converts their active and queued shares to redeemable assets at
 the common pool-tier rate before applying USDC or LP valuation.
 
-The v3 pool stores immutable lending and reserve configuration, v2-compatible
-reserve interest accounting, bToken and dToken positions, oracle-valued health
-checks, and atomic supply, withdraw, collateral-supply, collateral-withdraw,
-borrow, and repay requests. The immutable pool-local operator has no lending
-configuration authority. The request path requires spender authorization and,
-when distinct, position-owner authorization; a repayment at or above live debt
-clears the position and returns excess input to the designated recipient.
+The v3 pool stores v2-compatible reserve interest accounting, bToken and
+dToken positions, oracle-valued health checks, and atomic supply, withdraw,
+collateral-supply, collateral-withdraw, borrow, and repay requests. Its
+transferable v2-style pool admin may update pool parameters and queue or cancel
+reserve configuration; post-Setup reserve changes retain v2's seven-day
+timelock and permissionless application. The request path requires spender
+authorization and, when distinct, position-owner authorization; a repayment at
+or above live debt clears the position and returns excess input to the
+designated recipient.
 Stored status is enforced before accounting mutations. The lending price
 boundary requires positive, unexpired quotes at the pool's immutable decimal
 scale. The included adapter is deterministic test infrastructure, not a
@@ -153,11 +155,11 @@ BLND-emission accrual is still required before the pool is a complete lending
 market.
 
 The v3 pool factory stores immutable backstop and pool-WASM configuration,
-deploys pools with explicit immutable operators, lending configuration, and
-ordered reserve configuration, and maintains the registry consumed by the
-backstop deposit path. Compatibility tests exercise the deterministic
-candidate-address deployment order needed to configure the factory before the
-candidate constructor validates it.
+deploys pools with explicit transferable admins, initial lending
+configuration, and ordered reserve configuration, and maintains the registry
+consumed by the backstop deposit path. Compatibility tests exercise the
+deterministic candidate-address deployment order needed to configure the
+factory before the candidate constructor validates it.
 
 The backstop exposes the canonical Milestone-5 activation arithmetic for
 verified, pool-specific values of BLND:XLM LP, BLND:USDC LP, and plain USDC.
@@ -173,28 +175,26 @@ The backstop also exposes non-authoritative arithmetic for the v2-compatible
 pool statuses `0` through `6`. Multi-asset Q4W percentage uses verified USDC
 value and rounds upward to seven decimals. Normal status becomes On-Ice at 30%
 Q4W and Frozen at 60%; Admin Active becomes On-Ice at 50%, and Admin On-Ice
-becomes Frozen at 75%. Admin modes 0, 2, and 4 are bounded pool-local operator
-controls, not protocol governance; the operator may also relinquish an override
+becomes Frozen at 75%. Admin modes 0, 2, and 4 are bounded pool-local admin
+controls, not protocol governance; the admin may also relinquish an override
 into ordinary On-Ice status 3. Admin Active is a bounded risk-on override that
 can re-enable borrowing from 30% through immediately below 50% Q4W when the
 activation threshold is met. Admin On-Ice and Admin Frozen are risk-off
 controls. On-Ice blocks borrowing and auction cancellation. Frozen additionally
 blocks both supply and collateral supply, matching the v2 action matrix. This
-status authority is the sole continuing privileged operating-authority
-exception and cannot alter protocol-wide policy, migration, configuration,
-withdrawal safety, or WASM. Status storage, operator authorization, canonical
-valuation, and enforcement for the implemented lending requests are now
-integrated; future auction entry points must enforce the same predicate.
+status authority cannot alter protocol-wide policy, migration, tier
+configuration, withdrawal safety, or WASM. Status storage, admin authorization,
+canonical valuation, and enforcement for the implemented lending requests are
+now integrated.
 Tier-specific interest-auction creation, filling, and stale recovery are direct
 entry points available in every stored status because they realize previously
 accrued credit without modifying lending positions.
 
-The pool-local operator is immutable and has no rotation or recovery path. A
-compromised operator can always select Admin Frozen; if the operator is
-unavailable while Admin Frozen is selected, permissionless refresh cannot
-release the pool and it remains frozen indefinitely. Repayment, ordinary safe
-withdrawals, and auction fills remain available under the v2 Frozen action
-matrix.
+Pool administration uses v2's two-step `propose_admin` / `accept_admin`
+transfer. A compromised current admin can select Admin Frozen or change the
+v2-compatible mutable pool settings until authority is transferred. Repayment,
+ordinary safe withdrawals, and auction fills remain available under the v2
+Frozen action matrix.
 
 The loss-waterfall auction boundary selects at most one of BLND:USDC LP,
 BLND:XLM LP, and plain USDC in that order. A tier must have at least $200 of
@@ -211,25 +211,26 @@ v2-style supplier residual settlement are implemented as a separate bounded
 continuation call. Take-rate accrual remains implementation work.
 
 The backstop also exposes arithmetic-only ongoing BLND-emission quotes for the
-backstop-depositor tranche. Active pools are weighted by eligible underlying
-BLND across BLND:USDC and BLND:XLM positions, and users within each pool are
-weighted by their underlying BLND across those same tiers. Plain USDC receives
-no BLND-emission weight. Production LP accounting, activation integration,
-accumulators, and claims remain implementation work; the top-level split
-between backstop and supply/borrow emissions remains an open economic decision.
+backstop-depositor tranche. Reward-zone pools are weighted by eligible
+underlying BLND across BLND:USDC and BLND:XLM positions, and users within each
+pool are weighted by their underlying BLND across those same tiers. Plain USDC
+receives no BLND-emission weight. The top-level split is immutable at 70%
+backstop depositors and 30% pool supply/borrow positions. Reward-zone storage,
+emitter funding, accumulators, and claims remain implementation work.
 
 The contract extends its code and instance TTL to 90 days at construction and
 renews it whenever fewer than 89 days remain. This does not change the
 emitter's 31-day migration delay.
 
-The candidate has no protocol-governance, multisig, administrator-recovery,
-protocol-wide emergency override, or WASM-upgrade path. Its only continuing
-privileged operating-authority exception is the bounded pool-local
-v2-compatible status authority described above. Protocol replacement uses only
-the legacy emitter's permissionless, economically gated queue and swap
-mechanism. Deployment and transaction-submission identities retain no authority
-over the deployed candidate. User authorization is still required for actions
-that move that user's assets or shares.
+The candidate has no protocol governance, multisig control, protocol-wide
+administrator recovery, protocol-wide emergency override, or WASM-upgrade
+path. Its continuing privileged role is the transferable v2-compatible
+pool-local admin described above, limited to bounded statuses, mutable pool
+parameters, reserve queues, and supply/borrow emission weights. Protocol
+replacement uses only the legacy emitter's permissionless, economically gated
+queue and swap mechanism. Deployment and transaction-submission identities
+retain no authority over the deployed candidate. User authorization is still
+required for actions that move that user's assets or shares.
 
 Successful migration awards zero discretionary BLND. The candidate schedules
 only the time-weighted BLND:USDC backfill, capped at 10 million BLND, and the

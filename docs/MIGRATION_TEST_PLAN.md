@@ -57,10 +57,11 @@ The test suite must verify:
   authorization.
 - Candidate interfaces expose no governance recovery, protocol-wide emergency
   override, privileged WASM replacement, or administrative migration bypass.
-- The only continuing privileged operating-authority exception is the bounded,
-  pool-local v2-compatible status authority described below. Its risk-off modes
-  are the only emergency-control exception, and it cannot alter migration,
-  protocol configuration, withdrawal safety, or protocol-wide policy.
+- The continuing privileged role is the transferable, pool-local v2-compatible
+  admin described below. It may select bounded statuses, update the permitted
+  pool parameters, queue or cancel reserve configuration, and configure the
+  30% supply/borrow emission weights. It cannot alter migration, backstop-tier
+  policy, withdrawal safety, contract WASM, or protocol-wide policy.
 - Deployment and transaction-submission identities receive no continuing
   protocol authority.
 - A full early withdrawal receives zero backfill weight.
@@ -237,7 +238,8 @@ For a multi-asset activation formula, test:
 - Price, reserve, and LP-supply manipulation.
 - Oracle staleness and unavailable-market behavior.
 - Queued withdrawals and assets already committed to covering losses.
-- Consistent results between pool status and reward-zone eligibility.
+- Consistent activation valuation for pool-status and reward-zone threshold
+  decisions.
 
 ## Pool status
 
@@ -261,41 +263,58 @@ The v3 tests must verify:
 - An inactive pool in the hysteresis band cannot reactivate until it reaches
   the 12,500-USDC entry threshold.
 - Permissionless refresh rejects Setup and Admin Frozen.
-- The immutable pool-local operator can select statuses 0, 2, and 4, or
+- The current transferable pool admin can select statuses 0, 2, and 4, or
   relinquish an override into ordinary On-Ice status 3. Admin Active requires
   the applicable activation threshold and Q4W below 50%; Admin On-Ice and
   ordinary On-Ice require Q4W below 75%; Admin Frozen is always selectable.
-- The authenticated factory deployer explicitly fixes the pool-local operator
-  at construction; no entry point can rotate or recover it afterward.
-- Every successful permissionless or operator transition stores the canonical
+- The initial pool admin authorizes factory deployment and fixes its own
+  deterministic salt domain. The current admin alone can propose a successor,
+  the proposed admin must
+  accept, and neither proposal nor failed acceptance changes current authority.
+- Every successful permissionless or admin transition stores the canonical
   result atomically and emits its previous status, new status, and whether the
-  transition was an operator action. Failed, disallowed, stale, or invalid
+  transition was an admin action. Failed, disallowed, stale, or invalid
   quotes leave stored status unchanged.
 - At or above 30% but below 50% Q4W, an otherwise qualified pool is ordinarily
-  On-Ice, but the operator can select Admin Active and re-enable borrowing.
+  On-Ice, but the admin can select Admin Active and re-enable borrowing.
   Tests must treat this as an explicit bounded risk-on override rather than
   risk-off or permissionless behavior.
-- A compromised operator can always select Admin Frozen. Permissionless refresh
-  cannot release that status, no alternate principal can change it, and an
-  unavailable immutable operator leaves the pool Admin Frozen indefinitely.
-- The pool-local operator cannot change thresholds, valuation, asset or
-  backstop configuration, withdrawal safety, loss ordering, WASM, migration,
-  or protocol-wide policy.
+- The pool admin can update the v2-compatible pool parameters, queue or cancel
+  reserve configuration, and configure the 30% supply/borrow emission weights.
+  A new or updated reserve unlocks immediately in Setup and after seven days in
+  every other status; any caller can apply it after unlock.
+- The pool admin cannot change thresholds, valuation, the three backstop
+  assets, `5:5:4` weighting, withdrawal safety, loss ordering, the 70/30 split,
+  WASM, migration, or protocol-wide policy.
 - On-Ice blocks borrowing and auction cancellation. Frozen additionally blocks
   both supply and collateral supply, exactly matching the v2 action matrix.
   Repayment, withdrawals, auction fills, and other actions not prohibited by
   that matrix remain subject to their ordinary safety checks.
 - Queueing alone does not mutate stored status; permissionless refresh applies
   the transition using canonical checkpointed inputs.
-- Pool-status enforcement and BLND reward eligibility use the same canonical
-  result.
+- Pool-status enforcement uses the canonical stored status. Reward-zone
+  admission and maintenance use the same canonical activation valuation but
+  do not treat stored status as an additional eligibility gate.
 
 ## Initial lending core
 
 The v3 tests must verify:
 
-- Factory deployment fixes the complete pool and ordered reserve configuration;
-  no operator or other post-deployment entry point can mutate it.
+- Factory deployment fixes the oracle boundary and initial pool and reserve
+  configuration. V2-compatible admin updates validate and atomically mutate
+  only the permitted pool fields.
+- Reserve queues reject duplicates and invalid changes, require the current
+  admin for queue and cancellation, enforce the post-Setup seven-day timelock,
+  and allow permissionless application after unlock.
+- The queue input and event expose complete mutable reserve metadata without an
+  asset or index, plus the separately supplied asset and unlock timestamp, for
+  unambiguous pre-application auditing.
+- Multiple new reserves may be queued concurrently; each receives the next
+  immutable reserve index when its queue is applied and returns that final
+  index, matching v2.
+- Existing-reserve updates preserve the immutable index and decimals, reject
+  removal of a nonzero liability factor, preserve the interest modifier for
+  non-curve changes, and reset it when inherited curve parameters change.
 - Supply, withdraw, collateral supply, collateral withdraw, borrow, and repay
   execute against native and optimized pool WASM.
 - Every request enforces the stored status before changing reserve or position
@@ -336,8 +355,8 @@ The v3 tests must verify:
 - Auction creation is permissionless, accepts only an unhealthy non-pool,
   non-backstop liquidatee, rejects duplicate or unsupported bid/lot assets, and
   permits at most one active user-liquidation auction per account.
-- Bid and lot asset counts are bounded by the pool's immutable maximum-position
-  limit.
+- Bid and lot asset counts are bounded by the pool's current configured
+  maximum-position limit.
 - Quote construction inherits the v2 average-factor incentive, rounding, full
   liquidation, and 1.03-through-1.15 post-liquidation repair constraints.
 - An auction cannot fill before its next-ledger start.
@@ -586,7 +605,15 @@ The v3 tests must verify:
   pool supply/borrow split.
 - The two floor-rounded tranches plus top-level carry exactly conserve the
   input, and the carry remains scoped to the next top-level split.
-- Only active pools receive the backstop-depositor BLND tranche.
+- The reward zone contains at most 30 registered pools.
+- Entry requires the 12,500-USDC threshold, while an existing member remains
+  eligible at or above the 10,000-USDC maintenance threshold.
+- Permissionless full-zone replacement requires the entrant to have strictly
+  more eligible underlying BLND than the named member.
+- Every reward-zone edit after its first member requires a distribution
+  checkpoint within the preceding hour.
+- Stored Active, On-Ice, or Frozen status is not a separate distribution gate.
+- Only reward-zone pools receive the backstop-depositor BLND tranche.
 - Pool allocation is proportional to eligible underlying BLND across
   BLND:USDC and BLND:XLM backstop positions.
 - BLND held through either eligible tier has equal emission weight per
@@ -595,7 +622,7 @@ The v3 tests must verify:
 - Within a pool, each user's allocation is proportional to the user's eligible
   underlying BLND across both eligible tiers.
 - A pool or user with zero eligible underlying BLND receives zero.
-- Pool weight cannot exceed total eligible underlying BLND across active
+- Pool weight cannot exceed total eligible underlying BLND across reward-zone
   pools, and user weight cannot exceed its pool's eligible underlying BLND.
 - Negative values, invalid denominators, and checked-addition overflow are
   rejected; large proportional multiplication is handled with wide arithmetic.
@@ -607,8 +634,9 @@ The v3 tests must verify:
   queued shares receive zero ongoing BLND emissions.
 - Dequeueing restores ongoing-emission eligibility prospectively without
   awarding emissions for the queued interval.
-- Capital committed to losses receives the explicitly selected eligibility
-  treatment.
+- Capital committed to a pending bad-debt lot remains eligible until an actual
+  fill transfers tier assets. The fill checkpoints first, and only the amount
+  transferred loses weight prospectively.
 - Underlying BLND is floor-rounded from each Comet's current BLND reserve and
   total LP supply in the same invocation.
 - Zero or negative LP supply, negative reserve/LP amounts, an LP amount above
@@ -619,8 +647,13 @@ The v3 tests must verify:
 - Direct LP-token transfers without candidate tier shares receive zero
   emission weight.
 - Accrual and claims use bounded accumulator/checkpoint accounting.
+- The pool admin can configure positive relative weights among valid supply and
+  debt token identifiers for the 30% tranche; disabled reserves are omitted and
+  remaining weights renormalize as in v2.
 - Supply and borrow emissions remain separate from the backstop-depositor
-  tranche.
+  tranche and are claimable to an authorized user's chosen destination.
+- A backstop claim equals the existing pool/user underlying-BLND formula and is
+  not redirected or reweighted into one preferred tier.
 
 ## Execution environments
 

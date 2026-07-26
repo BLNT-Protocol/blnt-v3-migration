@@ -23,7 +23,7 @@ enum PersistentKey {
     Pool(Address),
 }
 
-/// Structural mirror of the immutable pool-level lending configuration.
+/// Structural mirror of the initial pool-level lending configuration.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct LendingConfig {
@@ -34,7 +34,7 @@ pub struct LendingConfig {
     pub price_decimals: u32,
 }
 
-/// Structural mirror of one immutable reserve configuration.
+/// Structural mirror of one initial reserve configuration.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct ReserveConfig {
@@ -57,8 +57,7 @@ pub struct ReserveConfig {
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PoolDeployed {
-    pub deployer: Address,
-    pub operator: Address,
+    pub admin: Address,
     pub pool: Address,
 }
 
@@ -88,19 +87,16 @@ impl PoolFactoryContract {
             .unwrap()
     }
 
-    /// Deploy a pool whose backstop, local operator, lending configuration,
-    /// and ordered reserve configuration are all fixed at construction. The
-    /// deployer authorizes use of its deterministic salt domain.
+    /// Deploy a pool with a transferable v2-style pool administrator.
     pub fn deploy(
         env: Env,
-        deployer: Address,
-        operator: Address,
+        admin: Address,
         lending_config: LendingConfig,
         reserves: Vec<ReserveConfig>,
         salt: BytesN<32>,
     ) -> Address {
         extend_instance_ttl(&env);
-        deployer.require_auth();
+        admin.require_auth();
 
         let backstop: Address = env.storage().instance().get(&DataKey::Backstop).unwrap();
         let pool_wasm_hash: BytesN<32> = env
@@ -108,17 +104,17 @@ impl PoolFactoryContract {
             .instance()
             .get(&DataKey::PoolWasmHash)
             .unwrap();
-        let mut deployer_bytes = [0_u8; 56];
-        deployer.to_string().copy_into_slice(&mut deployer_bytes);
-        let mut salted_deployer: Bytes = salt.into_val(&env);
-        salted_deployer.extend_from_array(&deployer_bytes);
-        let effective_salt = env.crypto().keccak256(&salted_deployer);
+        let mut admin_bytes = [0_u8; 56];
+        admin.to_string().copy_into_slice(&mut admin_bytes);
+        let mut salted_admin: Bytes = salt.into_val(&env);
+        salted_admin.extend_from_array(&admin_bytes);
+        let effective_salt = env.crypto().keccak256(&salted_admin);
         let pool = env
             .deployer()
             .with_current_contract(effective_salt)
             .deploy_v2(
                 pool_wasm_hash,
-                (&backstop, &operator, &lending_config, &reserves),
+                (&backstop, &admin, &lending_config, &reserves),
             );
         let key = PersistentKey::Pool(pool.clone());
         env.storage().persistent().set(&key, &true);
@@ -127,8 +123,7 @@ impl PoolFactoryContract {
             .extend_ttl(&key, POOL_TTL_THRESHOLD, POOL_TTL_BUMP);
 
         PoolDeployed {
-            deployer,
-            operator,
+            admin,
             pool: pool.clone(),
         }
         .publish(&env);

@@ -134,7 +134,7 @@ verifies:
 - The emitter queue is empty.
 - The candidate is active.
 - The candidate, factory, and deployed pool retain their immutable bindings.
-- The deployed pool retains its immutable local operator and remains in Setup
+- The deployed pool retains its transferable v2-style local admin and remains in Setup
   until an authorized status transition occurs.
 - The pool remains registered.
 - The legacy and next designated tokens match the deployment plan.

@@ -8,6 +8,13 @@ Build and evaluate an experimental Blend Protocol v3 candidate without losing
 the ability to demonstrate compatibility with the deployed legacy emitter and
 the incumbent v2 protocol.
 
+Treat deployed v2 behavior as the default specification. V3 behavioral changes
+require an explicit justification tied to the three-tier backstop, legacy
+migration compatibility, Protocol 27 compatibility, a conservation/safety
+fix, or a separately approved exception recorded in the system specification.
+Carrying integer dust forward at the same accounting scope and the
+12,500-USDC entry / 10,000-USDC maintenance hysteresis are approved exceptions.
+
 This is financial smart-contract software. Prefer explicit invariants,
 conservative state transitions, deterministic accounting, and tests over
 implicit assumptions.
@@ -97,28 +104,35 @@ side effect of work in this repository.
 - Legacy migration qualification uses the candidate contract's direct balance
   of the incumbent emitter-designated token and requires a strictly greater
   balance.
-- Do not introduce protocol governance, multisig control, administrator
-  recovery, privileged WASM replacement, a protocol-wide emergency override,
-  or an alternate upgrade path. Future protocol replacement must use the
-  legacy emitter's permissionless queue and swap mechanism.
+- Do not introduce protocol governance, multisig control, protocol-wide
+  administrator recovery, privileged WASM replacement, a protocol-wide
+  emergency override, or an alternate upgrade path. Future protocol
+  replacement must use the legacy emitter's permissionless queue and swap
+  mechanism. V2-compatible transferable pool administration is pool-local and
+  is not a protocol-upgrade path.
 - A successful migration awards zero discretionary BLND. Any one-time BLND
   distributed in connection with migration must fund only the scheduled,
   time-weighted BLND:USDC backfill and must not exceed 10 million BLND.
-- An activation-policy change must produce consistent pool-status and
-  reward-eligibility results from one canonical calculation.
+- Pool-status and reward-zone threshold decisions must use the same canonical
+  activation valuation. Stored pool status is not an additional reward-zone
+  eligibility gate.
 - Pool status preserves v2 codes and hard Q4W thresholds: normal On-Ice at
   30%, Admin Active On-Ice at 50%, normal Frozen at 60%, and Admin On-Ice
-  Frozen at 75%. The pool-local operator may select statuses 0, 2, and 4 or
-  relinquish an override into ordinary On-Ice status 3. This is the sole
-  continuing privileged operating-authority exception. It includes the bounded
-  risk-on Admin Active override between the normal 30% and admin 50% Q4W
-  limits; its Admin On-Ice and Admin Frozen modes are the sole emergency-control
-  exception. It is not protocol governance and grants no upgrade, migration,
-  configuration, or withdrawal-safety authority.
-- The pool-local operator is immutable. A compromised operator can always
-  select Admin Frozen, and an unavailable operator cannot release a pool from
-  Admin Frozen. Do not add a rotation or recovery path that weakens the stated
-  immutability model.
+  Frozen at 75%. The transferable pool admin may select statuses 0, 2, and 4
+  or relinquish an override into ordinary On-Ice status 3. It includes the
+  bounded risk-on Admin Active override between the normal 30% and admin 50%
+  Q4W limits and the v2 risk-off Admin On-Ice and Admin Frozen controls.
+- Pool administration follows v2's two-step `propose_admin` / `accept_admin`
+  lifecycle. The current admin may update the v2-compatible pool parameters,
+  queue or cancel reserve configuration, and set relative supply/borrow
+  emission weights. The admin cannot change the three backstop tiers,
+  activation thresholds, `5:5:4` take-rate weighting, loss waterfall, migration
+  policy, 70/30 emission split, contract WASM, or any protocol-wide rule.
+- Preserve the v2-compatible reward-zone shape: at most 30 pools,
+  permissionless threshold-qualified entry/removal/replacement, and no
+  additional stored pool-status gate. V3 replacement weight uses eligible
+  underlying BLND across active BLND:USDC and BLND:XLM tier positions; plain
+  USDC and Q4W positions have zero emission weight.
 - Preserve the v2 action matrix: On-Ice blocks borrowing and auction
   cancellation; Frozen additionally blocks both supply and collateral supply.
 - Never involuntarily swap a depositor's legacy backstop asset. Conversion

@@ -11,10 +11,13 @@ use crate::{
 pub const SCALAR_7: i128 = 10_000_000;
 pub const SCALAR_12: i128 = 1_000_000_000_000;
 const SECONDS_PER_YEAR: i128 = 31_536_000;
+pub(crate) const SECONDS_PER_WEEK: u64 = 604_800;
 const MAX_RESERVES: u32 = 30;
 const MAX_POSITIONS: u32 = MAX_RESERVES * 2;
 const MAX_REQUESTS: u32 = MAX_POSITIONS;
 const MIN_HEALTH_FACTOR: i128 = 10_000_100;
+const RESERVE_QUEUE_TTL_THRESHOLD: u32 = 100 * 17_280;
+const RESERVE_QUEUE_TTL_BUMP: u32 = 120 * 17_280;
 const SHARED_TTL_THRESHOLD: u32 = 179 * 17_280;
 const SHARED_TTL_BUMP: u32 = 180 * 17_280;
 const USER_TTL_THRESHOLD: u32 = 359 * 17_280;
@@ -45,6 +48,27 @@ pub struct ReserveConfig {
     pub decimals: u32,
     pub enabled: bool,
     pub index: u32,
+    pub l_factor: u32,
+    pub max_util: u32,
+    pub r_base: u32,
+    pub r_one: u32,
+    pub r_three: u32,
+    pub r_two: u32,
+    pub reactivity: u32,
+    pub supply_cap: i128,
+    pub util: u32,
+}
+
+/// Mutable reserve metadata accepted by the timelocked configuration queue.
+///
+/// The asset is supplied separately and the immutable reserve index is
+/// assigned when a new reserve is applied or preserved when one is updated.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct ReserveConfigUpdate {
+    pub c_factor: u32,
+    pub decimals: u32,
+    pub enabled: bool,
     pub l_factor: u32,
     pub max_util: u32,
     pub r_base: u32,
@@ -122,6 +146,13 @@ pub struct PositionHealth {
     pub raw_collateral_base: i128,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+struct QueuedReserveConfig {
+    update: ReserveConfigUpdate,
+    unlock_time: u64,
+}
+
 pub(crate) struct PositionData {
     pub collateral_base: i128,
     pub liability_base: i128,
@@ -187,6 +218,7 @@ pub struct LendingAction {
 #[contracttype]
 pub(crate) enum LendingDataKey {
     Config,
+    QueuedReserve(Address),
     ReserveConfig(Address),
     ReserveList,
 }
@@ -270,11 +302,135 @@ pub(crate) fn config(env: &Env) -> LendingConfig {
         .unwrap()
 }
 
+pub(crate) fn update_config(
+    env: &Env,
+    backstop_take_rate: u32,
+    max_positions: u32,
+    min_collateral: i128,
+) -> LendingConfig {
+    let mut config = config(env);
+    if config.backstop_take_rate != backstop_take_rate {
+        for asset in reserve_list(env) {
+            let reserve = accrue_reserve(env, &asset);
+            set_reserve_data(env, &asset, &reserve.data);
+        }
+    }
+    config.backstop_take_rate = backstop_take_rate;
+    config.max_positions = max_positions;
+    config.min_collateral = min_collateral;
+    validate_lending_config(env, &config);
+    env.storage()
+        .instance()
+        .set(&LendingDataKey::Config, &config);
+    config
+}
+
 pub(crate) fn reserve_list(env: &Env) -> Vec<Address> {
     env.storage()
         .instance()
         .get(&LendingDataKey::ReserveList)
         .unwrap()
+}
+
+pub(crate) fn queue_set_reserve(env: &Env, asset: &Address, update: &ReserveConfigUpdate) -> u64 {
+    let key = LendingDataKey::QueuedReserve(asset.clone());
+    if env.storage().temporary().has(&key) {
+        panic_with_error!(env, PoolError::BadRequest);
+    }
+    validate_reserve_config_update(env, update);
+    let assets = reserve_list(env);
+    if assets.contains(asset.clone()) {
+        validate_reserve_config_change(env, &reserve_config(env, asset), update);
+    } else if assets.len() >= MAX_RESERVES {
+        panic_with_error!(env, PoolError::InvalidReserveConfig);
+    }
+
+    let unlock_time = if crate::get_status(env) == crate::STATUS_SETUP {
+        env.ledger().timestamp()
+    } else {
+        env.ledger()
+            .timestamp()
+            .checked_add(SECONDS_PER_WEEK)
+            .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError))
+    };
+    env.storage().temporary().set(
+        &key,
+        &QueuedReserveConfig {
+            update: update.clone(),
+            unlock_time,
+        },
+    );
+    env.storage()
+        .temporary()
+        .extend_ttl(&key, RESERVE_QUEUE_TTL_THRESHOLD, RESERVE_QUEUE_TTL_BUMP);
+    unlock_time
+}
+
+pub(crate) fn cancel_set_reserve(env: &Env, asset: &Address) {
+    let key = LendingDataKey::QueuedReserve(asset.clone());
+    env.storage().temporary().remove(&key);
+}
+
+pub(crate) fn set_reserve(env: &Env, asset: &Address) -> u32 {
+    let key = LendingDataKey::QueuedReserve(asset.clone());
+    let queued: QueuedReserveConfig = env
+        .storage()
+        .temporary()
+        .get(&key)
+        .unwrap_or_else(|| panic_with_error!(env, PoolError::BadRequest));
+    if queued.unlock_time > env.ledger().timestamp() {
+        panic_with_error!(env, PoolError::BadRequest);
+    }
+
+    let mut assets = reserve_list(env);
+    let index = if assets.contains(asset.clone()) {
+        let current = reserve_config(env, asset);
+        validate_reserve_config_change(env, &current, &queued.update);
+        let mut reserve = accrue_reserve(env, asset);
+        if current.r_base != queued.update.r_base
+            || current.r_one != queued.update.r_one
+            || current.r_two != queued.update.r_two
+            || current.r_three != queued.update.r_three
+            || current.util != queued.update.util
+        {
+            reserve.data.ir_mod = SCALAR_7;
+        }
+        set_reserve_data(env, asset, &reserve.data);
+        current.index
+    } else {
+        if assets.len() >= MAX_RESERVES {
+            panic_with_error!(env, PoolError::InvalidReserveConfig);
+        }
+        // Matching v2, a new reserve receives the next index when its queued
+        // configuration is applied. This permits multiple new reserves to be
+        // queued concurrently without making later queues stale.
+        let index = assets.len();
+        assets.push_back(asset.clone());
+        env.storage()
+            .instance()
+            .set(&LendingDataKey::ReserveList, &assets);
+        set_reserve_data(
+            env,
+            asset,
+            &ReserveData {
+                b_rate: SCALAR_12,
+                b_supply: 0,
+                backstop_credit: 0,
+                d_rate: SCALAR_12,
+                d_supply: 0,
+                ir_mod: SCALAR_7,
+                last_time: env.ledger().timestamp(),
+            },
+        );
+        index
+    };
+
+    let config = reserve_config_from_update(asset, index, &queued.update);
+    env.storage()
+        .instance()
+        .set(&LendingDataKey::ReserveConfig(asset.clone()), &config);
+    env.storage().temporary().remove(&key);
+    index
 }
 
 pub(crate) fn reserve(env: &Env, asset: &Address) -> Reserve {
@@ -604,21 +760,75 @@ fn validate_lending_config(env: &Env, config: &LendingConfig) {
 }
 
 fn validate_reserve_config(env: &Env, config: &ReserveConfig) {
-    if config.decimals > 18
-        || config.c_factor > SCALAR_7 as u32
-        || config.l_factor > SCALAR_7 as u32
-        || config.util == 0
-        || config.util > 9_000_000
-        || config.max_util > SCALAR_7 as u32
-        || config.max_util <= config.util
-        || config.r_base >= SCALAR_7 as u32
-        || config.r_base < 1_000
-        || config.r_one > config.r_two
-        || config.r_two > config.r_three
-        || config.reactivity > 1_000
-        || config.supply_cap < 0
+    validate_reserve_config_update(env, &reserve_config_to_update(config));
+}
+
+fn validate_reserve_config_update(env: &Env, update: &ReserveConfigUpdate) {
+    if update.decimals > 18
+        || update.c_factor > SCALAR_7 as u32
+        || update.l_factor > SCALAR_7 as u32
+        || update.util == 0
+        || update.util > 9_000_000
+        || update.max_util > SCALAR_7 as u32
+        || update.max_util <= update.util
+        || update.r_base >= SCALAR_7 as u32
+        || update.r_base < 1_000
+        || update.r_one > update.r_two
+        || update.r_two > update.r_three
+        || update.reactivity > 1_000
+        || update.supply_cap < 0
     {
         panic_with_error!(env, PoolError::InvalidReserveConfig);
+    }
+}
+
+fn validate_reserve_config_change(
+    env: &Env,
+    current: &ReserveConfig,
+    update: &ReserveConfigUpdate,
+) {
+    if current.decimals != update.decimals || (current.l_factor != 0 && update.l_factor == 0) {
+        panic_with_error!(env, PoolError::InvalidReserveConfig);
+    }
+}
+
+fn reserve_config_to_update(config: &ReserveConfig) -> ReserveConfigUpdate {
+    ReserveConfigUpdate {
+        c_factor: config.c_factor,
+        decimals: config.decimals,
+        enabled: config.enabled,
+        l_factor: config.l_factor,
+        max_util: config.max_util,
+        r_base: config.r_base,
+        r_one: config.r_one,
+        r_three: config.r_three,
+        r_two: config.r_two,
+        reactivity: config.reactivity,
+        supply_cap: config.supply_cap,
+        util: config.util,
+    }
+}
+
+fn reserve_config_from_update(
+    asset: &Address,
+    index: u32,
+    update: &ReserveConfigUpdate,
+) -> ReserveConfig {
+    ReserveConfig {
+        asset: asset.clone(),
+        c_factor: update.c_factor,
+        decimals: update.decimals,
+        enabled: update.enabled,
+        index,
+        l_factor: update.l_factor,
+        max_util: update.max_util,
+        r_base: update.r_base,
+        r_one: update.r_one,
+        r_three: update.r_three,
+        r_two: update.r_two,
+        reactivity: update.reactivity,
+        supply_cap: update.supply_cap,
+        util: update.util,
     }
 }
 
@@ -1128,6 +1338,87 @@ mod tests {
             supply_cap: i128::MAX,
             util: 7_500_000,
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1306)")]
+    fn reserve_config_update_rejects_invalid_metadata() {
+        let env = Env::default();
+        let mut update = reserve_config_to_update(&interest_config(&env));
+        update.supply_cap = -1;
+        validate_reserve_config_update(&env, &update);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1306)")]
+    fn reserve_config_update_rejects_decimal_change() {
+        let env = Env::default();
+        let current = interest_config(&env);
+        let mut update = reserve_config_to_update(&current);
+        update.decimals += 1;
+        validate_reserve_config_change(&env, &current, &update);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1306)")]
+    fn reserve_config_update_rejects_liability_factor_removal() {
+        let env = Env::default();
+        let current = interest_config(&env);
+        let mut update = reserve_config_to_update(&current);
+        update.l_factor = 0;
+        validate_reserve_config_change(&env, &current, &update);
+    }
+
+    #[test]
+    fn reserve_config_update_preserves_index_and_resets_changed_curve() {
+        let env = Env::default();
+        let initial_config = interest_config(&env);
+        let lending_config = LendingConfig {
+            backstop_take_rate: 0,
+            max_positions: 2,
+            min_collateral: 0,
+            oracle: Address::generate(&env),
+            price_decimals: 7,
+        };
+        let contract = env.register(
+            crate::PoolContract,
+            (
+                &Address::generate(&env),
+                &Address::generate(&env),
+                &lending_config,
+                &soroban_sdk::vec![&env, initial_config.clone()],
+            ),
+        );
+
+        env.as_contract(&contract, || {
+            let modified_ir_mod = SCALAR_7 + 123;
+            let mut data = reserve_data(&env, &initial_config.asset);
+            data.ir_mod = modified_ir_mod;
+            set_reserve_data(&env, &initial_config.asset, &data);
+
+            let mut non_curve_update = reserve_config_to_update(&initial_config);
+            non_curve_update.supply_cap -= 1;
+            queue_set_reserve(&env, &initial_config.asset, &non_curve_update);
+            assert_eq!(
+                set_reserve(&env, &initial_config.asset),
+                initial_config.index
+            );
+            let after_non_curve = reserve(&env, &initial_config.asset);
+            assert_eq!(after_non_curve.config.index, initial_config.index);
+            assert_eq!(after_non_curve.data.ir_mod, modified_ir_mod);
+
+            let mut curve_update = reserve_config_to_update(&after_non_curve.config);
+            curve_update.r_one += 1;
+            queue_set_reserve(&env, &initial_config.asset, &curve_update);
+            assert_eq!(
+                set_reserve(&env, &initial_config.asset),
+                initial_config.index
+            );
+            let after_curve = reserve(&env, &initial_config.asset);
+            assert_eq!(after_curve.config.index, initial_config.index);
+            assert_eq!(after_curve.config.r_one, curve_update.r_one);
+            assert_eq!(after_curve.data.ir_mod, SCALAR_7);
+        });
     }
 
     #[test]

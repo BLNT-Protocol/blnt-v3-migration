@@ -23,6 +23,23 @@ upgrade system for this candidate.
 Normative terms `MUST`, `MUST NOT`, `SHOULD`, and `MAY` describe candidate
 requirements.
 
+### 1.1 V2-parity rule
+
+The deployed v2 contracts are the behavioral baseline. A v3 behavior MUST
+match v2 unless its difference is explicitly required by:
+
+- the three-tier backstop;
+- legacy-emitter migration compatibility;
+- Protocol 27 compatibility; or
+- an approved conservation or safety fix; or
+- a separately approved exception recorded in this specification.
+
+Integer carry-forward at the same pool, reserve, tier, or user accounting
+scope is an approved conservation fix. The 12,500-USDC entry / 10,000-USDC
+maintenance hysteresis is the sole currently approved economic exception to
+strict v2 parity. A proposed economic or administrative redesign that does not
+fall into one of these categories remains out of scope.
+
 ## 2. System boundaries
 
 ### 2.0 Runtime baselines
@@ -644,7 +661,8 @@ The implemented activation policy MUST:
 - Specify treatment of queued withdrawals and committed loss capital.
 - Fail safely when required prices are stale or unavailable.
 - Resist same-transaction price, reserve, and LP-supply manipulation.
-- Use one canonical result for pool status and reward eligibility.
+- Use one canonical activation valuation for pool-status and reward-zone
+  threshold decisions.
 - Define behavior exactly at the threshold.
 
 Activation status MUST be refreshable permissionlessly.
@@ -655,11 +673,11 @@ V3 preserves the v2 numeric status codes and action restrictions:
 
 | Code | Status | Selected by |
 | ---: | --- | --- |
-| 0 | Admin Active | Pool-local operator |
+| 0 | Admin Active | Pool admin |
 | 1 | Active | Permissionless status refresh |
-| 2 | Admin On-Ice | Pool-local operator |
+| 2 | Admin On-Ice | Pool admin |
 | 3 | On-Ice | Permissionless status refresh |
-| 4 | Admin Frozen | Pool-local operator |
+| 4 | Admin Frozen | Pool admin |
 | 5 | Frozen | Permissionless status refresh |
 | 6 | Setup | Pool initialization |
 
@@ -703,66 +721,80 @@ Statuses 0 and 1 use the 10,000-USDC maintenance threshold. Statuses 2, 3, 4,
 returning to an active status. This preserves the v3 activation hysteresis
 while adopting the v2 Q4W status thresholds.
 
-Each pool MAY configure one immutable pool-local operator at construction.
-That operator MAY request only:
+Each pool MUST configure one v2-compatible pool admin at construction. The
+admin MAY request:
 
 - Status 0 when the applicable activation threshold is met and
   \(Q_p < 50\%\).
 - Status 2 when \(Q_p < 75\%\).
-- Status 3 when \(Q_p < 75\%\), allowing the operator to relinquish an
+- Status 3 when \(Q_p < 75\%\), allowing the admin to relinquish an
   override into ordinary permissionless On-Ice mode.
 - Status 4 without an additional Q4W condition.
 
 Status 0 is a bounded risk-on override. At \(30\% \le Q_p < 50\%\), ordinary
-permissionless policy produces On-Ice, but an operator may select Admin Active
+permissionless policy produces On-Ice, but an admin may select Admin Active
 and re-enable borrowing when the applicable activation threshold is met.
 Statuses 2 and 4 are bounded risk-off controls.
 
-This status-selection authority is the sole continuing privileged
-operating-authority exception. Its Admin On-Ice and Admin Frozen modes are the
-sole exception to the prohibition on emergency control. It MUST NOT change
-status codes, thresholds, valuation rules, backstop configuration, asset
-configuration, the loss waterfall, withdrawal eligibility, contract WASM,
-emitter migration, or any protocol-wide rule. It is therefore pool-local
-operational authority rather than protocol governance, an administrative
-recovery path, or a protocol-wide emergency override.
+Pool administration MUST use v2's two-step `propose_admin` / `accept_admin`
+transfer. The current admin alone may propose a replacement, and the proposed
+admin must authorize acceptance before authority changes. A proposal grants no
+interim authority.
 
-The operator is immutable and has no rotation or recovery path. A compromised
-operator can always select Admin Frozen. Because status 4 rejects permissionless
-refresh, an unavailable operator while status 4 is selected leaves the pool
-Admin Frozen indefinitely. This availability risk is accepted to preserve the
-no-governance and no-administrator-recovery model. Admin Frozen MUST continue to
-permit the actions allowed by the v2 Frozen action matrix, including repayment,
-withdrawals subject to ordinary safety checks, and auction fills.
+The admin retains v2-compatible authority to update the pool's backstop take
+rate, maximum positions, and minimum collateral; queue and cancel reserve
+configuration; select bounded admin statuses; and configure relative weights
+for the 30% supply/borrow emission tranche. Reserve changes after Setup retain
+v2's seven-day timelock and permissionless application after unlock.
+
+The admin MUST NOT change status codes, activation thresholds, valuation rules,
+the three backstop assets, `5:5:4` take-rate weights, the loss waterfall,
+withdrawal eligibility, the immutable 70/30 emission split, contract WASM,
+emitter migration, or any protocol-wide rule. It is pool-local administration,
+not protocol governance or a protocol-wide emergency override. Admin Frozen
+MUST continue to permit the actions allowed by the v2 Frozen action matrix,
+including repayment, withdrawals subject to ordinary safety checks, and
+auction fills.
 
 Queueing shares does not itself change stored pool status. A caller MUST invoke
 the permissionless status-refresh entry point, using canonical values
-checkpointed for that transaction. Status refresh, operator status requests,
-pool-status enforcement, and BLND reward eligibility MUST consume the same
-canonical status result.
+checkpointed for that transaction. Status refresh, admin status requests, and
+pool-status enforcement MUST consume the same canonical status result.
+Reward-zone admission and maintenance MUST consume the same canonical
+activation valuation, but stored pool status is not an additional reward-zone
+eligibility gate.
 
-The implemented v3 pool stores status 6 at construction, stores its operator
-immutably, and emits a status-change event after each successful transition.
-The factory accepts the operator as an explicit deployment argument while the
-authenticated deployer retains the deterministic salt domain. Permissionless
-refresh and operator requests call the immutable backstop, reject disallowed
-or invalid results, and store the returned status atomically. The pool exposes
-the centralized v2-compatible action predicate enforced by the implemented
-lending and user-liquidation requests. Bad-debt fills are explicit direct
-entry points that remain available under every status. Tier-specific interest
-auction creation, filling, and stale recovery are explicit direct entry points
-that remain available under every status because they realize already accrued
+The implemented v3 pool stores status 6 and its initial admin at construction,
+supports authenticated two-step admin transfer, and emits an event after each
+successful status or admin transition. Permissionless refresh and admin
+requests call the immutable backstop, reject disallowed or invalid results,
+and store the returned status atomically. The pool exposes the centralized
+v2-compatible action predicate enforced by the implemented lending and
+user-liquidation requests. Bad-debt fills are explicit direct entry points
+that remain available under every status. Tier-specific interest-auction
+creation, filling, and stale recovery are explicit direct entry points that
+remain available under every status because they realize already accrued
 credit and do not create or modify a user lending position.
 
 ### 8.2 Initial lending core
 
-The pool factory fixes the complete pool-level lending configuration and
-ordered reserve configuration when it deploys a pool. Those values are
-immutable. In particular, the pool-local operator has no authority to add,
-remove, enable, disable, or reconfigure reserves; change the oracle; alter
-interest parameters, collateral factors, liability factors, supply caps,
-minimum collateral, maximum positions, or the backstop take rate; or replace
-the pool WASM.
+The pool preserves v2's administrative configuration model. The oracle address
+and oracle precision remain fixed for the deployed pool. The transferable pool
+admin MAY update the backstop take rate, maximum positions, and minimum
+collateral and MAY queue a new or updated reserve configuration. During Setup,
+a valid queued reserve configuration may be applied immediately. After Setup,
+it unlocks after seven days and any caller may apply it. The admin may cancel
+it before application. The queue interface and event MUST use mutable reserve
+metadata that excludes the separately supplied asset and immutable reserve
+index. The event MUST expose the complete proposed metadata and its unlock
+timestamp so permissionless keepers and pool participants can audit the
+pending change before application. Applying an existing reserve preserves its
+index; applying a new reserve assigns and returns the next index.
+
+Reserve validation, immutable reserve decimals and index, the prohibition on
+changing a nonzero liability factor to zero, and interest-modifier resets on
+interest-curve changes MUST follow v2. These pool-local controls do not permit
+replacement of pool WASM or modification of any backstop-tier rule.
 
 The initial lending core implements request types 0 through 5:
 
@@ -841,8 +873,8 @@ creation is permissionless and accepts a liquidatee, unique
 reserve-asset lists for the dToken bid and bToken collateral lot, and a
 liquidation percentage from 1 through 100. The liquidatee cannot be the pool or
 its configured backstop and can have at most one active user-liquidation
-auction. The total bid-plus-lot asset count MUST NOT exceed the pool's immutable
-maximum-position limit.
+auction. The total bid-plus-lot asset count MUST NOT exceed the pool's current
+configured maximum-position limit.
 
 Creation MUST use current accrued reserve rates and current valid oracle quotes.
 The liquidatee must be economically unhealthy, every requested bid asset must
@@ -1350,13 +1382,32 @@ configuration path.
 
 This section's pool and user weighting applies only to
 \(E_{\mathrm{backstop}}\). The 30% \(E_{\mathrm{pool}}\) tranche remains
-segregated for pool supply and borrow positions. Its reserve-level and
-supply-versus-borrow allocation requires a separately specified pool-side
-accounting rule and MUST NOT be claimable through the backstop-depositor path.
+segregated for pool supply and borrow positions and follows the v2-compatible
+configuration rule below.
 
-Only active pools are eligible for ongoing backstop-depositor emissions. A
-pool's weight is the eligible underlying BLND held through its BLND:USDC and
-BLND:XLM backstop tiers:
+The candidate MUST preserve v2's bounded reward-zone shape:
+
+- The reward zone contains at most 30 registered pools.
+- Any caller may add a nonmember that meets the 12,500-USDC entry threshold.
+- Any caller may remove a member that falls below the 10,000-USDC maintenance
+  threshold.
+- If the zone is full, an addition must name one existing member to remove and
+  the entrant must have strictly greater eligible underlying-BLND weight than
+  that member.
+- A pool cannot appear twice.
+- Reward-zone edits after the first entry require a distribution checkpoint
+  within the preceding hour, matching v2's protection against retroactive
+  disruption.
+
+Stored pool status is not an additional reward-zone or distribution gate.
+Admin On-Ice, On-Ice, Admin Frozen, or Frozen status does not by itself remove
+a threshold-qualified pool or erase already accrued emissions. This preserves
+v2's separation between pool status and reward-zone membership while applying
+v3's explicit activation hysteresis to entry and maintenance.
+
+Only reward-zone pools participate in ongoing emission distribution. A pool's
+weight is the eligible underlying BLND held through its BLND:USDC and BLND:XLM
+backstop tiers:
 
 \[
 B_p =
@@ -1370,12 +1421,12 @@ Plain USDC contributes zero BLND-emission weight. The pool allocation is:
 E_p =
 \left\lfloor
 E_{\mathrm{backstop}}
-\frac{B_p}{\sum_{q \in \mathrm{active}} B_q}
+\frac{B_p}{\sum_{q \in \mathrm{reward\ zone}} B_q}
 \right\rfloor
 \]
 
-Within active pool \(p\), user \(u\)'s weight is the user's eligible underlying
-BLND across the same two tiers:
+Within reward-zone pool \(p\), user \(u\)'s weight is the user's eligible
+underlying BLND across the same two tiers:
 
 \[
 B_{p,u} =
@@ -1431,11 +1482,39 @@ same scope.
 Queued withdrawals receive zero ongoing BLND-emission weight immediately after
 their emissions are checkpointed at queue time. Dequeueing restores emission
 eligibility only prospectively and MUST NOT grant emissions for the queued
-interval. The accounting MUST separately define treatment of capital committed
-to losses and activation-status transitions. A position MUST NOT earn
-simultaneously through both tiers or through both active and ineligible
-accounting. Changes in balances, underlying BLND per LP share, or pool status
-MUST NOT retroactively alter already accrued emissions.
+interval. Capital committed to a pending bad-debt lot remains eligible until an
+auction fill actually transfers tier assets out of the backstop. The fill MUST
+checkpoint emissions before that transfer; only the amount actually
+transferred loses weight prospectively. Mere commitment, later discount, or
+stale release MUST NOT retroactively change emissions.
+
+A position MUST NOT earn simultaneously through both tiers or through both
+active and ineligible accounting. Changes in balances, underlying BLND per LP
+share, reward-zone membership, or pool status MUST NOT retroactively alter
+already accrued emissions.
+
+The claimable backstop-depositor amount remains exactly \(E_{p,u}\) under the
+pool and user formulas above. Claim realization MUST NOT redirect, reweight, or
+recompute that entitlement based on a preferred tier. No rule that compounds
+every claim into BLND:XLM or another single v3 tier is introduced here.
+
+### 10.2 Pool supply and borrow emissions
+
+The 30% \(E_{\mathrm{pool}}\) tranche follows v2. Each reserve has a supply
+token identifier and a debt token identifier. The transferable pool admin may
+configure any nonempty set of valid identifiers with positive relative
+weights. On each pool emission gulp:
+
+- disabled configured reserves are omitted;
+- the remaining positive weights are normalized against their sum;
+- the tranche is distributed proportionally among those identifiers;
+- users accrue by their corresponding supply or debt-token balances; and
+- an authorized user may claim accrued BLND to a chosen destination.
+
+The configured weights are mutable, but the 70/30 top-level split is not.
+Changing configuration MUST checkpoint affected emission indexes first and
+MUST NOT alter past accrual. Integer remainder at the pool, reserve-token, or
+user scope MUST be carried forward only at that same scope.
 
 ## 11. Protocol fees and interest accounting
 
@@ -1473,8 +1552,10 @@ toward pool activation.
 ## 13. Authorization, immutability, and protocol replacement
 
 The v3 candidate MUST NOT introduce protocol governance, multisig control,
-administrator-controlled recovery, a protocol-wide emergency override, or an
-independent WASM upgrade authority.
+protocol-wide administrator-controlled recovery, a protocol-wide emergency
+override, or an independent WASM upgrade authority. A transferable v2-style
+pool admin is a pool-local operating role and is not a protocol replacement
+mechanism.
 
 The candidate backstop, factory, migration policy, activation policy,
 emissions policy, and loss-waterfall rules MUST be immutable after deployment.
@@ -1494,13 +1575,12 @@ Deployment keys and transaction submitters are operational actors only. They
 MUST NOT receive continuing protocol authority merely because they deploy,
 fund, prepare, finalize, or synchronize a candidate.
 
-The sole continuing privileged operating-authority exception is a separately
-and explicitly configured immutable pool-local operator holding only the
-bounded status-selection authority in Section 8.1. It includes the
-v2-compatible risk-on Admin Active override and risk-off Admin On-Ice and Admin
-Frozen controls. The authority is not inherited merely by deploying a pool and
-cannot act as governance, recovery, a protocol-wide emergency override, or a
-protocol-upgrade path.
+The continuing pool-local authority is the explicitly configured transferable
+pool admin described in Section 8.1. It includes v2-compatible configuration,
+reserve-queue, emission-weight, Admin Active, Admin On-Ice, and Admin Frozen
+controls. It cannot alter the candidate backstop, factory, migration policy,
+activation policy, tier rules, loss waterfall, immutable 70/30 split, or
+contract WASM and cannot act as a protocol-upgrade path.
 
 User authorization remains required for custody-changing actions involving
 that user's assets or shares. This is distinct from protocol governance and
@@ -1559,9 +1639,6 @@ implemented:
 - Production lending-reserve admission policy for issuer controls, clawback,
   deauthorization, rebasing, and other nonstandard token behavior.
 - Post-migration designated token.
-- Pool-side allocation of the 30% ongoing BLND tranche among supply and borrow
-  positions.
-- Ongoing-emission treatment of capital committed to a pending loss auction.
 - Protocol-fee existence and incidence.
 - Whether existing v2 pool positions remain isolated or receive an explicit
   position-migration mechanism.
@@ -1592,10 +1669,10 @@ implemented:
    reserve credit with the canonical `5:5:4` weighting, cycle across qualifying
    tiers, donate the selected tier token without minting shares, and support
    atomic partial fills and permissionless stale recovery.
-10. Implement the immutable ongoing-emission 70/30 split and canonical current
-    Comet-composition reads for BLND:USDC and BLND:XLM, then connect them to
-    bounded pool/user accrual after the 30% pool-side allocation and pending-loss
-    eligibility policies are resolved.
+10. Implement the immutable ongoing-emission 70/30 split, the v2-compatible
+    maximum-30 reward zone, canonical current Comet-composition reads for
+    BLND:USDC and BLND:XLM, mutable admin-selected 30% supply/borrow weights,
+    and bounded pool/user accrual and claims.
 
 Milestones 1 through 5, the bounded-Q4W and canonical-loss-state-boundary
 portions of milestone 6, the reproducible deployment runner for the local
@@ -1612,9 +1689,10 @@ pool-local checked asset/share exchange rates that proportionally expose active
 and queued shares to tier impairment, and 17-day bounded withdrawal queues for
 all three tiers, exact one-time
 backfill funding and owner-authorized constant-time claims, an immutable
-Protocol-27 pool factory, immutable per-pool operator and stored status,
-canonical permissionless and operator status transitions, the v2-compatible
-action predicate, immutable lending and reserve configuration, the six
+Protocol-27 pool factory, transferable per-pool admin and stored status,
+canonical permissionless and admin status transitions, v2-compatible pool
+parameter updates and timelocked reserve configuration, the v2-compatible
+action predicate, the six
 non-auction v2 request types, v2-compatible reserve interest and share
 accounting, fail-closed oracle-valued health checks, v2-compatible
 user-liquidation creation and fills with atomic completed-auction handoff of
@@ -1636,9 +1714,10 @@ SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
 local run, the public-testnet exercise, a production LP valuation source for
 non-emission policy, and ongoing BLND-emission accrual remain intentionally
-unimplemented. Milestone 10's policy arithmetic and canonical spot-composition
-read boundary are implemented; emitter funding, accumulators, and claims remain
-blocked on the open decisions stated above.
+unimplemented. Milestone 10's policy arithmetic, admin and pending-loss
+policies, and canonical spot-composition read boundary are specified;
+reward-zone storage, emitter funding, accumulators, and claims remain
+unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

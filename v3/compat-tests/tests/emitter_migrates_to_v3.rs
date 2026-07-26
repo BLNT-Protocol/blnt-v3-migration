@@ -757,40 +757,32 @@ fn v3_factory_deploys_registered_loss_aware_pool_wasm() {
     let pool_hash = env.deployer().upload_contract_wasm(v3_pool::WASM);
     let factory_id = env.register(v3_pool_factory::WASM, (&backstop, &pool_hash));
     let factory = v3_pool_factory::Client::new(&env, &factory_id);
-    let deployer = Address::generate(&env);
-    let operator = Address::generate(&env);
+    let admin = Address::generate(&env);
     let lending_config = test_lending_config(&backstop);
     let reserves = soroban_sdk::Vec::<v3_pool_factory::ReserveConfig>::new(&env);
     let salt = soroban_sdk::BytesN::from_array(&env, &[11; 32]);
 
     assert!(factory
-        .try_deploy(&deployer, &operator, &lending_config, &reserves, &salt)
+        .try_deploy(&admin, &lending_config, &reserves, &salt)
         .is_err());
     let pool_id = factory
         .mock_auths(&[MockAuth {
-            address: &deployer,
+            address: &admin,
             invoke: &MockAuthInvoke {
                 contract: &factory_id,
                 fn_name: "deploy",
-                args: (
-                    &deployer,
-                    &operator,
-                    &lending_config,
-                    &reserves,
-                    salt.clone(),
-                )
-                    .into_val(&env),
+                args: (&admin, &lending_config, &reserves, salt.clone()).into_val(&env),
                 sub_invokes: &[],
             },
         }])
-        .deploy(&deployer, &operator, &lending_config, &reserves, &salt);
+        .deploy(&admin, &lending_config, &reserves, &salt);
     let pool = v3_pool::Client::new(&env, &pool_id);
 
     assert!(factory.is_pool(&pool_id));
     assert_eq!(factory.backstop(), backstop);
     assert_eq!(factory.pool_wasm_hash(), pool_hash);
     assert_eq!(pool.backstop(), backstop);
-    assert_eq!(pool.operator(), operator);
+    assert_eq!(pool.admin(), admin);
     assert_eq!(pool.status(), 6);
     assert_eq!(
         pool.backstop_loss_state(),
@@ -865,7 +857,6 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
         lending_reserve_config(&next_token_id, 1)
     ];
     let pool_id = factory.deploy(
-        &deployer,
         &deployer,
         &lending_config,
         &reserves,

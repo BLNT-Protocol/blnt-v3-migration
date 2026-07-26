@@ -26,6 +26,7 @@ Reusable Git dependencies are kept beside this repository:
   clones and CI builds do not need to fetch the Git repository.
 
 See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the candidate requirements,
+[docs/V2_PARITY.md](docs/V2_PARITY.md) for the v2 parity matrix,
 [docs/BASELINE.md](docs/BASELINE.md) for the baseline policy, and
 [docs/MIGRATION_TEST_PLAN.md](docs/MIGRATION_TEST_PLAN.md) for the migration
 test requirements.
@@ -74,10 +75,11 @@ harness verifies both a cross-contract call into the SDK-22 backstop and a
 complete legacy-emitter migration into the v3 candidate on a Protocol-27
 host. The deterministic adapter exercises the immutable valuation boundary;
 it is not a production oracle. The candidate pool persists v2-compatible
-status transitions using that canonical boundary and an immutable pool-local
-operator. Its SDK-27 lending core executes the six non-auction v2 request
-types against immutable reserve configuration with checked interest, share,
-health, authorization, and token-transfer accounting. The pool also supports
+status transitions using that canonical boundary and a transferable v2-style
+pool admin. Its SDK-27 lending core executes the six non-auction v2 request
+types with v2-compatible mutable pool parameters and timelocked reserve
+configuration, checked interest, share, health, authorization, and
+token-transfer accounting. The pool also supports
 permissionless v2-compatible user-liquidation auctions. Completion of an
 auction that exhausts the liquidatee's collateral atomically transfers all
 residual dToken liabilities to the configured backstop and its canonical loss
@@ -103,8 +105,8 @@ emission quote boundary derives underlying BLND directly from the current
 BLND reserve and total supply of the BLND:USDC and BLND:XLM Comet contracts.
 That same-invocation composition is an intentional spot policy and therefore
 accepts reserve-ratio manipulation risk at a checkpoint. Emitter funding,
-bounded pool/user accrual, and claims remain unimplemented until the 30% pool
-allocation and pending-loss eligibility rules are specified.
+the maximum-30 reward zone, bounded pool/user accrual, supply/borrow emission
+configuration, and claims remain unimplemented.
 
 Run both lanes:
 

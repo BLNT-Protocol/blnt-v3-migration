@@ -1373,7 +1373,7 @@ impl BackstopContract {
         )
     }
 
-    /// Quote an operator status request from canonical pool accounting.
+    /// Quote a pool-admin status request from canonical pool accounting.
     ///
     /// Authorization and stored-status mutation remain the pool's
     /// responsibility.
@@ -1409,11 +1409,11 @@ impl BackstopContract {
         quote_update_pool_status_values(&env, current_status, &active_values, &queued_values)
     }
 
-    /// Quote a pool-local operator's v2-compatible status request.
+    /// Quote a pool-local admin's v2-compatible status request.
     ///
     /// This function performs no authorization and defines arithmetic only.
-    /// The production pool MUST require its immutable operator and MUST NOT
-    /// grant that operator any protocol-wide or withdrawal-safety authority.
+    /// The production pool MUST require its current admin and MUST NOT grant
+    /// that admin any protocol-wide or withdrawal-safety authority.
     pub fn quote_set_pool_status(
         env: Env,
         current_status: u32,
@@ -1459,24 +1459,31 @@ impl BackstopContract {
         quotes
     }
 
-    /// Quote an active pool's share of the backstop-depositor BLND tranche.
+    /// Quote a reward-zone pool's share of the backstop-depositor BLND tranche.
     ///
-    /// `total_active_blnd` is the eligible underlying BLND across every active
-    /// pool. This is an arithmetic-only diagnostic boundary. Production
-    /// accrual MUST obtain each tier's values from canonical candidate shares
-    /// and `spot_blnd_emission_values`, not untrusted caller input.
+    /// `total_reward_zone_blnd` is the eligible underlying BLND across every
+    /// reward-zone pool. This is an arithmetic-only diagnostic boundary.
+    /// Production accrual MUST obtain each tier's values from canonical
+    /// candidate shares and `spot_blnd_emission_values`, not untrusted caller
+    /// input.
     pub fn quote_pool_blnd_emissions(
         env: Env,
         distribution: i128,
         values: BlndEmissionValues,
-        total_active_blnd: i128,
-        active: bool,
+        total_reward_zone_blnd: i128,
+        reward_zone_member: bool,
     ) -> BlndEmissionQuote {
         extend_instance_ttl(&env);
-        quote_pool_blnd_emission_values(&env, distribution, &values, total_active_blnd, active)
+        quote_pool_blnd_emission_values(
+            &env,
+            distribution,
+            &values,
+            total_reward_zone_blnd,
+            reward_zone_member,
+        )
     }
 
-    /// Quote one user's share of an active pool's BLND-emission allocation.
+    /// Quote one user's share of a reward-zone pool's BLND-emission allocation.
     ///
     /// `pool_eligible_blnd` is the eligible underlying BLND held through both
     /// BLND-bearing tiers for the pool. This is an arithmetic-only diagnostic
@@ -3673,26 +3680,26 @@ fn quote_pool_blnd_emission_values(
     env: &Env,
     distribution: i128,
     values: &BlndEmissionValues,
-    total_active_blnd: i128,
-    active: bool,
+    total_reward_zone_blnd: i128,
+    reward_zone_member: bool,
 ) -> BlndEmissionQuote {
-    if distribution < 0 || total_active_blnd < 0 {
+    if distribution < 0 || total_reward_zone_blnd < 0 {
         panic_with_error!(env, BackstopError::InvalidEmissionValue);
     }
     let pool_blnd = eligible_blnd(env, values);
-    if !active {
+    if !reward_zone_member {
         return BlndEmissionQuote {
             allocation: 0,
             eligible_blnd: pool_blnd,
         };
     }
-    if pool_blnd > total_active_blnd || (pool_blnd > 0 && total_active_blnd == 0) {
+    if pool_blnd > total_reward_zone_blnd || (pool_blnd > 0 && total_reward_zone_blnd == 0) {
         panic_with_error!(env, BackstopError::InvalidEmissionValue);
     }
     let allocation = if pool_blnd == 0 {
         0
     } else {
-        proportional_floor(env, distribution, pool_blnd, total_active_blnd)
+        proportional_floor(env, distribution, pool_blnd, total_reward_zone_blnd)
     };
     BlndEmissionQuote {
         allocation,
@@ -5810,7 +5817,7 @@ mod tests {
     }
 
     #[test]
-    fn pool_status_policy_bounds_pool_operator_overrides() {
+    fn pool_status_policy_bounds_pool_admin_overrides() {
         let env = Env::default();
         let values = |amount| ActivationValues {
             blnd_xlm: 0,
@@ -6118,7 +6125,7 @@ mod tests {
     }
 
     #[test]
-    fn blnd_emissions_allocate_active_pool_tranche_by_underlying_blnd() {
+    fn blnd_emissions_allocate_reward_zone_tranche_by_underlying_blnd() {
         let env = Env::default();
         let pool_values = BlndEmissionValues {
             blnd_usdc: 60 * SCALAR_7,

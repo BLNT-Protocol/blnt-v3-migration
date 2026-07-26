@@ -13,7 +13,7 @@ pub use auction::{
 };
 pub use lending::{
     LendingAction, LendingConfig, PositionHealth, Positions, PriceQuote, Request, Reserve,
-    ReserveConfig, ReserveData, ACTION_BORROW, ACTION_REPAY, ACTION_SUPPLY,
+    ReserveConfig, ReserveConfigUpdate, ReserveData, ACTION_BORROW, ACTION_REPAY, ACTION_SUPPLY,
     ACTION_SUPPLY_COLLATERAL, ACTION_WITHDRAW, ACTION_WITHDRAW_COLLATERAL,
 };
 
@@ -25,6 +25,7 @@ use soroban_sdk::{
 const DAY_IN_LEDGERS: u32 = 17_280;
 const INSTANCE_TTL_THRESHOLD: u32 = 89 * DAY_IN_LEDGERS;
 const INSTANCE_TTL_BUMP: u32 = 90 * DAY_IN_LEDGERS;
+const ADMIN_PROPOSAL_TTL: u32 = 10 * DAY_IN_LEDGERS;
 const MAX_LOSS_RECORDS_PER_KIND: u32 = 30;
 const STATUS_SETUP: u32 = 6;
 const MAX_ACTION_TYPE: u32 = ACTION_DELETE_LIQUIDATION;
@@ -32,9 +33,10 @@ const MAX_ACTION_TYPE: u32 = ACTION_DELETE_LIQUIDATION;
 #[derive(Clone)]
 #[contracttype]
 enum DataKey {
+    Admin,
     Backstop,
     LossRecords,
-    Operator,
+    ProposedAdmin,
     Status,
 }
 
@@ -137,9 +139,48 @@ pub trait Backstop {
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PoolStatusChanged {
-    pub operator_action: bool,
+    pub admin_action: bool,
     pub previous_status: u32,
     pub status: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PoolAdminChanged {
+    pub previous_admin: Address,
+    pub admin: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PoolConfigUpdated {
+    pub admin: Address,
+    pub backstop_take_rate: u32,
+    pub max_positions: u32,
+    pub min_collateral: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReserveConfigQueued {
+    pub admin: Address,
+    pub asset: Address,
+    pub update: ReserveConfigUpdate,
+    pub unlock_time: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReserveConfigCancelled {
+    pub admin: Address,
+    pub asset: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReserveConfigured {
+    pub asset: Address,
+    pub index: u32,
 }
 
 /// Canonical nonzero records that can prevent backstop withdrawals.
@@ -182,13 +223,13 @@ impl PoolContract {
     pub fn __constructor(
         env: Env,
         backstop: Address,
-        operator: Address,
+        admin: Address,
         lending_config: LendingConfig,
         reserves: Vec<ReserveConfig>,
     ) {
         extend_instance_ttl(&env);
+        env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Backstop, &backstop);
-        env.storage().instance().set(&DataKey::Operator, &operator);
         env.storage()
             .instance()
             .set(&DataKey::Status, &STATUS_SETUP);
@@ -203,10 +244,48 @@ impl PoolContract {
         env.storage().instance().get(&DataKey::Backstop).unwrap()
     }
 
-    /// Return this pool's immutable local operator.
-    pub fn operator(env: Env) -> Address {
+    /// Return this pool's current transferable v2-style administrator.
+    pub fn admin(env: Env) -> Address {
         extend_instance_ttl(&env);
-        get_operator(&env)
+        get_admin(&env)
+    }
+
+    /// Propose a replacement administrator.
+    ///
+    /// The current administrator must authorize the proposal. The proposed
+    /// administrator does not gain authority until it accepts.
+    pub fn propose_admin(env: Env, new_admin: Address) {
+        extend_instance_ttl(&env);
+        get_admin(&env).require_auth();
+        env.storage()
+            .temporary()
+            .set(&DataKey::ProposedAdmin, &new_admin);
+        env.storage().temporary().extend_ttl(
+            &DataKey::ProposedAdmin,
+            ADMIN_PROPOSAL_TTL,
+            ADMIN_PROPOSAL_TTL,
+        );
+    }
+
+    /// Accept a pending administrator transfer.
+    pub fn accept_admin(env: Env) {
+        extend_instance_ttl(&env);
+        let proposed_admin: Address = env
+            .storage()
+            .temporary()
+            .get(&DataKey::ProposedAdmin)
+            .unwrap_or_else(|| panic_with_error!(&env, PoolError::BadRequest));
+        proposed_admin.require_auth();
+        let previous_admin = get_admin(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::Admin, &proposed_admin);
+        env.storage().temporary().remove(&DataKey::ProposedAdmin);
+        PoolAdminChanged {
+            previous_admin,
+            admin: proposed_admin,
+        }
+        .publish(&env);
     }
 
     /// Return the stored v2-compatible pool status code.
@@ -226,10 +305,10 @@ impl PoolContract {
         apply_status_quote(&env, current_status, &quote, false)
     }
 
-    /// Request one of the bounded pool-local operator status overrides.
+    /// Request one of the bounded v2-style pool-admin status overrides.
     pub fn set_pool_status(env: Env, requested_status: u32) -> u32 {
         extend_instance_ttl(&env);
-        get_operator(&env).require_auth();
+        get_admin(&env).require_auth();
         let current_status = get_status(&env);
         let backstop = get_backstop(&env);
         let quote = BackstopClient::new(&env, &backstop).quote_pool_status_set(
@@ -242,21 +321,81 @@ impl PoolContract {
 
     /// Return whether the stored status permits one v2 request type.
     ///
-    /// Implemented lending and future auction entry points use the same
-    /// internal predicate before performing an accounting transition.
+    /// Every request submitted through `submit`, including user-liquidation
+    /// fill and cancellation, uses this predicate. Direct interest- and
+    /// bad-debt-auction operations follow their separate all-status rules.
     pub fn action_allowed(env: Env, action_type: u32) -> bool {
         extend_instance_ttl(&env);
         require_valid_action(&env, action_type);
         action_allowed_for_status(get_status(&env), action_type)
     }
 
-    /// Return immutable pool-level lending configuration.
+    /// Return pool-level lending configuration.
     pub fn lending_config(env: Env) -> LendingConfig {
         extend_instance_ttl(&env);
         lending::config(&env)
     }
 
-    /// Return the immutable reserve list in reserve-index order.
+    /// Update the v2-compatible mutable pool parameters.
+    pub fn update_pool(
+        env: Env,
+        backstop_take_rate: u32,
+        max_positions: u32,
+        min_collateral: i128,
+    ) -> LendingConfig {
+        extend_instance_ttl(&env);
+        let admin = get_admin(&env);
+        admin.require_auth();
+        let config =
+            lending::update_config(&env, backstop_take_rate, max_positions, min_collateral);
+        PoolConfigUpdated {
+            admin,
+            backstop_take_rate,
+            max_positions,
+            min_collateral,
+        }
+        .publish(&env);
+        config
+    }
+
+    /// Queue mutable metadata for a new or existing reserve.
+    ///
+    /// Setup pools may apply it immediately. Other statuses retain v2's
+    /// seven-day timelock. A new reserve receives its immutable index only
+    /// when this queue is applied.
+    pub fn queue_set_reserve(env: Env, asset: Address, update: ReserveConfigUpdate) -> u64 {
+        extend_instance_ttl(&env);
+        let admin = get_admin(&env);
+        admin.require_auth();
+        let unlock_time = lending::queue_set_reserve(&env, &asset, &update);
+        ReserveConfigQueued {
+            admin,
+            asset,
+            update,
+            unlock_time,
+        }
+        .publish(&env);
+        unlock_time
+    }
+
+    /// Cancel one pending reserve configuration.
+    pub fn cancel_set_reserve(env: Env, asset: Address) {
+        extend_instance_ttl(&env);
+        let admin = get_admin(&env);
+        admin.require_auth();
+        lending::cancel_set_reserve(&env, &asset);
+        ReserveConfigCancelled { admin, asset }.publish(&env);
+    }
+
+    /// Permissionlessly apply an unlocked reserve configuration.
+    pub fn set_reserve(env: Env, asset: Address) -> u32 {
+        extend_instance_ttl(&env);
+        let index = lending::set_reserve(&env, &asset);
+        ReserveConfigured { asset, index }.publish(&env);
+        index
+    }
+
+    /// Return the reserve list in reserve-index order.
     pub fn reserve_list(env: Env) -> Vec<Address> {
         extend_instance_ttl(&env);
         lending::reserve_list(&env)
@@ -280,7 +419,8 @@ impl PoolContract {
         lending::health(&env, &user)
     }
 
-    /// Execute an atomic v2-compatible set of non-auction lending requests.
+    /// Execute an atomic v2-compatible request set, including user-liquidation
+    /// fill and cancellation actions.
     pub fn submit(
         env: Env,
         from: Address,
@@ -418,8 +558,8 @@ fn get_backstop(env: &Env) -> Address {
     env.storage().instance().get(&DataKey::Backstop).unwrap()
 }
 
-fn get_operator(env: &Env) -> Address {
-    env.storage().instance().get(&DataKey::Operator).unwrap()
+fn get_admin(env: &Env) -> Address {
+    env.storage().instance().get(&DataKey::Admin).unwrap()
 }
 
 fn get_status(env: &Env) -> u32 {
@@ -430,7 +570,7 @@ fn apply_status_quote(
     env: &Env,
     previous_status: u32,
     quote: &PoolStatusQuote,
-    operator_action: bool,
+    admin_action: bool,
 ) -> u32 {
     if !quote.transition_allowed {
         panic_with_error!(env, PoolError::StatusTransitionNotAllowed);
@@ -440,7 +580,7 @@ fn apply_status_quote(
         .instance()
         .set(&DataKey::Status, &quote.status);
     PoolStatusChanged {
-        operator_action,
+        admin_action,
         previous_status,
         status: quote.status,
     }
@@ -1134,6 +1274,23 @@ mod tests {
         }
     }
 
+    fn reserve_config_update(config: &ReserveConfig) -> ReserveConfigUpdate {
+        ReserveConfigUpdate {
+            c_factor: config.c_factor,
+            decimals: config.decimals,
+            enabled: config.enabled,
+            l_factor: config.l_factor,
+            max_util: config.max_util,
+            r_base: config.r_base,
+            r_one: config.r_one,
+            r_three: config.r_three,
+            r_two: config.r_two,
+            reactivity: config.reactivity,
+            supply_cap: config.supply_cap,
+            util: config.util,
+        }
+    }
+
     fn register_lending_pool(
         env: &Env,
         backstop: &Address,
@@ -1366,7 +1523,7 @@ mod tests {
     }
 
     #[test]
-    fn stores_immutable_status_configuration_and_applies_canonical_quotes() {
+    fn stores_admin_status_configuration_and_applies_canonical_quotes() {
         let env = Env::default();
         let backstop_id = env.register(MockBackstop, ());
         let backstop = MockBackstopClient::new(&env, &backstop_id);
@@ -1375,7 +1532,7 @@ mod tests {
         let pool = PoolContractClient::new(&env, &pool_id);
 
         assert_eq!(pool.backstop(), backstop_id);
-        assert_eq!(pool.operator(), operator);
+        assert_eq!(pool.admin(), operator);
         assert_eq!(pool.status(), STATUS_SETUP);
 
         env.as_contract(&pool_id, || {
@@ -1398,7 +1555,7 @@ mod tests {
     }
 
     #[test]
-    fn operator_status_request_requires_the_immutable_operator() {
+    fn admin_status_request_requires_the_current_admin() {
         let env = Env::default();
         let backstop_id = env.register(MockBackstop, ());
         let backstop = MockBackstopClient::new(&env, &backstop_id);
@@ -1424,6 +1581,241 @@ mod tests {
             0
         );
         assert_eq!(pool.status(), 0);
+    }
+
+    #[test]
+    fn admin_transfer_requires_proposal_and_acceptance() {
+        let env = Env::default();
+        let backstop_id = env.register(MockBackstop, ());
+        let current_admin = Address::generate(&env);
+        let proposed_admin = Address::generate(&env);
+        let pool_id = register_pool(&env, &backstop_id, &current_admin);
+        let pool = PoolContractClient::new(&env, &pool_id);
+
+        assert!(pool.try_propose_admin(&proposed_admin).is_err());
+        pool.mock_auths(&[MockAuth {
+            address: &current_admin,
+            invoke: &MockAuthInvoke {
+                contract: &pool_id,
+                fn_name: "propose_admin",
+                args: (proposed_admin.clone(),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&proposed_admin);
+        assert_eq!(pool.admin(), current_admin);
+
+        assert!(pool.try_accept_admin().is_err());
+        pool.mock_auths(&[MockAuth {
+            address: &proposed_admin,
+            invoke: &MockAuthInvoke {
+                contract: &pool_id,
+                fn_name: "accept_admin",
+                args: ().into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .accept_admin();
+        assert_eq!(pool.admin(), proposed_admin);
+        assert!(pool.try_accept_admin().is_err());
+
+        assert!(pool
+            .mock_auths(&[MockAuth {
+                address: &current_admin,
+                invoke: &MockAuthInvoke {
+                    contract: &pool_id,
+                    fn_name: "update_pool",
+                    args: (1_000_000_u32, 4_u32, 0_i128).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_update_pool(&1_000_000, &4, &0)
+            .is_err());
+        assert!(pool
+            .mock_auths(&[MockAuth {
+                address: &proposed_admin,
+                invoke: &MockAuthInvoke {
+                    contract: &pool_id,
+                    fn_name: "update_pool",
+                    args: (1_000_000_u32, 4_u32, 0_i128).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_update_pool(&1_000_000, &4, &0)
+            .is_ok());
+    }
+
+    #[test]
+    fn admin_updates_pool_and_queues_v2_style_reserve_configuration() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+        let backstop_id = env.register(MockBackstop, ());
+        let admin = Address::generate(&env);
+        let pool_id = register_pool(&env, &backstop_id, &admin);
+        let pool = PoolContractClient::new(&env, &pool_id);
+
+        let updated = pool.update_pool(&2_000_000, &6, &(5 * lending::SCALAR_7));
+        assert_eq!(updated.backstop_take_rate, 2_000_000);
+        assert_eq!(updated.max_positions, 6);
+        assert_eq!(updated.min_collateral, 5 * lending::SCALAR_7);
+
+        let asset = Address::generate(&env);
+        let config = reserve_config(&asset, 0);
+        let update = reserve_config_update(&config);
+        assert_eq!(pool.queue_set_reserve(&asset, &update), 1_000);
+        assert_eq!(
+            env.events().all().events().last(),
+            Some(
+                &ReserveConfigQueued {
+                    admin: admin.clone(),
+                    asset: asset.clone(),
+                    update: update.clone(),
+                    unlock_time: 1_000,
+                }
+                .to_xdr(&env, &pool_id)
+            )
+        );
+        assert_eq!(pool.set_reserve(&asset), 0);
+        assert_eq!(pool.reserve_list(), vec![&env, asset.clone()]);
+
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        let mut updated_reserve = update;
+        updated_reserve.supply_cap += 1;
+        assert_eq!(
+            pool.queue_set_reserve(&asset, &updated_reserve),
+            1_000 + lending::SECONDS_PER_WEEK
+        );
+        assert!(pool.try_set_reserve(&asset).is_err());
+        env.ledger()
+            .set_timestamp(1_000 + lending::SECONDS_PER_WEEK);
+        assert_eq!(pool.set_reserve(&asset), 0);
+        assert_eq!(
+            pool.reserve(&asset).config.supply_cap,
+            updated_reserve.supply_cap
+        );
+
+        updated_reserve.supply_cap += 1;
+        pool.queue_set_reserve(&asset, &updated_reserve);
+        pool.cancel_set_reserve(&asset);
+        assert!(pool.try_set_reserve(&asset).is_err());
+    }
+
+    #[test]
+    fn concurrent_new_reserve_queues_assign_indexes_when_applied() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let backstop_id = env.register(MockBackstop, ());
+        let admin = Address::generate(&env);
+        let pool_id = register_pool(&env, &backstop_id, &admin);
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let asset_a = Address::generate(&env);
+        let asset_b = Address::generate(&env);
+        let config_a = reserve_config_update(&reserve_config(&asset_a, 0));
+        let config_b = reserve_config_update(&reserve_config(&asset_b, 0));
+
+        pool.queue_set_reserve(&asset_a, &config_a);
+        pool.queue_set_reserve(&asset_b, &config_b);
+
+        assert_eq!(pool.set_reserve(&asset_a), 0);
+        assert_eq!(pool.set_reserve(&asset_b), 1);
+        assert_eq!(
+            pool.reserve_list(),
+            vec![&env, asset_a.clone(), asset_b.clone()]
+        );
+        assert_eq!(pool.reserve(&asset_a).config.index, 0);
+        assert_eq!(pool.reserve(&asset_b).config.index, 1);
+    }
+
+    #[test]
+    fn reserve_queue_and_cancel_require_the_current_admin() {
+        let env = Env::default();
+        let backstop_id = env.register(MockBackstop, ());
+        let current_admin = Address::generate(&env);
+        let next_admin = Address::generate(&env);
+        let pool_id = register_pool(&env, &backstop_id, &current_admin);
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let asset = Address::generate(&env);
+        let config = reserve_config_update(&reserve_config(&asset, 0));
+
+        assert!(pool.try_queue_set_reserve(&asset, &config).is_err());
+        pool.mock_auths(&[MockAuth {
+            address: &current_admin,
+            invoke: &MockAuthInvoke {
+                contract: &pool_id,
+                fn_name: "queue_set_reserve",
+                args: (asset.clone(), config.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .queue_set_reserve(&asset, &config);
+        assert!(pool.try_cancel_set_reserve(&asset).is_err());
+
+        pool.mock_auths(&[MockAuth {
+            address: &current_admin,
+            invoke: &MockAuthInvoke {
+                contract: &pool_id,
+                fn_name: "propose_admin",
+                args: (next_admin.clone(),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .propose_admin(&next_admin);
+        pool.mock_auths(&[MockAuth {
+            address: &next_admin,
+            invoke: &MockAuthInvoke {
+                contract: &pool_id,
+                fn_name: "accept_admin",
+                args: ().into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .accept_admin();
+
+        assert!(pool
+            .mock_auths(&[MockAuth {
+                address: &current_admin,
+                invoke: &MockAuthInvoke {
+                    contract: &pool_id,
+                    fn_name: "cancel_set_reserve",
+                    args: (asset.clone(),).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_cancel_set_reserve(&asset)
+            .is_err());
+        pool.mock_auths(&[MockAuth {
+            address: &next_admin,
+            invoke: &MockAuthInvoke {
+                contract: &pool_id,
+                fn_name: "cancel_set_reserve",
+                args: (asset.clone(),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .cancel_set_reserve(&asset);
+        assert!(pool.try_set_reserve(&asset).is_err());
+    }
+
+    #[test]
+    fn reserve_queue_cancellation_is_v2_compatible_and_idempotent() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let backstop_id = env.register(MockBackstop, ());
+        let admin = Address::generate(&env);
+        let pool_id = register_pool(&env, &backstop_id, &admin);
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let asset = Address::generate(&env);
+        let config = reserve_config_update(&reserve_config(&asset, 0));
+
+        pool.cancel_set_reserve(&asset);
+        pool.queue_set_reserve(&asset, &config);
+        pool.cancel_set_reserve(&asset);
+        pool.cancel_set_reserve(&asset);
+
+        assert!(pool.try_set_reserve(&asset).is_err());
     }
 
     #[test]
@@ -3729,7 +4121,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1305)")]
-    fn lending_constructor_rejects_invalid_immutable_configuration() {
+    fn lending_constructor_rejects_invalid_initial_configuration() {
         let env = Env::default();
         let backstop = Address::generate(&env);
         let operator = Address::generate(&env);

@@ -104,8 +104,10 @@ and 30% pool supply/borrow split, with deterministic top-level carry. Its
 emission quote boundary derives underlying BLND directly from the current
 BLND reserve and total supply of the BLND:USDC and BLND:XLM Comet contracts.
 That same-invocation composition is an intentional spot policy and therefore
-accepts reserve-ratio manipulation risk at a checkpoint. Emitter funding,
-the maximum-30 reward zone, bounded pool/user accrual, supply/borrow emission
+accepts reserve-ratio manipulation risk at a checkpoint. Permissionless,
+maximum-30 reward-zone membership, threshold entry/removal, and spot-BLND
+replacement are implemented. Emitter funding, the production distribution
+checkpoint writer, bounded pool/user accrual, supply/borrow emission
 configuration, and claims remain unimplemented.
 
 Run both lanes:

@@ -612,6 +612,9 @@ The v3 tests must verify:
   more eligible underlying BLND than the named member.
 - Every reward-zone edit after its first member requires a distribution
   checkpoint within the preceding hour.
+- Until the ongoing distributor is implemented, optimized-WASM coverage proves
+  that the first member can enter and every later edit fails closed because no
+  production checkpoint writer exists.
 - Stored Active, On-Ice, or Frozen status is not a separate distribution gate.
 - Only reward-zone pools receive the backstop-depositor BLND tranche.
 - Pool allocation is proportional to eligible underlying BLND across

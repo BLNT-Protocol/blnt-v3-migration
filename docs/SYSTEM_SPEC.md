@@ -1715,9 +1715,10 @@ limits while recording transaction and cost evidence. A completed wall-clock
 local run, the public-testnet exercise, a production LP valuation source for
 non-emission policy, and ongoing BLND-emission accrual remain intentionally
 unimplemented. Milestone 10's policy arithmetic, admin and pending-loss
-policies, and canonical spot-composition read boundary are specified;
-reward-zone storage, emitter funding, accumulators, and claims remain
-unimplemented.
+policies, canonical spot-composition read boundary, and permissionless
+maximum-30 reward-zone membership are implemented. Emitter funding, the
+production distribution checkpoint writer, accumulators, supply/borrow
+emission configuration, and claims remain unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

@@ -215,8 +215,10 @@ backstop-depositor tranche. Reward-zone pools are weighted by eligible
 underlying BLND across BLND:USDC and BLND:XLM positions, and users within each
 pool are weighted by their underlying BLND across those same tiers. Plain USDC
 receives no BLND-emission weight. The top-level split is immutable at 70%
-backstop depositors and 30% pool supply/borrow positions. Reward-zone storage,
-emitter funding, accumulators, and claims remain implementation work.
+backstop depositors and 30% pool supply/borrow positions. Permissionless
+maximum-30 reward-zone membership, threshold entry/removal, and spot-BLND
+replacement are implemented. Emitter funding, the production distribution
+checkpoint writer, accumulators, and claims remain implementation work.
 
 The contract extends its code and instance TTL to 90 days at construction and
 renews it whenever fewer than 89 days remain. This does not change the

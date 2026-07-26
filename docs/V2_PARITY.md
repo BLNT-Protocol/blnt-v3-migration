@@ -15,7 +15,7 @@ the system specification.
 | Activation | BLND/USDC product threshold | Aggregate verified USDC across three tiers | Implemented tier delta |
 | Activation hysteresis | One threshold | 12,500 USDC entry; 10,000 USDC maintenance | Approved exception |
 | Q4W basis | Shares of one LP token | Verified value across three tier assets | Implemented tier delta |
-| Reward zone | Permissionless, maximum 30 pools | Same shape; rank by eligible underlying BLND | Specified; not implemented |
+| Reward zone | Permissionless, maximum 30 pools | Same shape; rank by eligible underlying BLND | Membership implemented; distribution checkpoint writer pending |
 | Ongoing split | 70% backstop / 30% supply and borrow | Same, with scoped carry-forward | Arithmetic implemented |
 | Pool emission weight | Nonqueued BLND:USDC LP tokens | Underlying BLND across nonqueued BLND:USDC and BLND:XLM | Formula implemented |
 | Backstop user weight | Nonqueued backstop shares | User underlying BLND across the same two tiers | Formula implemented |

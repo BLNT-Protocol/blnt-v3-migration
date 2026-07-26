@@ -467,6 +467,39 @@ fn v3_wasm_exposes_asset_neutral_activation_hysteresis_quote() {
 }
 
 #[test]
+fn v3_wasm_exposes_bounded_checkpoint_gated_reward_zone() {
+    let fixture = Fixture::create();
+    let first = fixture.loss_aware_pool(false).address.clone();
+    let second = fixture.loss_aware_pool(false).address.clone();
+    let depositor = Address::generate(&fixture.env);
+    let usdc = StellarAssetClient::new(&fixture.env, &fixture.prefund_token);
+    let qualifying_amount = 12_500 * SCALAR_7;
+
+    usdc.mint(&depositor, &(2 * qualifying_amount));
+    fixture
+        .candidate
+        .deposit_usdc(&depositor, &first, &qualifying_amount);
+    fixture
+        .candidate
+        .deposit_usdc(&depositor, &second, &qualifying_amount);
+
+    assert!(fixture.candidate.reward_zone().is_empty());
+    assert_eq!(fixture.candidate.reward_zone_checkpoint(), None);
+    fixture.env.cost_estimate().budget().reset_unlimited();
+    fixture.candidate.add_reward(&first, &None);
+    assert_mainnet_invocation_limits!(fixture.env.cost_estimate().resources());
+    assert_eq!(
+        fixture.candidate.reward_zone(),
+        soroban_sdk::vec![&fixture.env, first.clone()]
+    );
+    assert!(fixture.candidate.try_add_reward(&first, &None).is_err());
+
+    // Later edits fail closed until the ongoing distributor records a
+    // completed checkpoint. That checkpoint writer is the next milestone.
+    assert!(fixture.candidate.try_add_reward(&second, &None).is_err());
+}
+
+#[test]
 fn v3_wasm_derives_canonical_pool_valuation_from_accounted_shares() {
     let fixture = Fixture::create();
     let pool = fixture.loss_aware_pool(false).address.clone();

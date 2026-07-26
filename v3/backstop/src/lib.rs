@@ -51,6 +51,8 @@ const INTEREST_LOT_PREMIUM_DENOMINATOR: i128 = 5;
 const BACKSTOP_EMISSION_NUMERATOR: i128 = 7;
 const POOL_EMISSION_NUMERATOR: i128 = 3;
 const EMISSION_SPLIT_DENOMINATOR: i128 = 10;
+const MAX_REWARD_ZONE_SIZE: u32 = 30;
+const REWARD_ZONE_CHECKPOINT_MAX_AGE_SECONDS: u64 = 60 * 60;
 
 /// The candidate's fixed three-tier backstop set in first-loss order.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -95,6 +97,8 @@ enum DataKey {
 #[derive(Clone)]
 #[contracttype]
 enum PersistentKey {
+    RewardZone,
+    RewardZoneCheckpoint,
     MigrationPosition(Address, Address),
     BlndUsdcQ4W(Address, Address),
     PoolBlndUsdcShares(Address),
@@ -172,6 +176,9 @@ pub enum BackstopError {
     InterestCommitmentNotFound = 1243,
     InvalidInterestLot = 1244,
     InterestTierLocked = 1245,
+    InvalidRewardZoneEntry = 1246,
+    RewardZoneFull = 1247,
+    DistributionCheckpointRequired = 1248,
 }
 
 #[derive(Clone)]
@@ -362,6 +369,14 @@ pub struct OngoingBlndSplit {
     pub carry: i128,
     pub pool: i128,
     pub total: i128,
+}
+
+/// Most recent completed distribution checkpoint used to guard reward-zone
+/// membership edits.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RewardZoneCheckpoint {
+    pub timestamp: u64,
 }
 
 #[contractclient(name = "EmitterClient")]
@@ -556,6 +571,19 @@ pub struct InterestLotSettled {
     pub tier: BackstopTier,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RewardZoneAdded {
+    pub pool: Address,
+    pub removed: Option<Address>,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RewardZoneRemoved {
+    pub pool: Address,
+}
+
 #[contract]
 pub struct BackstopContract;
 
@@ -680,6 +708,44 @@ impl BackstopContract {
     pub fn valuation_adapter(env: Env) -> Address {
         extend_instance_ttl(&env);
         valuation_adapter(&env)
+    }
+
+    /// Return the bounded v2-compatible reward-zone membership.
+    pub fn reward_zone(env: Env) -> Vec<Address> {
+        extend_instance_ttl(&env);
+        get_reward_zone(&env)
+    }
+
+    /// Return the most recent completed distribution checkpoint, if any.
+    ///
+    /// The ongoing distributor added in the next milestone writes this
+    /// checkpoint only after it has accounted through the returned timestamp.
+    pub fn reward_zone_checkpoint(env: Env) -> Option<RewardZoneCheckpoint> {
+        extend_instance_ttl(&env);
+        get_reward_zone_checkpoint(&env).map(|timestamp| RewardZoneCheckpoint { timestamp })
+    }
+
+    /// Add a threshold-qualified registered pool to the reward zone.
+    ///
+    /// The first member needs no earlier distribution. Every later edit
+    /// requires a completed distribution checkpoint within the preceding hour.
+    /// If all 30 slots are occupied, `to_remove` must name a member with
+    /// strictly less current eligible underlying BLND.
+    pub fn add_reward(env: Env, to_add: Address, to_remove: Option<Address>) {
+        extend_instance_ttl(&env);
+        let removed = add_to_reward_zone(&env, &to_add, to_remove.as_ref());
+        RewardZoneAdded {
+            pool: to_add,
+            removed,
+        }
+        .publish(&env);
+    }
+
+    /// Remove a member only after it falls below the maintenance threshold.
+    pub fn remove_reward(env: Env, to_remove: Address) {
+        extend_instance_ttl(&env);
+        remove_from_reward_zone(&env, &to_remove);
+        RewardZoneRemoved { pool: to_remove }.publish(&env);
     }
 
     /// Deposit BLND:XLM LP into its pool-attributed second-loss tier.
@@ -1515,6 +1581,13 @@ impl BackstopContract {
             blnd_usdc: spot_underlying_blnd(&env, BackstopTier::BlndUsdc, blnd_usdc_lp),
             blnd_xlm: spot_underlying_blnd(&env, BackstopTier::BlndXlm, blnd_xlm_lp),
         }
+    }
+
+    /// Derive one registered pool's canonical current emission weight from
+    /// accounted active assets in both BLND-bearing tiers.
+    pub fn pool_spot_blnd_emission_values(env: Env, pool: Address) -> BlndEmissionValues {
+        extend_instance_ttl(&env);
+        pool_spot_blnd_values(&env, &pool)
     }
 
     /// Quote the immutable 70% backstop / 30% pool split, including carry
@@ -2614,6 +2687,123 @@ fn require_registered_pool(env: &Env, pool: &Address) {
     if !PoolFactoryClient::new(env, &factory).is_pool(pool) {
         panic_with_error!(env, BackstopError::InvalidPool);
     }
+}
+
+fn get_reward_zone(env: &Env) -> Vec<Address> {
+    let key = PersistentKey::RewardZone;
+    let reward_zone = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    extend_persistent_ttl_if_present(env, &key);
+    if reward_zone.len() > MAX_REWARD_ZONE_SIZE {
+        panic_with_error!(env, BackstopError::ArithmeticError);
+    }
+    reward_zone
+}
+
+fn set_reward_zone(env: &Env, reward_zone: &Vec<Address>) {
+    if reward_zone.len() > MAX_REWARD_ZONE_SIZE {
+        panic_with_error!(env, BackstopError::RewardZoneFull);
+    }
+    let key = PersistentKey::RewardZone;
+    env.storage().persistent().set(&key, reward_zone);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
+}
+
+fn get_reward_zone_checkpoint(env: &Env) -> Option<u64> {
+    let key = PersistentKey::RewardZoneCheckpoint;
+    let checkpoint = env.storage().persistent().get(&key);
+    extend_persistent_ttl_if_present(env, &key);
+    checkpoint
+}
+
+fn require_recent_distribution_checkpoint(env: &Env) {
+    let now = env.ledger().timestamp();
+    let checkpoint = get_reward_zone_checkpoint(env)
+        .unwrap_or_else(|| panic_with_error!(env, BackstopError::DistributionCheckpointRequired));
+    if checkpoint > now
+        || now
+            .checked_sub(checkpoint)
+            .is_none_or(|age| age > REWARD_ZONE_CHECKPOINT_MAX_AGE_SECONDS)
+    {
+        panic_with_error!(env, BackstopError::DistributionCheckpointRequired);
+    }
+}
+
+fn add_to_reward_zone(env: &Env, to_add: &Address, to_remove: Option<&Address>) -> Option<Address> {
+    let mut reward_zone = get_reward_zone(env);
+    if reward_zone.contains(to_add.clone()) {
+        panic_with_error!(env, BackstopError::InvalidRewardZoneEntry);
+    }
+
+    let valuation = build_pool_valuation(env, to_add);
+    if !quote_activation_values(env, &valuation.active_values, false).meets_threshold {
+        panic_with_error!(env, BackstopError::InvalidRewardZoneEntry);
+    }
+    if !reward_zone.is_empty() {
+        require_recent_distribution_checkpoint(env);
+    }
+
+    let removed = if reward_zone.len() < MAX_REWARD_ZONE_SIZE {
+        None
+    } else {
+        let to_remove =
+            to_remove.unwrap_or_else(|| panic_with_error!(env, BackstopError::RewardZoneFull));
+        let remove_index = reward_zone
+            .first_index_of(to_remove.clone())
+            .unwrap_or_else(|| panic_with_error!(env, BackstopError::InvalidRewardZoneEntry));
+        let entrant_weight = eligible_blnd(env, &pool_spot_blnd_values(env, to_add));
+        let removed_weight = eligible_blnd(env, &pool_spot_blnd_values(env, to_remove));
+        if entrant_weight <= removed_weight {
+            panic_with_error!(env, BackstopError::InvalidRewardZoneEntry);
+        }
+        reward_zone.remove(remove_index);
+        Some(to_remove.clone())
+    };
+
+    reward_zone.push_front(to_add.clone());
+    set_reward_zone(env, &reward_zone);
+    removed
+}
+
+fn remove_from_reward_zone(env: &Env, to_remove: &Address) {
+    let mut reward_zone = get_reward_zone(env);
+    let remove_index = reward_zone
+        .first_index_of(to_remove.clone())
+        .unwrap_or_else(|| panic_with_error!(env, BackstopError::InvalidRewardZoneEntry));
+    let valuation = build_pool_valuation(env, to_remove);
+    if quote_activation_values(env, &valuation.active_values, true).meets_threshold {
+        panic_with_error!(env, BackstopError::InvalidRewardZoneEntry);
+    }
+    require_recent_distribution_checkpoint(env);
+    reward_zone.remove(remove_index);
+    set_reward_zone(env, &reward_zone);
+}
+
+fn pool_spot_blnd_values(env: &Env, pool: &Address) -> BlndEmissionValues {
+    require_registered_pool(env, pool);
+    BlndEmissionValues {
+        blnd_usdc: spot_underlying_blnd(
+            env,
+            BackstopTier::BlndUsdc,
+            pool_active_emission_assets(env, BackstopTier::BlndUsdc, pool),
+        ),
+        blnd_xlm: spot_underlying_blnd(
+            env,
+            BackstopTier::BlndXlm,
+            pool_active_emission_assets(env, BackstopTier::BlndXlm, pool),
+        ),
+    }
+}
+
+fn pool_active_emission_assets(env: &Env, tier: BackstopTier, pool: &Address) -> i128 {
+    let state = get_pool_tier_state(env, tier, pool);
+    let active_shares = checked_nonnegative_sub_i128(env, state.shares, state.queued_shares);
+    assets_from_shares(env, active_shares, &state)
 }
 
 fn queue_blnd_usdc_withdrawal(env: &Env, from: Address, pool: Address, amount: i128) -> Q4WEntry {
@@ -4121,6 +4311,337 @@ mod tests {
                 .instance()
                 .set(&MockEmitterKey::Backstop, &candidate);
         }
+    }
+
+    struct RewardZoneFixture {
+        env: Env,
+        candidate: Address,
+        pool_factory: Address,
+    }
+
+    impl RewardZoneFixture {
+        fn create() -> Self {
+            let env = Env::default();
+            env.ledger().set_timestamp(10_000);
+            let incumbent = Address::generate(&env);
+            let blnd = Address::generate(&env);
+            let blnd_usdc = env.register(
+                MockComet,
+                (&blnd, &(1_000_000 * SCALAR_7), &(4_000_000 * SCALAR_7)),
+            );
+            let blnd_xlm = env.register(
+                MockComet,
+                (&blnd, &(1_000_000 * SCALAR_7), &(2_000_000 * SCALAR_7)),
+            );
+            let usdc = Address::generate(&env);
+            let candidate = Address::generate(&env);
+            let pool_factory = env.register(MockPoolFactory, (&candidate,));
+            let emitter = env.register(MockEmitter, (&incumbent, &candidate, &blnd_xlm));
+            let valuation_adapter = register_valuation_adapter(&env);
+            env.register_at(
+                &candidate,
+                BackstopContract,
+                (
+                    &emitter,
+                    &blnd,
+                    &pool_factory,
+                    &blnd_usdc,
+                    &blnd_xlm,
+                    &usdc,
+                    &valuation_adapter,
+                ),
+            );
+            Self {
+                env,
+                candidate,
+                pool_factory,
+            }
+        }
+
+        fn client(&self) -> BackstopContractClient<'_> {
+            BackstopContractClient::new(&self.env, &self.candidate)
+        }
+
+        fn pool(&self) -> Address {
+            let pool = Address::generate(&self.env);
+            MockPoolFactoryClient::new(&self.env, &self.pool_factory).set_pool(&pool);
+            pool
+        }
+
+        fn set_tier_state(
+            &self,
+            pool: &Address,
+            tier: BackstopTier,
+            assets: i128,
+            shares: i128,
+            queued_shares: i128,
+        ) {
+            self.env.as_contract(&self.candidate, || {
+                match tier {
+                    BackstopTier::BlndUsdc => {
+                        set_pool_blnd_usdc_shares(&self.env, pool, shares);
+                        if queued_shares != 0 {
+                            add_pool_blnd_usdc_queued_shares(&self.env, pool, queued_shares);
+                        }
+                    }
+                    _ => {
+                        set_pool_tier_shares(&self.env, tier, pool, shares);
+                        if queued_shares != 0 {
+                            add_pool_tier_queued_shares(&self.env, tier, pool, queued_shares);
+                        }
+                    }
+                }
+                set_pool_tier_assets(&self.env, tier, pool, assets);
+            });
+        }
+
+        fn add_queued_shares(&self, pool: &Address, tier: BackstopTier, delta: i128) {
+            self.env.as_contract(&self.candidate, || match tier {
+                BackstopTier::BlndUsdc => {
+                    add_pool_blnd_usdc_queued_shares(&self.env, pool, delta);
+                }
+                _ => add_pool_tier_queued_shares(&self.env, tier, pool, delta),
+            });
+        }
+
+        fn set_checkpoint(&self, timestamp: u64) {
+            self.env.as_contract(&self.candidate, || {
+                let key = PersistentKey::RewardZoneCheckpoint;
+                self.env.storage().persistent().set(&key, &timestamp);
+                self.env.storage().persistent().extend_ttl(
+                    &key,
+                    POSITION_TTL_THRESHOLD,
+                    POSITION_TTL_BUMP,
+                );
+            });
+        }
+
+        fn set_reward_zone(&self, reward_zone: &Vec<Address>) {
+            self.env.as_contract(&self.candidate, || {
+                set_reward_zone(&self.env, reward_zone);
+            });
+        }
+
+        fn commit_blnd_usdc(&self, pool: &Address, lot_amount: i128) {
+            self.env.as_contract(&self.candidate, || {
+                let commitment = BadDebtCommitment {
+                    auction_id: BytesN::from_array(&self.env, &[29; 32]),
+                    quote: BadDebtLotQuote {
+                        committed_value: lot_amount,
+                        debt_value: lot_amount,
+                        tier: BackstopTier::BlndUsdc,
+                        lot_amount,
+                        unfilled_target_value: 0,
+                        target_value: lot_amount,
+                        valid_until: u64::MAX,
+                    },
+                };
+                self.env
+                    .storage()
+                    .temporary()
+                    .set(&TemporaryKey::BadDebtCommitment(pool.clone()), &commitment);
+            });
+        }
+    }
+
+    #[test]
+    fn reward_zone_is_permissionless_bounded_and_checkpoint_gated() {
+        let fixture = RewardZoneFixture::create();
+        let candidate = fixture.client();
+        let first = fixture.pool();
+        fixture.set_tier_state(
+            &first,
+            BackstopTier::Usdc,
+            ACTIVATION_ENTRY_THRESHOLD_USDC - 1,
+            ACTIVATION_ENTRY_THRESHOLD_USDC - 1,
+            0,
+        );
+
+        assert!(candidate.try_add_reward(&first, &None).is_err());
+        fixture.set_tier_state(
+            &first,
+            BackstopTier::Usdc,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            0,
+        );
+        candidate.add_reward(&first, &None);
+        assert_eq!(
+            candidate.reward_zone(),
+            soroban_sdk::vec![&fixture.env, first.clone()]
+        );
+        assert_eq!(candidate.reward_zone_checkpoint(), None);
+        assert!(candidate.try_add_reward(&first, &None).is_err());
+        assert!(candidate
+            .try_add_reward(&Address::generate(&fixture.env), &None)
+            .is_err());
+
+        let second = fixture.pool();
+        fixture.set_tier_state(
+            &second,
+            BackstopTier::Usdc,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            0,
+        );
+        assert!(candidate.try_add_reward(&second, &None).is_err());
+
+        fixture.set_checkpoint(
+            fixture.env.ledger().timestamp() - REWARD_ZONE_CHECKPOINT_MAX_AGE_SECONDS,
+        );
+        candidate.add_reward(&second, &None);
+        fixture.env.ledger().set_timestamp(
+            fixture.env.ledger().timestamp() + REWARD_ZONE_CHECKPOINT_MAX_AGE_SECONDS + 1,
+        );
+        let third = fixture.pool();
+        fixture.set_tier_state(
+            &third,
+            BackstopTier::Usdc,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            0,
+        );
+        assert!(candidate.try_add_reward(&third, &None).is_err());
+
+        fixture.set_checkpoint(fixture.env.ledger().timestamp());
+        candidate.add_reward(&third, &None);
+        while candidate.reward_zone().len() < MAX_REWARD_ZONE_SIZE {
+            let pool = fixture.pool();
+            fixture.set_tier_state(
+                &pool,
+                BackstopTier::Usdc,
+                ACTIVATION_ENTRY_THRESHOLD_USDC,
+                ACTIVATION_ENTRY_THRESHOLD_USDC,
+                0,
+            );
+            candidate.add_reward(&pool, &None);
+        }
+        assert_eq!(candidate.reward_zone().len(), MAX_REWARD_ZONE_SIZE);
+
+        let overflow = fixture.pool();
+        fixture.set_tier_state(
+            &overflow,
+            BackstopTier::Usdc,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            0,
+        );
+        assert!(candidate.try_add_reward(&overflow, &None).is_err());
+        assert_eq!(candidate.reward_zone().len(), MAX_REWARD_ZONE_SIZE);
+    }
+
+    #[test]
+    fn reward_zone_replacement_uses_spot_active_blnd_and_keeps_commitments_eligible() {
+        let fixture = RewardZoneFixture::create();
+        let candidate = fixture.client();
+        let removed = fixture.pool();
+        let entrant = fixture.pool();
+        let mut reward_zone = Vec::new(&fixture.env);
+        reward_zone.push_back(removed.clone());
+        while reward_zone.len() < MAX_REWARD_ZONE_SIZE {
+            reward_zone.push_back(fixture.pool());
+        }
+        fixture.set_reward_zone(&reward_zone);
+        fixture.set_checkpoint(fixture.env.ledger().timestamp());
+
+        fixture.set_tier_state(
+            &removed,
+            BackstopTier::BlndUsdc,
+            100 * SCALAR_7,
+            100 * SCALAR_7,
+            0,
+        );
+        fixture.set_tier_state(
+            &entrant,
+            BackstopTier::BlndUsdc,
+            101 * SCALAR_7,
+            101 * SCALAR_7,
+            SCALAR_7,
+        );
+        fixture.set_tier_state(
+            &entrant,
+            BackstopTier::Usdc,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            0,
+        );
+        fixture.commit_blnd_usdc(&entrant, 50 * SCALAR_7);
+
+        assert_eq!(
+            candidate.pool_spot_blnd_emission_values(&removed),
+            BlndEmissionValues {
+                blnd_usdc: 400 * SCALAR_7,
+                blnd_xlm: 0,
+            }
+        );
+        assert_eq!(
+            candidate.pool_spot_blnd_emission_values(&entrant),
+            BlndEmissionValues {
+                blnd_usdc: 400 * SCALAR_7,
+                blnd_xlm: 0,
+            }
+        );
+        assert!(candidate
+            .try_add_reward(&entrant, &Some(removed.clone()))
+            .is_err());
+
+        fixture.add_queued_shares(&entrant, BackstopTier::BlndUsdc, -SCALAR_7);
+        assert_eq!(
+            candidate.pool_spot_blnd_emission_values(&entrant),
+            BlndEmissionValues {
+                blnd_usdc: 404 * SCALAR_7,
+                blnd_xlm: 0,
+            }
+        );
+        candidate.add_reward(&entrant, &Some(removed.clone()));
+        let updated = candidate.reward_zone();
+        assert_eq!(updated.len(), MAX_REWARD_ZONE_SIZE);
+        assert_eq!(updated.first(), Some(entrant));
+        assert!(!updated.contains(removed));
+    }
+
+    #[test]
+    fn reward_zone_removal_uses_maintenance_hysteresis_without_pool_status() {
+        let fixture = RewardZoneFixture::create();
+        let candidate = fixture.client();
+        let pool = fixture.pool();
+        fixture.set_tier_state(
+            &pool,
+            BackstopTier::Usdc,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            0,
+        );
+        candidate.add_reward(&pool, &None);
+
+        fixture.set_tier_state(
+            &pool,
+            BackstopTier::Usdc,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 1,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 1,
+            0,
+        );
+        assert!(candidate.try_remove_reward(&pool).is_err());
+
+        fixture.set_checkpoint(fixture.env.ledger().timestamp());
+        fixture.set_tier_state(
+            &pool,
+            BackstopTier::Usdc,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
+            0,
+        );
+        assert!(candidate.try_remove_reward(&pool).is_err());
+
+        fixture.set_tier_state(
+            &pool,
+            BackstopTier::Usdc,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 1,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 1,
+            0,
+        );
+        candidate.remove_reward(&pool);
+        assert!(candidate.reward_zone().is_empty());
     }
 
     #[test]

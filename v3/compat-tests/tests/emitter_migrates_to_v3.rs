@@ -95,6 +95,7 @@ struct MockComet;
 #[derive(Clone)]
 #[contracttype]
 enum MockCometKey {
+    Balance(Address),
     Blnd,
     BlndReserve,
     TotalSupply,
@@ -138,6 +139,44 @@ impl MockComet {
         env.storage()
             .instance()
             .set(&MockCometKey::BlndReserve, &blnd_reserve);
+    }
+
+    pub fn balance(env: Env, id: Address) -> i128 {
+        env.storage()
+            .instance()
+            .get(&MockCometKey::Balance(id))
+            .unwrap_or(0)
+    }
+
+    pub fn mint(env: Env, to: Address, amount: i128) {
+        if amount < 0 {
+            panic!("negative mint");
+        }
+        let balance = Self::balance(env.clone(), to.clone());
+        env.storage().instance().set(
+            &MockCometKey::Balance(to),
+            &balance.checked_add(amount).unwrap(),
+        );
+    }
+
+    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        from.require_auth();
+        if amount < 0 {
+            panic!("negative transfer");
+        }
+        let from_balance = Self::balance(env.clone(), from.clone());
+        if amount > from_balance {
+            panic!("insufficient balance");
+        }
+        let to_balance = Self::balance(env.clone(), to.clone());
+        env.storage().instance().set(
+            &MockCometKey::Balance(from),
+            &from_balance.checked_sub(amount).unwrap(),
+        );
+        env.storage().instance().set(
+            &MockCometKey::Balance(to),
+            &to_balance.checked_add(amount).unwrap(),
+        );
     }
 }
 
@@ -468,35 +507,309 @@ fn v3_wasm_exposes_asset_neutral_activation_hysteresis_quote() {
 
 #[test]
 fn v3_wasm_exposes_bounded_checkpoint_gated_reward_zone() {
-    let fixture = Fixture::create();
-    let first = fixture.loss_aware_pool(false).address.clone();
-    let second = fixture.loss_aware_pool(false).address.clone();
-    let depositor = Address::generate(&fixture.env);
-    let usdc = StellarAssetClient::new(&fixture.env, &fixture.prefund_token);
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+    let candidate_id = Address::generate(&env);
+    let incumbent = Address::generate(&env);
+    let emitter_id = env.register(LEGACY_EMITTER_WASM, ());
+    let blnd = env
+        .register_stellar_asset_contract_v2(emitter_id.clone())
+        .address();
+    let blnd_usdc = env.register(
+        MockComet,
+        (&blnd, &(1_000_000 * SCALAR_7), &(4_000_000 * SCALAR_7)),
+    );
+    let blnd_xlm = env.register(
+        MockComet,
+        (&blnd, &(1_000_000 * SCALAR_7), &(2_000_000 * SCALAR_7)),
+    );
+    let usdc = env
+        .register_stellar_asset_contract_v2(Address::generate(&env))
+        .address();
+    LegacyEmitterClient::new(&env, &emitter_id).initialize(&blnd, &incumbent, &blnd_usdc);
+    let pool_factory_id = env.register(MockPoolFactory, (&candidate_id,));
+    let valuation_adapter = env.register(v3_test_valuation_adapter::WASM, (&blnd_usdc, &blnd_xlm));
+    env.register_at(
+        &candidate_id,
+        v3_backstop::WASM,
+        (
+            &emitter_id,
+            &blnd,
+            &pool_factory_id,
+            &blnd_usdc,
+            &blnd_xlm,
+            &usdc,
+            &valuation_adapter,
+        ),
+    );
+    let candidate = v3_backstop::Client::new(&env, &candidate_id);
+    let pool_factory = MockPoolFactoryClient::new(&env, &pool_factory_id);
+    let first = env.register(MockLossAwarePool, (&candidate_id, false));
+    let second = env.register(MockLossAwarePool, (&candidate_id, false));
+    pool_factory.set_pool(&first);
+    pool_factory.set_pool(&second);
+
+    let depositor = Address::generate(&env);
+    let usdc_token = StellarAssetClient::new(&env, &usdc);
+    let blnd_usdc_token = MockCometClient::new(&env, &blnd_usdc);
+    let blnd_xlm_token = MockCometClient::new(&env, &blnd_xlm);
     let qualifying_amount = 12_500 * SCALAR_7;
 
-    usdc.mint(&depositor, &(2 * qualifying_amount));
-    fixture
-        .candidate
-        .deposit_usdc(&depositor, &first, &qualifying_amount);
-    fixture
-        .candidate
-        .deposit_usdc(&depositor, &second, &qualifying_amount);
+    usdc_token.mint(&depositor, &(2 * qualifying_amount));
+    candidate.deposit_usdc(&depositor, &first, &qualifying_amount);
+    candidate.deposit_usdc(&depositor, &second, &qualifying_amount);
 
-    assert!(fixture.candidate.reward_zone().is_empty());
-    assert_eq!(fixture.candidate.reward_zone_checkpoint(), None);
-    fixture.env.cost_estimate().budget().reset_unlimited();
-    fixture.candidate.add_reward(&first, &None);
-    assert_mainnet_invocation_limits!(fixture.env.cost_estimate().resources());
-    assert_eq!(
-        fixture.candidate.reward_zone(),
-        soroban_sdk::vec![&fixture.env, first.clone()]
+    let usdc_only_valuation = candidate.pool_valuation(&first);
+    assert!(usdc_only_valuation.active_values.usdc >= qualifying_amount);
+    assert!(
+        candidate
+            .quote_activation(&usdc_only_valuation.active_values, &false)
+            .meets_threshold
     );
-    assert!(fixture.candidate.try_add_reward(&first, &None).is_err());
+    assert!(candidate.try_add_reward(&first, &None).is_err());
+    assert!(candidate.reward_zone().is_empty());
+
+    // USDC alone activates the pool, while either BLND-bearing tier can make
+    // it eligible for permissionless reward-zone admission.
+    blnd_xlm_token.mint(&depositor, &SCALAR_7);
+    candidate.deposit_blnd_xlm(&depositor, &first, &SCALAR_7);
+    env.cost_estimate().budget().reset_unlimited();
+    candidate.add_reward(&first, &None);
+    assert_mainnet_invocation_limits!(env.cost_estimate().resources());
+    assert_eq!(
+        candidate.reward_zone(),
+        soroban_sdk::vec![&env, first.clone()]
+    );
+    assert!(candidate.try_add_reward(&first, &None).is_err());
 
     // Later edits fail closed until the ongoing distributor records a
-    // completed checkpoint. That checkpoint writer is the next milestone.
-    assert!(fixture.candidate.try_add_reward(&second, &None).is_err());
+    // completed checkpoint.
+    blnd_usdc_token.mint(&depositor, &SCALAR_7);
+    candidate.deposit_blnd_usdc(&depositor, &second, &SCALAR_7);
+    assert!(candidate.pool_spot_blnd_emission_values(&second).blnd_usdc > 0);
+    assert!(candidate.try_add_reward(&second, &None).is_err());
+}
+
+#[test]
+fn optimized_v3_distributes_ongoing_blnd_across_maximum_reward_zone() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+    let incumbent = Address::generate(&env);
+    let emitter_id = env.register(LEGACY_EMITTER_WASM, ());
+    let blnd = env
+        .register_stellar_asset_contract_v2(emitter_id.clone())
+        .address();
+    let blnd_usdc = env.register(
+        MockComet,
+        (&blnd, &(1_000_000 * SCALAR_7), &(4_000_000 * SCALAR_7)),
+    );
+    let blnd_xlm = env.register(
+        MockComet,
+        (&blnd, &(1_000_000 * SCALAR_7), &(2_000_000 * SCALAR_7)),
+    );
+    let usdc = env
+        .register_stellar_asset_contract_v2(Address::generate(&env))
+        .address();
+    let emitter = LegacyEmitterClient::new(&env, &emitter_id);
+    emitter.initialize(&blnd, &incumbent, &blnd_usdc);
+
+    let candidate_id = Address::generate(&env);
+    let pool_factory_id = env.register(MockPoolFactory, (&candidate_id,));
+    let valuation_adapter = env.register(v3_test_valuation_adapter::WASM, (&blnd_usdc, &blnd_xlm));
+    env.register_at(
+        &candidate_id,
+        v3_backstop::WASM,
+        (
+            &emitter_id,
+            &blnd,
+            &pool_factory_id,
+            &blnd_usdc,
+            &blnd_xlm,
+            &usdc,
+            &valuation_adapter,
+        ),
+    );
+    let candidate = v3_backstop::Client::new(&env, &candidate_id);
+    let pool_factory = MockPoolFactoryClient::new(&env, &pool_factory_id);
+    let blnd_usdc_token = MockCometClient::new(&env, &blnd_usdc);
+    let depositor = Address::generate(&env);
+    let per_pool = 12_500 * SCALAR_7;
+    blnd_usdc_token.mint(&incumbent, &per_pool);
+    blnd_usdc_token.mint(&depositor, &(30 * per_pool));
+
+    let mut pools = soroban_sdk::Vec::new(&env);
+    for _ in 0..30 {
+        let pool = env.register(MockLossAwarePool, (&candidate_id, false));
+        pool_factory.set_pool(&pool);
+        candidate.deposit_blnd_usdc(&depositor, &pool, &per_pool);
+        pools.push_back(pool);
+    }
+    let first = pools.get(0).unwrap();
+    candidate.add_reward(&first, &None);
+
+    candidate.begin_migration();
+    let unlock = emitter.get_queued_swap().unwrap().unlock_time;
+    env.ledger()
+        .set_timestamp(unlock - PREPARATION_WINDOW_SECONDS);
+    candidate.prepare_migration();
+    env.ledger().set_timestamp(unlock);
+    emitter.swap_backstop();
+
+    env.ledger().set_timestamp(unlock + 10);
+    assert_eq!(emitter.distribute(), 10 * SCALAR_7);
+    assert_eq!(candidate.sync_migration(), unlock + 10);
+    assert_eq!(candidate.backfill_end(), Some(unlock));
+    assert_eq!(
+        candidate.scheduled_backfill(),
+        QUEUE_SECONDS as i128 * SCALAR_7
+    );
+    assert!(!candidate.blnd_binding_verified());
+    assert_eq!(candidate.fund_backfill(), QUEUE_SECONDS as i128 * SCALAR_7);
+    assert!(candidate.blnd_binding_verified());
+
+    env.ledger().set_timestamp(unlock + 15);
+    assert_eq!(candidate.distribute().received, 15 * SCALAR_7);
+    for index in 1..30 {
+        candidate.add_reward(&pools.get(index).unwrap(), &None);
+    }
+    assert_eq!(candidate.reward_zone().len(), 30);
+
+    env.ledger().set_timestamp(unlock + 20);
+    env.cost_estimate().budget().reset_unlimited();
+    let distribution = candidate.distribute();
+    assert_mainnet_invocation_limits!(env.cost_estimate().resources());
+    assert_eq!(distribution.received, 5 * SCALAR_7);
+    assert_eq!(distribution.eligible_blnd, 1_500_000 * SCALAR_7);
+    assert_eq!(
+        candidate.ongoing_emission_state().total_received,
+        20 * SCALAR_7
+    );
+    for pool in pools.iter() {
+        let emissions = candidate.pool_ongoing_emissions(&pool);
+        assert!(emissions.accrued_backstop > 0);
+        assert!(emissions.accrued_pool > 0);
+        assert_eq!(emissions.active_blnd_usdc, per_pool);
+        assert_eq!(emissions.active_blnd_xlm, 0);
+    }
+
+    env.ledger().set_timestamp(unlock + 25);
+    blnd_usdc_token.mint(&depositor, &SCALAR_7);
+    env.cost_estimate().budget().reset_unlimited();
+    candidate.deposit_blnd_usdc(&depositor, &first, &SCALAR_7);
+    assert_mainnet_invocation_limits!(env.cost_estimate().resources());
+    assert_eq!(
+        candidate.ongoing_emission_state().total_received,
+        20 * SCALAR_7
+    );
+    assert_eq!(
+        candidate.pool_ongoing_emissions(&first).active_blnd_usdc,
+        per_pool + SCALAR_7
+    );
+
+    env.ledger().set_timestamp(unlock + 30);
+    let first_before = candidate.pool_ongoing_emissions(&first);
+    let second_before = candidate.pool_ongoing_emissions(&pools.get(1).unwrap());
+    assert_eq!(candidate.distribute().received, 10 * SCALAR_7);
+    let first_after = candidate.pool_ongoing_emissions(&first);
+    let second_after = candidate.pool_ongoing_emissions(&pools.get(1).unwrap());
+    assert!(
+        first_after.accrued_backstop - first_before.accrued_backstop
+            > second_after.accrued_backstop - second_before.accrued_backstop
+    );
+    assert_eq!(
+        candidate.ongoing_emission_state().total_received,
+        30 * SCALAR_7
+    );
+}
+
+#[test]
+fn direct_transfer_only_migration_binds_blnd_through_first_distribution() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+    let incumbent = Address::generate(&env);
+    let emitter_id = env.register(LEGACY_EMITTER_WASM, ());
+    let blnd = env
+        .register_stellar_asset_contract_v2(emitter_id.clone())
+        .address();
+    let blnd_usdc = env.register(
+        MockComet,
+        (&blnd, &(1_000_000 * SCALAR_7), &(4_000_000 * SCALAR_7)),
+    );
+    let blnd_xlm = env.register(
+        MockComet,
+        (&blnd, &(1_000_000 * SCALAR_7), &(2_000_000 * SCALAR_7)),
+    );
+    let usdc = env
+        .register_stellar_asset_contract_v2(Address::generate(&env))
+        .address();
+    let emitter = LegacyEmitterClient::new(&env, &emitter_id);
+    emitter.initialize(&blnd, &incumbent, &blnd_usdc);
+
+    let candidate_id = Address::generate(&env);
+    let pool_factory_id = env.register(MockPoolFactory, (&candidate_id,));
+    let valuation_adapter = env.register(v3_test_valuation_adapter::WASM, (&blnd_usdc, &blnd_xlm));
+    env.register_at(
+        &candidate_id,
+        v3_backstop::WASM,
+        (
+            &emitter_id,
+            &blnd,
+            &pool_factory_id,
+            &blnd_usdc,
+            &blnd_xlm,
+            &usdc,
+            &valuation_adapter,
+        ),
+    );
+    let candidate = v3_backstop::Client::new(&env, &candidate_id);
+    let pool_factory = MockPoolFactoryClient::new(&env, &pool_factory_id);
+    let blnd_usdc_token = MockCometClient::new(&env, &blnd_usdc);
+
+    // Raw LP balances satisfy the immutable emitter, but deliberately create
+    // no candidate shares or migration-backfill weight.
+    blnd_usdc_token.mint(&incumbent, &(100 * SCALAR_7));
+    blnd_usdc_token.mint(&candidate_id, &(100 * SCALAR_7 + 1));
+    candidate.begin_migration();
+    let unlock = emitter.get_queued_swap().unwrap().unlock_time;
+    env.ledger()
+        .set_timestamp(unlock - PREPARATION_WINDOW_SECONDS);
+    candidate.prepare_migration();
+    env.ledger().set_timestamp(unlock);
+    candidate.finalize_migration();
+
+    assert_eq!(candidate.total_migration_weight(), 0);
+    assert!(candidate.try_fund_backfill().is_err());
+    assert_eq!(candidate.funded_backfill(), None);
+    assert!(!candidate.blnd_binding_verified());
+
+    env.ledger().set_timestamp(unlock + 10);
+    assert_eq!(emitter.distribute(), 10 * SCALAR_7);
+
+    // Ordinary post-migration capital can establish a reward-zone weight. The
+    // first positive emitter distribution then proves the configured BLND
+    // binding by exact current-call balance delta, without minting backfill,
+    // while reconciling the earlier direct distribution exactly once.
+    let pool = env.register(MockLossAwarePool, (&candidate_id, false));
+    pool_factory.set_pool(&pool);
+    let depositor = Address::generate(&env);
+    blnd_usdc_token.mint(&depositor, &(12_500 * SCALAR_7));
+    candidate.deposit_blnd_usdc(&depositor, &pool, &(12_500 * SCALAR_7));
+    candidate.add_reward(&pool, &None);
+
+    env.ledger().set_timestamp(unlock + 15);
+    env.cost_estimate().budget().reset_unlimited();
+    let distribution = candidate.distribute();
+    assert_mainnet_invocation_limits!(env.cost_estimate().resources());
+    assert_eq!(distribution.received, 15 * SCALAR_7);
+    assert!(candidate.blnd_binding_verified());
+    assert_eq!(candidate.funded_backfill(), None);
+    assert_eq!(
+        TokenClient::new(&env, &blnd).balance(&candidate_id),
+        15 * SCALAR_7
+    );
 }
 
 #[test]
@@ -2619,6 +2932,22 @@ fn candidate_synchronizes_after_emitter_was_finalized_directly() {
     let original_unlock = fixture.candidate.prepare_migration();
     fixture.unlock();
     fixture.emitter.swap_backstop();
+
+    let pool = fixture.loss_aware_pool(true).address.clone();
+    let depositor = Address::generate(&fixture.env);
+    fixture.legacy_token.mint(&depositor, &SCALAR_7);
+    assert!(fixture
+        .candidate
+        .try_deposit_blnd_usdc(&depositor, &pool, &SCALAR_7)
+        .is_err());
+    assert_eq!(
+        fixture
+            .candidate
+            .migration_position(&depositor, &pool)
+            .amount,
+        0
+    );
+
     fixture
         .env
         .ledger()
@@ -2639,10 +2968,40 @@ fn candidate_synchronizes_after_emitter_was_finalized_directly() {
         Some(original_unlock + SYNC_GRACE_SECONDS)
     );
     assert_eq!(fixture.candidate.activated_at(), Some(synchronized_at));
+    assert_eq!(fixture.candidate.backfill_end(), Some(original_unlock));
+    assert_eq!(
+        fixture.candidate.scheduled_backfill(),
+        QUEUE_SECONDS as i128 * SCALAR_7
+    );
     assert_eq!(
         fixture.blnd.balance(&fixture.candidate.address),
         10 * SCALAR_7
     );
+}
+
+#[test]
+fn post_unlock_deposit_is_excluded_from_current_queue_backfill() {
+    let fixture = Fixture::create();
+    let pool = fixture.loss_aware_pool(true).address.clone();
+    let early = Address::generate(&fixture.env);
+    let late = Address::generate(&fixture.env);
+    fixture.legacy_token.mint(&early, &SCALAR_7);
+    fixture.legacy_token.mint(&late, &SCALAR_7);
+    fixture
+        .candidate
+        .deposit_blnd_usdc(&early, &pool, &SCALAR_7);
+    fixture.fund_qualifying_balances();
+    fixture.queue();
+    fixture.enter_preparation_window();
+    let unlock = fixture.candidate.prepare_migration();
+    fixture.unlock();
+    fixture.env.ledger().set_timestamp(unlock + 5);
+    fixture.candidate.deposit_blnd_usdc(&late, &pool, &SCALAR_7);
+
+    assert_eq!(fixture.candidate.finalize_migration(), unlock + 5);
+    assert!(fixture.candidate.migration_weight(&early, &pool) > 0);
+    assert_eq!(fixture.candidate.migration_weight(&late, &pool), 0);
+    assert!(fixture.candidate.total_migration_weight() > 0);
 }
 
 #[test]
@@ -2958,10 +3317,19 @@ fn unexpected_blnd_balance_delta_rolls_back_backfill_funding() {
     fixture.unlock();
     fixture.candidate.finalize_migration();
 
+    let configured_blnd = fixture.candidate.blnd_token();
+    let prefunded = fixture.candidate.scheduled_backfill();
+    StellarAssetClient::new(&fixture.env, &configured_blnd)
+        .mint(&fixture.candidate.address, &prefunded);
     assert!(fixture.candidate.try_fund_backfill().is_err());
     assert_eq!(fixture.candidate.funded_backfill(), None);
+    assert!(!fixture.candidate.blnd_binding_verified());
     assert_eq!(fixture.candidate.total_backfill_claimed(), 0);
     assert_eq!(fixture.blnd.balance(&fixture.candidate.address), 0);
+    assert_eq!(
+        TokenClient::new(&fixture.env, &configured_blnd).balance(&fixture.candidate.address),
+        prefunded
+    );
 }
 
 #[test]

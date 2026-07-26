@@ -52,6 +52,8 @@ const BACKSTOP_EMISSION_NUMERATOR: i128 = 7;
 const POOL_EMISSION_NUMERATOR: i128 = 3;
 const EMISSION_SPLIT_DENOMINATOR: i128 = 10;
 const MAX_REWARD_ZONE_SIZE: u32 = 30;
+const MIN_DISTRIBUTION_INTERVAL_SECONDS: u64 = 5;
+const WEIGHT_CHANGE_CHECKPOINT_MAX_AGE_SECONDS: u64 = MIN_DISTRIBUTION_INTERVAL_SECONDS;
 const REWARD_ZONE_CHECKPOINT_MAX_AGE_SECONDS: u64 = 60 * 60;
 
 /// The candidate's fixed three-tier backstop set in first-loss order.
@@ -86,7 +88,16 @@ enum DataKey {
     TotalMigrationWeight,
     ScheduledBackfill,
     BackfillFundedAmount,
+    BlndBindingVerified,
     TotalBackfillClaimed,
+    LastOngoingDistribution,
+    OngoingTotalReceived,
+    OngoingTotalClaimed,
+    OngoingBackstopAllocated,
+    OngoingPoolAllocated,
+    OngoingSplitCarry,
+    OngoingBackstopCarry,
+    OngoingPoolCarry,
     TotalBlndUsdcShares,
     TotalBlndUsdcQueuedShares,
     TotalTierShares(BackstopTier),
@@ -108,6 +119,7 @@ enum PersistentKey {
     PoolTierShares(BackstopTier, Address),
     PoolTierQueuedShares(BackstopTier, Address),
     PoolTierAssets(BackstopTier, Address),
+    PoolOngoingEmissions(Address),
 }
 
 #[derive(Clone)]
@@ -179,6 +191,8 @@ pub enum BackstopError {
     InvalidRewardZoneEntry = 1246,
     RewardZoneFull = 1247,
     DistributionCheckpointRequired = 1248,
+    DistributionTooSoon = 1249,
+    InvalidOngoingBalance = 1250,
 }
 
 #[derive(Clone)]
@@ -379,10 +393,55 @@ pub struct RewardZoneCheckpoint {
     pub timestamp: u64,
 }
 
+/// Pool-local ongoing-emission state.
+///
+/// The active amounts are candidate-accounted LP-token assets, not underlying
+/// BLND. They are synchronized from canonical tier shares and assets whenever
+/// either BLND-bearing tier changes, allowing a maximum-size reward-zone
+/// distribution to read one persistent entry per pool.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PoolOngoingEmissions {
+    pub accrued_backstop: i128,
+    pub accrued_pool: i128,
+    pub active_blnd_usdc: i128,
+    pub active_blnd_xlm: i128,
+}
+
+/// Auditable aggregate accounting for ongoing BLND held by the candidate.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct OngoingEmissionState {
+    pub backstop_allocated: i128,
+    pub backstop_carry: i128,
+    pub last_distribution: Option<u64>,
+    pub pool_allocated: i128,
+    pub pool_carry: i128,
+    pub split_carry: i128,
+    pub total_claimed: i128,
+    pub total_received: i128,
+}
+
+/// Result of one completed permissionless ongoing-emission distribution.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct OngoingDistribution {
+    pub backstop_allocated: i128,
+    pub backstop_carry: i128,
+    pub checkpoint: u64,
+    pub eligible_blnd: i128,
+    pub pool_allocated: i128,
+    pub pool_carry: i128,
+    pub received: i128,
+    pub split_carry: i128,
+}
+
 #[contractclient(name = "EmitterClient")]
 pub trait Emitter {
+    fn distribute(env: Env) -> i128;
     fn drop(env: Env, list: Vec<(Address, i128)>);
     fn get_backstop(env: Env) -> Address;
+    fn get_last_distro(env: Env, backstop_id: Address) -> u64;
     fn get_queued_swap(env: Env) -> Option<EmitterSwap>;
     fn queue_swap_backstop(env: Env, new_backstop: Address, new_backstop_token: Address);
     fn swap_backstop(env: Env);
@@ -584,6 +643,15 @@ pub struct RewardZoneRemoved {
     pub pool: Address,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OngoingBlndDistributed {
+    pub backstop_allocated: i128,
+    pub checkpoint: u64,
+    pub pool_allocated: i128,
+    pub received: i128,
+}
+
 #[contract]
 pub struct BackstopContract;
 
@@ -671,6 +739,12 @@ impl BackstopContract {
         env.storage().instance().get(&DataKey::BlndToken).unwrap()
     }
 
+    /// Return whether an exact emitter mint delta has verified the BLND token.
+    pub fn blnd_binding_verified(env: Env) -> bool {
+        extend_instance_ttl(&env);
+        env.storage().instance().has(&DataKey::BlndBindingVerified)
+    }
+
     /// Return the immutable registry used to validate attributed pools.
     pub fn pool_factory(env: Env) -> Address {
         extend_instance_ttl(&env);
@@ -718,14 +792,14 @@ impl BackstopContract {
 
     /// Return the most recent completed distribution checkpoint, if any.
     ///
-    /// The ongoing distributor added in the next milestone writes this
-    /// checkpoint only after it has accounted through the returned timestamp.
+    /// The ongoing distributor writes this checkpoint only after it has
+    /// accounted through the returned timestamp.
     pub fn reward_zone_checkpoint(env: Env) -> Option<RewardZoneCheckpoint> {
         extend_instance_ttl(&env);
         get_reward_zone_checkpoint(&env).map(|timestamp| RewardZoneCheckpoint { timestamp })
     }
 
-    /// Add a threshold-qualified registered pool to the reward zone.
+    /// Add a threshold-qualified, positive-BLND registered pool to the reward zone.
     ///
     /// The first member needs no earlier distribution. Every later edit
     /// requires a completed distribution checkpoint within the preceding hour.
@@ -741,11 +815,52 @@ impl BackstopContract {
         .publish(&env);
     }
 
-    /// Remove a member only after it falls below the maintenance threshold.
+    /// Remove a member below maintenance or with zero eligible BLND.
+    ///
+    /// Zero-weight removal needs no distribution checkpoint because it cannot
+    /// reallocate unresolved emissions.
     pub fn remove_reward(env: Env, to_remove: Address) {
         extend_instance_ttl(&env);
         remove_from_reward_zone(&env, &to_remove);
         RewardZoneRemoved { pool: to_remove }.publish(&env);
+    }
+
+    /// Reconcile BLND actually held after emitter distribution and account it
+    /// across the bounded reward zone.
+    ///
+    /// The call is permissionless and available only after this candidate is
+    /// the emitter's active backstop. Exact-delta backfill funding may have
+    /// already bound the configured BLND token to the emitter's minted asset;
+    /// otherwise, the first positive ongoing distribution establishes that
+    /// binding atomically from its own emitter-call balance delta. Both the
+    /// immutable 70/30 split and each reward-zone allocation retain their own
+    /// integer carry. The public reward-zone checkpoint is written only after
+    /// every pool accrual and aggregate conservation check succeeds.
+    pub fn distribute(env: Env) -> OngoingDistribution {
+        extend_instance_ttl(&env);
+        let distribution = distribute_ongoing_blnd(&env);
+        OngoingBlndDistributed {
+            backstop_allocated: distribution.backstop_allocated,
+            checkpoint: distribution.checkpoint,
+            pool_allocated: distribution.pool_allocated,
+            received: distribution.received,
+        }
+        .publish(&env);
+        distribution
+    }
+
+    /// Return aggregate ongoing-emission receipts, allocations, and carries.
+    pub fn ongoing_emission_state(env: Env) -> OngoingEmissionState {
+        extend_instance_ttl(&env);
+        get_ongoing_emission_state(&env)
+    }
+
+    /// Return one registered pool's active LP amounts and accrued 70/30
+    /// tranches.
+    pub fn pool_ongoing_emissions(env: Env, pool: Address) -> PoolOngoingEmissions {
+        extend_instance_ttl(&env);
+        require_registered_pool(&env, &pool);
+        get_pool_ongoing_emissions(&env, &pool)
     }
 
     /// Deposit BLND:XLM LP into its pool-attributed second-loss tier.
@@ -1676,8 +1791,9 @@ impl BackstopContract {
     /// Deposit BLND:USDC into its continuous pool-attributed backstop tier.
     ///
     /// Before migration, these same shares also count toward legacy-emitter
-    /// qualification and earn amount-times-time backfill weight. Deposits after
-    /// migration are ordinary tier shares and earn no retroactive backfill.
+    /// qualification and earn amount-times-time backfill weight until the
+    /// currently verified queue unlocks. Deposits at or after that unlock are
+    /// ordinary tier shares and earn no backfill for that queue.
     pub fn deposit_blnd_usdc(env: Env, from: Address, pool: Address, amount: i128) {
         extend_instance_ttl(&env);
         deposit_blnd_usdc_position(&env, from, pool, amount);
@@ -1834,6 +1950,9 @@ impl BackstopContract {
         if received != scheduled {
             panic_with_error!(&env, BackstopError::InvalidBackfillFunding);
         }
+        env.storage()
+            .instance()
+            .set(&DataKey::BlndBindingVerified, &true);
 
         BackfillFunded { amount: scheduled }.publish(&env);
         scheduled
@@ -2114,7 +2233,7 @@ impl BackstopContract {
             panic_with_error!(&env, BackstopError::EmitterDidNotMigrate);
         }
 
-        activate(&env)
+        activate(&env, env.ledger().timestamp())
     }
 
     /// Synchronize lifecycle state after the emitter was finalized directly.
@@ -2139,7 +2258,11 @@ impl BackstopContract {
             panic_with_error!(&env, BackstopError::EmitterDidNotMigrate);
         }
 
-        activate(&env)
+        // The emitter may have started sending ongoing BLND immediately after
+        // a direct swap. Cap recovery-path backfill at the earliest verified
+        // swap time so the synchronization delay cannot earn under both
+        // regimes.
+        activate(&env, verified_unlock)
     }
 }
 
@@ -2299,11 +2422,20 @@ fn recovery_end(env: &Env, original_unlock: u64) -> u64 {
     queue_anchored_end
 }
 
-fn activate(env: &Env) -> u64 {
+fn activate(env: &Env, requested_backfill_end: u64) -> u64 {
     let original_unlock = require_prepared(env);
     let activated_at = env.ledger().timestamp();
+    if requested_backfill_end > activated_at {
+        panic_with_error!(env, BackstopError::InvalidOngoingBalance);
+    }
+    let candidate = env.current_contract_address();
+    let emitter = EmitterClient::new(env, &get_emitter(env));
+    let last_distribution = emitter.get_last_distro(&candidate);
+    if last_distribution > activated_at {
+        panic_with_error!(env, BackstopError::InvalidOngoingBalance);
+    }
     let backfill_cap = recovery_end(env, original_unlock);
-    let backfill_end = activated_at.min(backfill_cap);
+    let backfill_end = requested_backfill_end.min(backfill_cap);
     let migration_epoch_start: u64 = env
         .storage()
         .instance()
@@ -2337,6 +2469,19 @@ fn activate(env: &Env) -> u64 {
     env.storage()
         .instance()
         .set(&DataKey::TotalMigrationWeight, &total_weight);
+    set_ongoing_emission_state(
+        env,
+        &OngoingEmissionState {
+            backstop_allocated: 0,
+            backstop_carry: 0,
+            last_distribution: Some(last_distribution),
+            pool_allocated: 0,
+            pool_carry: 0,
+            split_carry: 0,
+            total_claimed: 0,
+            total_received: 0,
+        },
+    );
     MigrationActivated {
         activated_at,
         backfill_end,
@@ -2357,6 +2502,13 @@ fn eligibility_timestamp(env: &Env, timestamp: u64) -> u64 {
     }
 }
 
+fn backfill_deposit_eligible_for_current_queue(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get::<DataKey, u64>(&DataKey::VerifiedQueueUnlock)
+        .is_none_or(|unlock| env.ledger().timestamp() < unlock)
+}
+
 fn deposit_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: i128) {
     require_positive(env, amount);
     from.require_auth();
@@ -2368,6 +2520,7 @@ fn deposit_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: i
     let state = get_pool_tier_state(env, BackstopTier::BlndUsdc, &pool);
     let shares = shares_from_assets(env, amount, &state);
     require_positive(env, shares);
+    require_recent_ongoing_checkpoint_for_weight_change(env, BackstopTier::BlndUsdc, &pool);
 
     // Keep companion withdrawal state live whenever the position is touched.
     get_blnd_usdc_q4w(env, &from, &pool);
@@ -2382,12 +2535,14 @@ fn deposit_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: i
         }
     } else {
         try_open_epoch_from_current_queue(env);
-        let timestamp = eligibility_timestamp(env, env.ledger().timestamp());
-        let time_basis_delta = checked_mul_i128(env, amount, timestamp as i128);
-        position.backfill_amount = checked_add_i128(env, position.backfill_amount, amount);
-        position.time_basis = checked_add_i128(env, position.time_basis, time_basis_delta);
-        add_to_instance_total(env, DataKey::TotalMigrationAmount, amount);
-        add_to_instance_total(env, DataKey::TotalMigrationTimeBasis, time_basis_delta);
+        if backfill_deposit_eligible_for_current_queue(env) {
+            let timestamp = eligibility_timestamp(env, env.ledger().timestamp());
+            let time_basis_delta = checked_mul_i128(env, amount, timestamp as i128);
+            position.backfill_amount = checked_add_i128(env, position.backfill_amount, amount);
+            position.time_basis = checked_add_i128(env, position.time_basis, time_basis_delta);
+            add_to_instance_total(env, DataKey::TotalMigrationAmount, amount);
+            add_to_instance_total(env, DataKey::TotalMigrationTimeBasis, time_basis_delta);
+        }
     }
     position.amount = checked_add_i128(env, position.amount, shares);
     set_position(env, &from, &pool, &position);
@@ -2399,6 +2554,7 @@ fn deposit_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: i
         &pool,
         checked_add_i128(env, state.assets, amount),
     );
+    refresh_pool_ongoing_assets(env, &pool);
     add_to_instance_total(env, DataKey::TotalBlndUsdcShares, shares);
     add_to_instance_total(
         env,
@@ -2439,6 +2595,7 @@ fn deposit_standard_tier(
     let state = get_pool_tier_state(env, tier, &pool);
     let shares = shares_from_assets(env, amount, &state);
     require_positive(env, shares);
+    require_recent_ongoing_checkpoint_for_weight_change(env, tier, &pool);
 
     // Keep the companion queue live whenever its position is touched.
     get_tier_q4w(env, tier, &from, &pool);
@@ -2462,6 +2619,7 @@ fn deposit_standard_tier(
         &pool,
         checked_add_i128(env, state.assets, amount),
     );
+    refresh_pool_ongoing_assets_for_tier(env, tier, &pool);
     add_to_instance_total(env, DataKey::TotalTierShares(tier), shares);
     add_to_instance_total(env, DataKey::TotalTierAssets(tier), amount);
 
@@ -2501,6 +2659,7 @@ fn queue_standard_tier_withdrawal(
     if queue.len() >= MAX_Q4W_ENTRIES {
         panic_with_error!(env, BackstopError::TooManyQ4WEntries);
     }
+    require_recent_ongoing_checkpoint_for_weight_change(env, tier, &pool);
 
     let expires_at = env
         .ledger()
@@ -2514,6 +2673,7 @@ fn queue_standard_tier_withdrawal(
     queue.push_back(entry.clone());
     set_tier_q4w(env, tier, &from, &pool, &queue);
     add_pool_tier_queued_shares(env, tier, &pool, shares);
+    refresh_pool_ongoing_assets_for_tier(env, tier, &pool);
     add_to_instance_total(env, DataKey::TotalTierQueuedShares(tier), shares);
     TierWithdrawalQueued {
         depositor: from,
@@ -2539,8 +2699,10 @@ fn dequeue_standard_tier_withdrawal(
 
     let mut queue = get_tier_q4w(env, tier, &from, &pool);
     consume_tier_queue_from_back(env, &mut queue, shares);
+    require_recent_ongoing_checkpoint_for_weight_change(env, tier, &pool);
     set_tier_q4w(env, tier, &from, &pool, &queue);
     add_pool_tier_queued_shares(env, tier, &pool, -shares);
+    refresh_pool_ongoing_assets_for_tier(env, tier, &pool);
     add_to_instance_total(env, DataKey::TotalTierQueuedShares(tier), -shares);
     TierWithdrawalDequeued {
         depositor: from,
@@ -2572,6 +2734,7 @@ fn withdraw_standard_tier(
     }
     let state = get_pool_tier_state(env, tier, &pool);
     let assets = assets_from_shares(env, shares, &state);
+    require_recent_ongoing_checkpoint_for_weight_change(env, tier, &pool);
     consume_expired_tier_q4w(env, tier, &from, &pool, shares);
     let user_shares = get_tier_shares(env, tier, &from, &pool);
     if shares > user_shares {
@@ -2600,6 +2763,7 @@ fn withdraw_standard_tier(
         checked_sub_i128(env, state.assets, assets),
     );
     add_pool_tier_queued_shares(env, tier, &pool, -shares);
+    refresh_pool_ongoing_assets_for_tier(env, tier, &pool);
     add_to_instance_total(env, DataKey::TotalTierShares(tier), -shares);
     add_to_instance_total(env, DataKey::TotalTierQueuedShares(tier), -shares);
     add_to_instance_total(env, DataKey::TotalTierAssets(tier), -assets);
@@ -2735,6 +2899,7 @@ fn require_recent_distribution_checkpoint(env: &Env) {
 }
 
 fn add_to_reward_zone(env: &Env, to_add: &Address, to_remove: Option<&Address>) -> Option<Address> {
+    require_no_unsynchronized_emitter_recipient(env);
     let mut reward_zone = get_reward_zone(env);
     if reward_zone.contains(to_add.clone()) {
         panic_with_error!(env, BackstopError::InvalidRewardZoneEntry);
@@ -2742,6 +2907,10 @@ fn add_to_reward_zone(env: &Env, to_add: &Address, to_remove: Option<&Address>) 
 
     let valuation = build_pool_valuation(env, to_add);
     if !quote_activation_values(env, &valuation.active_values, false).meets_threshold {
+        panic_with_error!(env, BackstopError::InvalidRewardZoneEntry);
+    }
+    let entrant_weight = eligible_blnd(env, &pool_spot_blnd_values(env, to_add));
+    if entrant_weight <= 0 {
         panic_with_error!(env, BackstopError::InvalidRewardZoneEntry);
     }
     if !reward_zone.is_empty() {
@@ -2756,7 +2925,6 @@ fn add_to_reward_zone(env: &Env, to_add: &Address, to_remove: Option<&Address>) 
         let remove_index = reward_zone
             .first_index_of(to_remove.clone())
             .unwrap_or_else(|| panic_with_error!(env, BackstopError::InvalidRewardZoneEntry));
-        let entrant_weight = eligible_blnd(env, &pool_spot_blnd_values(env, to_add));
         let removed_weight = eligible_blnd(env, &pool_spot_blnd_values(env, to_remove));
         if entrant_weight <= removed_weight {
             panic_with_error!(env, BackstopError::InvalidRewardZoneEntry);
@@ -2766,20 +2934,25 @@ fn add_to_reward_zone(env: &Env, to_add: &Address, to_remove: Option<&Address>) 
     };
 
     reward_zone.push_front(to_add.clone());
+    refresh_pool_ongoing_assets(env, to_add);
     set_reward_zone(env, &reward_zone);
     removed
 }
 
 fn remove_from_reward_zone(env: &Env, to_remove: &Address) {
+    require_no_unsynchronized_emitter_recipient(env);
     let mut reward_zone = get_reward_zone(env);
     let remove_index = reward_zone
         .first_index_of(to_remove.clone())
         .unwrap_or_else(|| panic_with_error!(env, BackstopError::InvalidRewardZoneEntry));
-    let valuation = build_pool_valuation(env, to_remove);
-    if quote_activation_values(env, &valuation.active_values, true).meets_threshold {
-        panic_with_error!(env, BackstopError::InvalidRewardZoneEntry);
+    let removed_weight = eligible_blnd(env, &pool_spot_blnd_values(env, to_remove));
+    if removed_weight > 0 {
+        let valuation = build_pool_valuation(env, to_remove);
+        if quote_activation_values(env, &valuation.active_values, true).meets_threshold {
+            panic_with_error!(env, BackstopError::InvalidRewardZoneEntry);
+        }
+        require_recent_distribution_checkpoint(env);
     }
-    require_recent_distribution_checkpoint(env);
     reward_zone.remove(remove_index);
     set_reward_zone(env, &reward_zone);
 }
@@ -2806,6 +2979,390 @@ fn pool_active_emission_assets(env: &Env, tier: BackstopTier, pool: &Address) ->
     assets_from_shares(env, active_shares, &state)
 }
 
+fn get_pool_ongoing_emissions(env: &Env, pool: &Address) -> PoolOngoingEmissions {
+    let key = PersistentKey::PoolOngoingEmissions(pool.clone());
+    let state = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(PoolOngoingEmissions {
+            accrued_backstop: 0,
+            accrued_pool: 0,
+            active_blnd_usdc: 0,
+            active_blnd_xlm: 0,
+        });
+    extend_persistent_ttl_if_present(env, &key);
+    if state.accrued_backstop < 0
+        || state.accrued_pool < 0
+        || state.active_blnd_usdc < 0
+        || state.active_blnd_xlm < 0
+    {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    state
+}
+
+fn set_pool_ongoing_emissions(env: &Env, pool: &Address, state: &PoolOngoingEmissions) {
+    if state.accrued_backstop < 0
+        || state.accrued_pool < 0
+        || state.active_blnd_usdc < 0
+        || state.active_blnd_xlm < 0
+    {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    let key = PersistentKey::PoolOngoingEmissions(pool.clone());
+    env.storage().persistent().set(&key, state);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
+}
+
+fn refresh_pool_ongoing_assets(env: &Env, pool: &Address) {
+    let mut state = get_pool_ongoing_emissions(env, pool);
+    state.active_blnd_usdc = pool_active_emission_assets(env, BackstopTier::BlndUsdc, pool);
+    state.active_blnd_xlm = pool_active_emission_assets(env, BackstopTier::BlndXlm, pool);
+    set_pool_ongoing_emissions(env, pool, &state);
+}
+
+fn refresh_pool_ongoing_assets_for_tier(env: &Env, tier: BackstopTier, pool: &Address) {
+    if tier != BackstopTier::Usdc {
+        refresh_pool_ongoing_assets(env, pool);
+    }
+}
+
+fn get_ongoing_emission_state(env: &Env) -> OngoingEmissionState {
+    OngoingEmissionState {
+        backstop_allocated: env
+            .storage()
+            .instance()
+            .get(&DataKey::OngoingBackstopAllocated)
+            .unwrap_or(0),
+        backstop_carry: env
+            .storage()
+            .instance()
+            .get(&DataKey::OngoingBackstopCarry)
+            .unwrap_or(0),
+        last_distribution: env
+            .storage()
+            .instance()
+            .get(&DataKey::LastOngoingDistribution),
+        pool_allocated: env
+            .storage()
+            .instance()
+            .get(&DataKey::OngoingPoolAllocated)
+            .unwrap_or(0),
+        pool_carry: env
+            .storage()
+            .instance()
+            .get(&DataKey::OngoingPoolCarry)
+            .unwrap_or(0),
+        split_carry: env
+            .storage()
+            .instance()
+            .get(&DataKey::OngoingSplitCarry)
+            .unwrap_or(0),
+        total_claimed: env
+            .storage()
+            .instance()
+            .get(&DataKey::OngoingTotalClaimed)
+            .unwrap_or(0),
+        total_received: env
+            .storage()
+            .instance()
+            .get(&DataKey::OngoingTotalReceived)
+            .unwrap_or(0),
+    }
+}
+
+fn set_ongoing_emission_state(env: &Env, state: &OngoingEmissionState) {
+    if state.backstop_allocated < 0
+        || state.backstop_carry < 0
+        || state.pool_allocated < 0
+        || state.pool_carry < 0
+        || state.split_carry < 0
+        || state.total_claimed < 0
+        || state.total_received < 0
+        || state.total_claimed > state.total_received
+    {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    let accounted = checked_add_i128(
+        env,
+        checked_add_i128(env, state.backstop_allocated, state.pool_allocated),
+        checked_add_i128(
+            env,
+            state.split_carry,
+            checked_add_i128(env, state.backstop_carry, state.pool_carry),
+        ),
+    );
+    if accounted != state.total_received {
+        panic_with_error!(env, BackstopError::InvalidOngoingBalance);
+    }
+
+    env.storage().instance().set(
+        &DataKey::OngoingBackstopAllocated,
+        &state.backstop_allocated,
+    );
+    env.storage()
+        .instance()
+        .set(&DataKey::OngoingBackstopCarry, &state.backstop_carry);
+    env.storage()
+        .instance()
+        .set(&DataKey::OngoingPoolAllocated, &state.pool_allocated);
+    env.storage()
+        .instance()
+        .set(&DataKey::OngoingPoolCarry, &state.pool_carry);
+    env.storage()
+        .instance()
+        .set(&DataKey::OngoingSplitCarry, &state.split_carry);
+    env.storage()
+        .instance()
+        .set(&DataKey::OngoingTotalClaimed, &state.total_claimed);
+    env.storage()
+        .instance()
+        .set(&DataKey::OngoingTotalReceived, &state.total_received);
+    if let Some(last_distribution) = state.last_distribution {
+        env.storage()
+            .instance()
+            .set(&DataKey::LastOngoingDistribution, &last_distribution);
+    }
+}
+
+fn remaining_backfill_or_zero(env: &Env) -> i128 {
+    let funded: Option<i128> = env.storage().instance().get(&DataKey::BackfillFundedAmount);
+    match funded {
+        Some(funded) => {
+            let claimed = env
+                .storage()
+                .instance()
+                .get(&DataKey::TotalBackfillClaimed)
+                .unwrap_or(0);
+            checked_nonnegative_sub_i128(env, funded, claimed)
+        }
+        None => 0,
+    }
+}
+
+fn comet_composition(env: &Env, tier: BackstopTier) -> (i128, i128) {
+    let lp_token = match tier {
+        BackstopTier::BlndUsdc | BackstopTier::BlndXlm => tier_token(env, tier),
+        BackstopTier::Usdc => panic_with_error!(env, BackstopError::InvalidTier),
+    };
+    let comet = CometClient::new(env, &lp_token);
+    let total_supply = comet.get_total_supply();
+    let blnd: Address = env.storage().instance().get(&DataKey::BlndToken).unwrap();
+    let blnd_reserve = comet.get_balance(&blnd);
+    if total_supply <= 0 || blnd_reserve < 0 {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    (total_supply, blnd_reserve)
+}
+
+fn underlying_blnd_from_composition(
+    env: &Env,
+    lp_amount: i128,
+    total_supply: i128,
+    blnd_reserve: i128,
+) -> i128 {
+    if lp_amount < 0 || total_supply <= 0 || blnd_reserve < 0 || lp_amount > total_supply {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    proportional_floor(env, lp_amount, blnd_reserve, total_supply)
+}
+
+fn require_recent_ongoing_checkpoint_for_weight_change(
+    env: &Env,
+    tier: BackstopTier,
+    pool: &Address,
+) {
+    if tier == BackstopTier::Usdc {
+        return;
+    }
+    if !env.storage().instance().has(&DataKey::ActivatedAt) {
+        require_no_unsynchronized_emitter_recipient(env);
+        return;
+    }
+    if !get_reward_zone(env).contains(pool.clone()) {
+        return;
+    }
+    let checkpoint = get_reward_zone_checkpoint(env)
+        .unwrap_or_else(|| panic_with_error!(env, BackstopError::DistributionCheckpointRequired));
+    let age = env
+        .ledger()
+        .timestamp()
+        .checked_sub(checkpoint)
+        .unwrap_or_else(|| panic_with_error!(env, BackstopError::DistributionCheckpointRequired));
+    if age > WEIGHT_CHANGE_CHECKPOINT_MAX_AGE_SECONDS {
+        panic_with_error!(env, BackstopError::DistributionCheckpointRequired);
+    }
+}
+
+fn require_no_unsynchronized_emitter_recipient(env: &Env) {
+    if env.storage().instance().has(&DataKey::ActivatedAt) {
+        return;
+    }
+    let Some(verified_unlock) = env
+        .storage()
+        .instance()
+        .get::<DataKey, u64>(&DataKey::VerifiedQueueUnlock)
+    else {
+        return;
+    };
+    if env.ledger().timestamp() < verified_unlock {
+        return;
+    }
+    if EmitterClient::new(env, &get_emitter(env)).get_backstop() == env.current_contract_address() {
+        panic_with_error!(env, BackstopError::MigrationNotActive);
+    }
+}
+
+fn distribute_ongoing_blnd(env: &Env) -> OngoingDistribution {
+    if !env.storage().instance().has(&DataKey::ActivatedAt) {
+        panic_with_error!(env, BackstopError::MigrationNotActive);
+    }
+    let candidate = env.current_contract_address();
+    let emitter = EmitterClient::new(env, &get_emitter(env));
+    if emitter.get_backstop() != candidate {
+        panic_with_error!(env, BackstopError::EmitterDidNotMigrate);
+    }
+
+    let reward_zone = get_reward_zone(env);
+    if reward_zone.is_empty() {
+        panic_with_error!(env, BackstopError::NoEligibleWeight);
+    }
+    let (blnd_usdc_supply, blnd_usdc_reserve) = comet_composition(env, BackstopTier::BlndUsdc);
+    let (blnd_xlm_supply, blnd_xlm_reserve) = comet_composition(env, BackstopTier::BlndXlm);
+    let mut weights = Vec::new(env);
+    let mut total_eligible_blnd = 0_i128;
+    let mut total_blnd_usdc = 0_i128;
+    let mut total_blnd_xlm = 0_i128;
+    for pool in reward_zone.iter() {
+        let pool_state = get_pool_ongoing_emissions(env, &pool);
+        total_blnd_usdc = checked_add_i128(env, total_blnd_usdc, pool_state.active_blnd_usdc);
+        total_blnd_xlm = checked_add_i128(env, total_blnd_xlm, pool_state.active_blnd_xlm);
+        let pool_blnd_usdc = underlying_blnd_from_composition(
+            env,
+            pool_state.active_blnd_usdc,
+            blnd_usdc_supply,
+            blnd_usdc_reserve,
+        );
+        let pool_blnd_xlm = underlying_blnd_from_composition(
+            env,
+            pool_state.active_blnd_xlm,
+            blnd_xlm_supply,
+            blnd_xlm_reserve,
+        );
+        let pool_weight = checked_add_i128(env, pool_blnd_usdc, pool_blnd_xlm);
+        total_eligible_blnd = checked_add_i128(env, total_eligible_blnd, pool_weight);
+        weights.push_back((pool, pool_weight));
+    }
+    if total_blnd_usdc > blnd_usdc_supply
+        || total_blnd_xlm > blnd_xlm_supply
+        || total_eligible_blnd <= 0
+    {
+        panic_with_error!(env, BackstopError::NoEligibleWeight);
+    }
+
+    let mut state = get_ongoing_emission_state(env);
+    let last_distribution = state
+        .last_distribution
+        .unwrap_or_else(|| panic_with_error!(env, BackstopError::MigrationNotActive));
+    let blnd: Address = env.storage().instance().get(&DataKey::BlndToken).unwrap();
+    let token = TokenClient::new(env, &blnd);
+    let binding_verified = env.storage().instance().has(&DataKey::BlndBindingVerified);
+    let balance_before = if binding_verified {
+        None
+    } else {
+        Some(token.balance(&candidate))
+    };
+    let emitted = emitter.distribute();
+    if emitted < 0 {
+        panic_with_error!(env, BackstopError::InvalidOngoingBalance);
+    }
+    let checkpoint = emitter.get_last_distro(&candidate);
+    let elapsed = checkpoint
+        .checked_sub(last_distribution)
+        .unwrap_or_else(|| panic_with_error!(env, BackstopError::DistributionTooSoon));
+    if elapsed < MIN_DISTRIBUTION_INTERVAL_SECONDS || checkpoint > env.ledger().timestamp() {
+        panic_with_error!(env, BackstopError::DistributionTooSoon);
+    }
+
+    let outstanding_ongoing =
+        checked_nonnegative_sub_i128(env, state.total_received, state.total_claimed);
+    let protected_balance =
+        checked_add_i128(env, remaining_backfill_or_zero(env), outstanding_ongoing);
+    let balance = token.balance(&candidate);
+    if let Some(balance_before) = balance_before {
+        // The first positive ongoing mint is an independent binding path for a
+        // migration with no eligible backfill weight. Compare only this call's
+        // balance delta so a pre-funded wrong token cannot mask a mismatch.
+        let binding_delta = checked_sub_i128(env, balance, balance_before);
+        if emitted <= 0 || binding_delta != emitted {
+            panic_with_error!(env, BackstopError::InvalidOngoingBalance);
+        }
+    }
+    if balance < protected_balance {
+        panic_with_error!(env, BackstopError::InvalidOngoingBalance);
+    }
+    let received = checked_sub_i128(env, balance, protected_balance);
+    if received <= 0 || received < emitted {
+        panic_with_error!(env, BackstopError::InvalidOngoingBalance);
+    }
+
+    let split = quote_ongoing_blnd_split_values(env, received, state.split_carry);
+    let backstop_distribution = checked_add_i128(env, split.backstop, state.backstop_carry);
+    let pool_distribution = checked_add_i128(env, split.pool, state.pool_carry);
+    let mut backstop_allocated = 0_i128;
+    let mut pool_allocated = 0_i128;
+    for (pool, weight) in weights.iter() {
+        let backstop_allocation =
+            proportional_floor(env, backstop_distribution, weight, total_eligible_blnd);
+        let pool_allocation =
+            proportional_floor(env, pool_distribution, weight, total_eligible_blnd);
+        let mut pool_state = get_pool_ongoing_emissions(env, &pool);
+        pool_state.accrued_backstop =
+            checked_add_i128(env, pool_state.accrued_backstop, backstop_allocation);
+        pool_state.accrued_pool = checked_add_i128(env, pool_state.accrued_pool, pool_allocation);
+        set_pool_ongoing_emissions(env, &pool, &pool_state);
+        backstop_allocated = checked_add_i128(env, backstop_allocated, backstop_allocation);
+        pool_allocated = checked_add_i128(env, pool_allocated, pool_allocation);
+    }
+
+    state.total_received = checked_add_i128(env, state.total_received, received);
+    state.backstop_allocated = checked_add_i128(env, state.backstop_allocated, backstop_allocated);
+    state.pool_allocated = checked_add_i128(env, state.pool_allocated, pool_allocated);
+    state.split_carry = split.carry;
+    state.backstop_carry =
+        checked_nonnegative_sub_i128(env, backstop_distribution, backstop_allocated);
+    state.pool_carry = checked_nonnegative_sub_i128(env, pool_distribution, pool_allocated);
+    state.last_distribution = Some(checkpoint);
+    set_ongoing_emission_state(env, &state);
+    if !binding_verified {
+        env.storage()
+            .instance()
+            .set(&DataKey::BlndBindingVerified, &true);
+    }
+
+    let checkpoint_key = PersistentKey::RewardZoneCheckpoint;
+    env.storage().persistent().set(&checkpoint_key, &checkpoint);
+    env.storage().persistent().extend_ttl(
+        &checkpoint_key,
+        POSITION_TTL_THRESHOLD,
+        POSITION_TTL_BUMP,
+    );
+
+    OngoingDistribution {
+        backstop_allocated,
+        backstop_carry: state.backstop_carry,
+        checkpoint,
+        eligible_blnd: total_eligible_blnd,
+        pool_allocated,
+        pool_carry: state.pool_carry,
+        received,
+        split_carry: state.split_carry,
+    }
+}
+
 fn queue_blnd_usdc_withdrawal(env: &Env, from: Address, pool: Address, amount: i128) -> Q4WEntry {
     require_positive(env, amount);
     from.require_auth();
@@ -2820,6 +3377,7 @@ fn queue_blnd_usdc_withdrawal(env: &Env, from: Address, pool: Address, amount: i
     if queue.len() >= MAX_Q4W_ENTRIES {
         panic_with_error!(env, BackstopError::TooManyQ4WEntries);
     }
+    require_recent_ongoing_checkpoint_for_weight_change(env, BackstopTier::BlndUsdc, &pool);
 
     let expires_at = env
         .ledger()
@@ -2830,6 +3388,7 @@ fn queue_blnd_usdc_withdrawal(env: &Env, from: Address, pool: Address, amount: i
     queue.push_back(entry.clone());
     set_blnd_usdc_q4w(env, &from, &pool, &queue);
     add_pool_blnd_usdc_queued_shares(env, &pool, amount);
+    refresh_pool_ongoing_assets(env, &pool);
     add_to_instance_total(env, DataKey::TotalBlndUsdcQueuedShares, amount);
 
     BlndUsdcWithdrawalQueued {
@@ -2860,8 +3419,10 @@ fn dequeue_blnd_usdc_withdrawal(env: &Env, from: Address, pool: Address, amount:
             remaining = checked_sub_i128(env, remaining, entry.amount);
         }
     }
+    require_recent_ongoing_checkpoint_for_weight_change(env, BackstopTier::BlndUsdc, &pool);
     set_blnd_usdc_q4w(env, &from, &pool, &queue);
     add_pool_blnd_usdc_queued_shares(env, &pool, -amount);
+    refresh_pool_ongoing_assets(env, &pool);
     add_to_instance_total(env, DataKey::TotalBlndUsdcQueuedShares, -amount);
 
     BlndUsdcWithdrawalDequeued {
@@ -2885,6 +3446,7 @@ fn withdraw_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: 
     }
     let state = get_pool_tier_state(env, BackstopTier::BlndUsdc, &pool);
     let assets = assets_from_shares(env, amount, &state);
+    require_recent_ongoing_checkpoint_for_weight_change(env, BackstopTier::BlndUsdc, &pool);
     consume_expired_blnd_usdc_q4w(env, &from, &pool, amount);
     let mut position = get_position(env, &from, &pool);
     if amount > position.amount {
@@ -2923,6 +3485,7 @@ fn withdraw_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: 
         checked_sub_i128(env, state.assets, assets),
     );
     add_pool_blnd_usdc_queued_shares(env, &pool, -amount);
+    refresh_pool_ongoing_assets(env, &pool);
     add_to_instance_total(env, DataKey::TotalBlndUsdcShares, -amount);
     add_to_instance_total(env, DataKey::TotalBlndUsdcQueuedShares, -amount);
     add_to_instance_total(
@@ -3180,7 +3743,9 @@ fn apply_pool_tier_loss(env: &Env, tier: BackstopTier, pool: &Address, assets: i
     if assets > state.assets {
         panic_with_error!(env, BackstopError::InsufficientBalance);
     }
+    require_recent_ongoing_checkpoint_for_weight_change(env, tier, pool);
     set_pool_tier_assets(env, tier, pool, checked_sub_i128(env, state.assets, assets));
+    refresh_pool_ongoing_assets_for_tier(env, tier, pool);
     add_to_instance_total(env, DataKey::TotalTierAssets(tier), -assets);
 }
 
@@ -3192,7 +3757,9 @@ fn apply_pool_tier_gain(env: &Env, tier: BackstopTier, pool: &Address, assets: i
     if state.shares == 0 {
         panic_with_error!(env, BackstopError::InvalidInterestLot);
     }
+    require_recent_ongoing_checkpoint_for_weight_change(env, tier, pool);
     set_pool_tier_assets(env, tier, pool, checked_add_i128(env, state.assets, assets));
+    refresh_pool_ongoing_assets_for_tier(env, tier, pool);
     add_to_instance_total(env, DataKey::TotalTierAssets(tier), assets);
 }
 
@@ -3819,21 +4386,8 @@ fn eligible_blnd(env: &Env, values: &BlndEmissionValues) -> i128 {
 }
 
 fn spot_underlying_blnd(env: &Env, tier: BackstopTier, lp_amount: i128) -> i128 {
-    if lp_amount < 0 {
-        panic_with_error!(env, BackstopError::InvalidEmissionValue);
-    }
-    let lp_token = match tier {
-        BackstopTier::BlndUsdc | BackstopTier::BlndXlm => tier_token(env, tier),
-        BackstopTier::Usdc => panic_with_error!(env, BackstopError::InvalidTier),
-    };
-    let comet = CometClient::new(env, &lp_token);
-    let total_supply = comet.get_total_supply();
-    let blnd: Address = env.storage().instance().get(&DataKey::BlndToken).unwrap();
-    let blnd_reserve = comet.get_balance(&blnd);
-    if total_supply <= 0 || blnd_reserve < 0 || lp_amount > total_supply {
-        panic_with_error!(env, BackstopError::InvalidEmissionValue);
-    }
-    proportional_floor(env, lp_amount, blnd_reserve, total_supply)
+    let (total_supply, blnd_reserve) = comet_composition(env, tier);
+    underlying_blnd_from_composition(env, lp_amount, total_supply, blnd_reserve)
 }
 
 fn quote_ongoing_blnd_split_values(
@@ -4188,6 +4742,7 @@ mod tests {
     #[derive(Clone)]
     #[contracttype]
     enum MockCometKey {
+        Balance(Address),
         Blnd,
         BlndReserve,
         TotalSupply,
@@ -4232,6 +4787,38 @@ mod tests {
                 .instance()
                 .set(&MockCometKey::BlndReserve, &blnd_reserve);
         }
+
+        pub fn balance(env: Env, id: Address) -> i128 {
+            env.storage()
+                .instance()
+                .get(&MockCometKey::Balance(id))
+                .unwrap_or(0)
+        }
+
+        pub fn mint(env: Env, to: Address, amount: i128) {
+            let balance = Self::balance(env.clone(), to.clone());
+            env.storage().instance().set(
+                &MockCometKey::Balance(to),
+                &balance.checked_add(amount).unwrap(),
+            );
+        }
+
+        pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+            from.require_auth();
+            let from_balance = Self::balance(env.clone(), from.clone());
+            if amount < 0 || amount > from_balance {
+                panic!("invalid transfer");
+            }
+            let to_balance = Self::balance(env.clone(), to.clone());
+            env.storage().instance().set(
+                &MockCometKey::Balance(from),
+                &from_balance.checked_sub(amount).unwrap(),
+            );
+            env.storage().instance().set(
+                &MockCometKey::Balance(to),
+                &to_balance.checked_add(amount).unwrap(),
+            );
+        }
     }
 
     #[contract]
@@ -4241,7 +4828,9 @@ mod tests {
     #[contracttype]
     enum MockEmitterKey {
         Backstop,
+        BlndToken,
         Candidate,
+        LastDistro(Address),
         NextBackstopToken,
         QueuedUnlock,
     }
@@ -4257,6 +4846,10 @@ mod tests {
             env.storage()
                 .instance()
                 .set(&MockEmitterKey::Backstop, &backstop);
+            env.storage().instance().set(
+                &MockEmitterKey::LastDistro(backstop),
+                &env.ledger().timestamp(),
+            );
             env.storage()
                 .instance()
                 .set(&MockEmitterKey::Candidate, &candidate);
@@ -4270,6 +4863,57 @@ mod tests {
                 .instance()
                 .get(&MockEmitterKey::Backstop)
                 .unwrap()
+        }
+
+        pub fn get_last_distro(env: Env, backstop_id: Address) -> u64 {
+            env.storage()
+                .instance()
+                .get(&MockEmitterKey::LastDistro(backstop_id))
+                .unwrap_or(env.ledger().timestamp())
+        }
+
+        pub fn distribute(env: Env) -> i128 {
+            let backstop: Address = env
+                .storage()
+                .instance()
+                .get(&MockEmitterKey::Backstop)
+                .unwrap();
+            let last_distribution = Self::get_last_distro(env.clone(), backstop.clone());
+            let elapsed = env
+                .ledger()
+                .timestamp()
+                .checked_sub(last_distribution)
+                .unwrap();
+            let amount = (elapsed as i128).checked_mul(SCALAR_7).unwrap();
+            env.storage().instance().set(
+                &MockEmitterKey::LastDistro(backstop.clone()),
+                &env.ledger().timestamp(),
+            );
+            if amount > 0 {
+                let blnd: Address = env
+                    .storage()
+                    .instance()
+                    .get(&MockEmitterKey::BlndToken)
+                    .unwrap();
+                StellarAssetClient::new(&env, &blnd).mint(&backstop, &amount);
+            }
+            amount
+        }
+
+        pub fn set_blnd_token(env: Env, blnd: Address) {
+            env.storage()
+                .instance()
+                .set(&MockEmitterKey::BlndToken, &blnd);
+        }
+
+        pub fn set_backstop(env: Env, backstop: Address) {
+            env.storage()
+                .instance()
+                .set(&MockEmitterKey::Backstop, &backstop);
+            env.storage().instance().set(
+                &MockEmitterKey::LastDistro(backstop),
+                &env.ledger().timestamp(),
+            );
         }
 
         pub fn get_queued_swap(env: Env) -> Option<EmitterSwap> {
@@ -4310,6 +4954,10 @@ mod tests {
             env.storage()
                 .instance()
                 .set(&MockEmitterKey::Backstop, &candidate);
+            env.storage().instance().set(
+                &MockEmitterKey::LastDistro(candidate),
+                &env.ledger().timestamp(),
+            );
         }
     }
 
@@ -4444,16 +5092,504 @@ mod tests {
         }
     }
 
+    struct OngoingFixture {
+        env: Env,
+        candidate: Address,
+        emitter: Address,
+        blnd: Address,
+        blnd_usdc: Address,
+        emitted_blnd: Address,
+        pool_factory: Address,
+    }
+
+    impl OngoingFixture {
+        fn create() -> Self {
+            Self::create_with_blnd_binding(true)
+        }
+
+        fn create_with_blnd_binding(bind_emitter_blnd: bool) -> Self {
+            let env = Env::default();
+            env.mock_all_auths();
+            env.ledger().set_timestamp(1_000);
+            let incumbent = Address::generate(&env);
+            let candidate = Address::generate(&env);
+            let next_backstop_token = Address::generate(&env);
+            let emitter = env.register(MockEmitter, (&incumbent, &candidate, &next_backstop_token));
+            let emitted_blnd = env
+                .register_stellar_asset_contract_v2(emitter.clone())
+                .address();
+            MockEmitterClient::new(&env, &emitter).set_blnd_token(&emitted_blnd);
+            let candidate_blnd = if bind_emitter_blnd {
+                emitted_blnd.clone()
+            } else {
+                env.register_stellar_asset_contract_v2(Address::generate(&env))
+                    .address()
+            };
+            let blnd_usdc = env.register(
+                MockComet,
+                (
+                    &candidate_blnd,
+                    &(1_000_000 * SCALAR_7),
+                    &(4_000_000 * SCALAR_7),
+                ),
+            );
+            let blnd_xlm = env.register(
+                MockComet,
+                (
+                    &candidate_blnd,
+                    &(1_000_000 * SCALAR_7),
+                    &(2_000_000 * SCALAR_7),
+                ),
+            );
+            let usdc = Address::generate(&env);
+            let pool_factory = env.register(MockPoolFactory, (&candidate,));
+            let valuation_adapter = register_valuation_adapter(&env);
+            env.register_at(
+                &candidate,
+                BackstopContract,
+                (
+                    &emitter,
+                    &candidate_blnd,
+                    &pool_factory,
+                    &blnd_usdc,
+                    &blnd_xlm,
+                    &usdc,
+                    &valuation_adapter,
+                ),
+            );
+            MockEmitterClient::new(&env, &emitter).set_backstop(&candidate);
+            env.as_contract(&candidate, || {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::ActivatedAt, &env.ledger().timestamp());
+                env.storage()
+                    .instance()
+                    .set(&DataKey::BackfillEnd, &env.ledger().timestamp());
+                set_ongoing_emission_state(
+                    &env,
+                    &OngoingEmissionState {
+                        backstop_allocated: 0,
+                        backstop_carry: 0,
+                        last_distribution: Some(env.ledger().timestamp()),
+                        pool_allocated: 0,
+                        pool_carry: 0,
+                        split_carry: 0,
+                        total_claimed: 0,
+                        total_received: 0,
+                    },
+                );
+            });
+            Self {
+                env,
+                candidate,
+                emitter,
+                blnd: candidate_blnd,
+                blnd_usdc,
+                emitted_blnd,
+                pool_factory,
+            }
+        }
+
+        fn client(&self) -> BackstopContractClient<'_> {
+            BackstopContractClient::new(&self.env, &self.candidate)
+        }
+
+        fn pool(&self, blnd_usdc: i128, blnd_xlm: i128) -> Address {
+            let pool = self.env.register(MockLossAwarePool, (&self.candidate,));
+            MockPoolFactoryClient::new(&self.env, &self.pool_factory).set_pool(&pool);
+            self.env.as_contract(&self.candidate, || {
+                if blnd_usdc > 0 {
+                    set_pool_blnd_usdc_shares(&self.env, &pool, blnd_usdc);
+                    set_pool_tier_assets(&self.env, BackstopTier::BlndUsdc, &pool, blnd_usdc);
+                }
+                if blnd_xlm > 0 {
+                    set_pool_tier_shares(&self.env, BackstopTier::BlndXlm, &pool, blnd_xlm);
+                    set_pool_tier_assets(&self.env, BackstopTier::BlndXlm, &pool, blnd_xlm);
+                }
+                refresh_pool_ongoing_assets(&self.env, &pool);
+            });
+            pool
+        }
+
+        fn set_reward_zone(&self, pools: &Vec<Address>) {
+            self.env.as_contract(&self.candidate, || {
+                set_reward_zone(&self.env, pools);
+            });
+        }
+
+        fn fund_backfill_reserve(&self, amount: i128) {
+            StellarAssetClient::new(&self.env, &self.blnd).mint(&self.candidate, &amount);
+            self.env.as_contract(&self.candidate, || {
+                self.env
+                    .storage()
+                    .instance()
+                    .set(&DataKey::BackfillFundedAmount, &amount);
+                self.env
+                    .storage()
+                    .instance()
+                    .set(&DataKey::TotalBackfillClaimed, &0_i128);
+                self.env
+                    .storage()
+                    .instance()
+                    .set(&DataKey::BlndBindingVerified, &true);
+            });
+        }
+    }
+
+    #[test]
+    fn ongoing_distribution_reconciles_actual_blnd_and_excludes_backfill() {
+        let fixture = OngoingFixture::create();
+        let candidate = fixture.client();
+        let first = fixture.pool(100 * SCALAR_7, 0);
+        let second = fixture.pool(0, 100 * SCALAR_7);
+        fixture.set_reward_zone(&soroban_sdk::vec![
+            &fixture.env,
+            first.clone(),
+            second.clone()
+        ]);
+        assert!(!candidate.blnd_binding_verified());
+        fixture.fund_backfill_reserve(5 * SCALAR_7);
+        assert!(candidate.blnd_binding_verified());
+
+        fixture.env.ledger().set_timestamp(1_010);
+        assert_eq!(
+            MockEmitterClient::new(&fixture.env, &fixture.emitter).distribute(),
+            10 * SCALAR_7
+        );
+        let distribution = candidate.distribute();
+        assert_eq!(
+            distribution,
+            OngoingDistribution {
+                backstop_allocated: 7 * SCALAR_7 - 1,
+                backstop_carry: 1,
+                checkpoint: 1_010,
+                eligible_blnd: 600 * SCALAR_7,
+                pool_allocated: 3 * SCALAR_7,
+                pool_carry: 0,
+                received: 10 * SCALAR_7,
+                split_carry: 0,
+            }
+        );
+        assert_eq!(
+            candidate.pool_ongoing_emissions(&first),
+            PoolOngoingEmissions {
+                accrued_backstop: 46_666_666,
+                accrued_pool: 2 * SCALAR_7,
+                active_blnd_usdc: 100 * SCALAR_7,
+                active_blnd_xlm: 0,
+            }
+        );
+        assert_eq!(
+            candidate.pool_ongoing_emissions(&second),
+            PoolOngoingEmissions {
+                accrued_backstop: 23_333_333,
+                accrued_pool: SCALAR_7,
+                active_blnd_usdc: 0,
+                active_blnd_xlm: 100 * SCALAR_7,
+            }
+        );
+        assert_eq!(
+            candidate.ongoing_emission_state(),
+            OngoingEmissionState {
+                backstop_allocated: 7 * SCALAR_7 - 1,
+                backstop_carry: 1,
+                last_distribution: Some(1_010),
+                pool_allocated: 3 * SCALAR_7,
+                pool_carry: 0,
+                split_carry: 0,
+                total_claimed: 0,
+                total_received: 10 * SCALAR_7,
+            }
+        );
+        assert_eq!(
+            candidate.reward_zone_checkpoint(),
+            Some(RewardZoneCheckpoint { timestamp: 1_010 })
+        );
+        assert_eq!(
+            TokenClient::new(&fixture.env, &fixture.blnd).balance(&fixture.candidate),
+            15 * SCALAR_7
+        );
+
+        let state_before = candidate.ongoing_emission_state();
+        assert!(candidate.try_distribute().is_err());
+        assert_eq!(candidate.ongoing_emission_state(), state_before);
+
+        fixture.env.ledger().set_timestamp(1_011);
+        assert!(candidate.try_distribute().is_err());
+        StellarAssetClient::new(&fixture.env, &fixture.blnd).mint(&fixture.candidate, &1);
+        fixture.env.ledger().set_timestamp(1_015);
+        let second_distribution = candidate.distribute();
+        assert_eq!(second_distribution.received, 5 * SCALAR_7 + 1);
+        assert_eq!(second_distribution.backstop_carry, 0);
+        assert_eq!(
+            candidate.ongoing_emission_state(),
+            OngoingEmissionState {
+                backstop_allocated: 105_000_000,
+                backstop_carry: 0,
+                last_distribution: Some(1_015),
+                pool_allocated: 45_000_000,
+                pool_carry: 0,
+                split_carry: 1,
+                total_claimed: 0,
+                total_received: 15 * SCALAR_7 + 1,
+            }
+        );
+    }
+
+    #[test]
+    fn ongoing_distribution_rejects_prefunded_token_without_binding_proof() {
+        let fixture = OngoingFixture::create_with_blnd_binding(false);
+        let candidate = fixture.client();
+        let pool = fixture.pool(100 * SCALAR_7, 0);
+        fixture.set_reward_zone(&soroban_sdk::vec![&fixture.env, pool]);
+        let prefunded = 10 * SCALAR_7;
+        StellarAssetClient::new(&fixture.env, &fixture.blnd).mint(&fixture.candidate, &prefunded);
+        fixture.env.ledger().set_timestamp(1_005);
+
+        assert!(!candidate.blnd_binding_verified());
+        assert!(candidate.try_distribute().is_err());
+        assert!(!candidate.blnd_binding_verified());
+        assert_eq!(
+            TokenClient::new(&fixture.env, &fixture.blnd).balance(&fixture.candidate),
+            prefunded
+        );
+        assert_eq!(
+            TokenClient::new(&fixture.env, &fixture.emitted_blnd).balance(&fixture.candidate),
+            0
+        );
+        assert_eq!(
+            MockEmitterClient::new(&fixture.env, &fixture.emitter)
+                .get_last_distro(&fixture.candidate),
+            1_000
+        );
+        assert_eq!(
+            candidate.ongoing_emission_state(),
+            OngoingEmissionState {
+                backstop_allocated: 0,
+                backstop_carry: 0,
+                last_distribution: Some(1_000),
+                pool_allocated: 0,
+                pool_carry: 0,
+                split_carry: 0,
+                total_claimed: 0,
+                total_received: 0,
+            }
+        );
+        assert_eq!(candidate.reward_zone_checkpoint(), None);
+    }
+
+    #[test]
+    fn ongoing_distribution_handles_maximum_reward_zone() {
+        let fixture = OngoingFixture::create();
+        let candidate = fixture.client();
+        let mut reward_zone = Vec::new(&fixture.env);
+        for _ in 0..MAX_REWARD_ZONE_SIZE {
+            reward_zone.push_back(fixture.pool(10 * SCALAR_7, 10 * SCALAR_7));
+        }
+        fixture.set_reward_zone(&reward_zone);
+        fixture.env.ledger().set_timestamp(1_005);
+
+        let distribution = candidate.distribute();
+        assert!(candidate.blnd_binding_verified());
+        assert_eq!(distribution.received, 5 * SCALAR_7);
+        assert_eq!(distribution.eligible_blnd, 1_800 * SCALAR_7);
+        assert_eq!(candidate.reward_zone().len(), MAX_REWARD_ZONE_SIZE);
+        for pool in reward_zone.iter() {
+            let state = candidate.pool_ongoing_emissions(&pool);
+            assert!(state.accrued_backstop > 0);
+            assert!(state.accrued_pool > 0);
+        }
+    }
+
+    #[test]
+    fn ongoing_distribution_requires_recent_checkpoint_before_deposit_weight_changes() {
+        let fixture = OngoingFixture::create();
+        let candidate = fixture.client();
+        let first = fixture.pool(100 * SCALAR_7, 0);
+        let second = fixture.pool(100 * SCALAR_7, 0);
+        fixture.set_reward_zone(&soroban_sdk::vec![
+            &fixture.env,
+            first.clone(),
+            second.clone()
+        ]);
+
+        fixture.env.ledger().set_timestamp(1_010);
+        candidate.distribute();
+
+        let depositor = Address::generate(&fixture.env);
+        MockCometClient::new(&fixture.env, &fixture.blnd_usdc).mint(&depositor, &(100 * SCALAR_7));
+        fixture.env.ledger().set_timestamp(1_020);
+        assert!(candidate
+            .try_deposit_blnd_usdc(&depositor, &first, &(100 * SCALAR_7))
+            .is_err());
+        assert_eq!(
+            candidate.pool_ongoing_emissions(&first).active_blnd_usdc,
+            100 * SCALAR_7
+        );
+
+        candidate.distribute();
+        fixture.env.ledger().set_timestamp(1_025);
+        candidate.deposit_blnd_usdc(&depositor, &first, &(100 * SCALAR_7));
+
+        let first_after_deposit = candidate.pool_ongoing_emissions(&first);
+        let second_after_deposit = candidate.pool_ongoing_emissions(&second);
+        assert_eq!(
+            first_after_deposit.accrued_backstop,
+            second_after_deposit.accrued_backstop
+        );
+        assert_eq!(
+            first_after_deposit.accrued_pool,
+            second_after_deposit.accrued_pool
+        );
+        assert_eq!(first_after_deposit.active_blnd_usdc, 200 * SCALAR_7);
+        assert_eq!(second_after_deposit.active_blnd_usdc, 100 * SCALAR_7);
+        assert_eq!(
+            candidate.ongoing_emission_state().total_received,
+            20 * SCALAR_7
+        );
+
+        fixture.env.ledger().set_timestamp(1_030);
+        candidate.distribute();
+        let first_after_next = candidate.pool_ongoing_emissions(&first);
+        let second_after_next = candidate.pool_ongoing_emissions(&second);
+        assert!(
+            first_after_next.accrued_backstop - first_after_deposit.accrued_backstop
+                > second_after_next.accrued_backstop - second_after_deposit.accrued_backstop
+        );
+    }
+
+    #[test]
+    fn ongoing_distribution_requires_recent_checkpoint_for_q4w_loss_and_gain_changes() {
+        let fixture = OngoingFixture::create();
+        let candidate = fixture.client();
+        let first = fixture.pool(0, 0);
+        let second = fixture.pool(0, 0);
+        let depositor = Address::generate(&fixture.env);
+        let token = MockCometClient::new(&fixture.env, &fixture.blnd_usdc);
+        token.mint(&depositor, &(200 * SCALAR_7));
+        candidate.deposit_blnd_usdc(&depositor, &first, &(100 * SCALAR_7));
+        candidate.deposit_blnd_usdc(&depositor, &second, &(100 * SCALAR_7));
+        fixture.set_reward_zone(&soroban_sdk::vec![
+            &fixture.env,
+            first.clone(),
+            second.clone()
+        ]);
+
+        fixture.env.ledger().set_timestamp(1_010);
+        candidate.distribute();
+        fixture.env.ledger().set_timestamp(1_020);
+        assert!(candidate
+            .try_queue_blnd_usdc_withdrawal(&depositor, &first, &(50 * SCALAR_7))
+            .is_err());
+        assert_eq!(
+            candidate.pool_ongoing_emissions(&first).active_blnd_usdc,
+            100 * SCALAR_7
+        );
+
+        candidate.distribute();
+        fixture.env.ledger().set_timestamp(1_025);
+        candidate.queue_blnd_usdc_withdrawal(&depositor, &first, &(50 * SCALAR_7));
+        let first_after_queue = candidate.pool_ongoing_emissions(&first);
+        let second_after_queue = candidate.pool_ongoing_emissions(&second);
+        assert_eq!(
+            first_after_queue.accrued_backstop,
+            second_after_queue.accrued_backstop
+        );
+        assert_eq!(first_after_queue.active_blnd_usdc, 50 * SCALAR_7);
+
+        fixture.env.ledger().set_timestamp(1_030);
+        candidate.distribute();
+        let first_before_dequeue = candidate.pool_ongoing_emissions(&first);
+        let second_before_dequeue = candidate.pool_ongoing_emissions(&second);
+        assert!(
+            first_before_dequeue.accrued_backstop - first_after_queue.accrued_backstop
+                < second_before_dequeue.accrued_backstop - second_after_queue.accrued_backstop
+        );
+
+        fixture.env.ledger().set_timestamp(1_035);
+        candidate.dequeue_blnd_usdc_withdrawal(&depositor, &first, &(50 * SCALAR_7));
+        assert_eq!(
+            candidate.pool_ongoing_emissions(&first).active_blnd_usdc,
+            100 * SCALAR_7
+        );
+
+        fixture.env.ledger().set_timestamp(1_040);
+        candidate.distribute();
+        let first_before_loss = candidate.pool_ongoing_emissions(&first);
+        let second_before_loss = candidate.pool_ongoing_emissions(&second);
+        assert_eq!(
+            first_before_loss.accrued_backstop - first_before_dequeue.accrued_backstop,
+            second_before_loss.accrued_backstop - second_before_dequeue.accrued_backstop
+        );
+
+        fixture.env.ledger().set_timestamp(1_045);
+        fixture.env.as_contract(&fixture.candidate, || {
+            apply_pool_tier_loss(&fixture.env, BackstopTier::BlndUsdc, &first, 50 * SCALAR_7);
+        });
+        let first_after_loss = candidate.pool_ongoing_emissions(&first);
+        let second_after_loss = candidate.pool_ongoing_emissions(&second);
+        assert_eq!(
+            first_after_loss.accrued_backstop,
+            first_before_loss.accrued_backstop
+        );
+        assert_eq!(
+            second_after_loss.accrued_backstop,
+            second_before_loss.accrued_backstop
+        );
+        assert_eq!(first_after_loss.active_blnd_usdc, 50 * SCALAR_7);
+
+        fixture.env.ledger().set_timestamp(1_050);
+        candidate.distribute();
+        let first_before_gain = candidate.pool_ongoing_emissions(&first);
+        let second_before_gain = candidate.pool_ongoing_emissions(&second);
+        assert!(
+            first_before_gain.accrued_backstop - first_after_loss.accrued_backstop
+                < second_before_gain.accrued_backstop - second_after_loss.accrued_backstop
+        );
+
+        fixture.env.ledger().set_timestamp(1_055);
+        fixture.env.as_contract(&fixture.candidate, || {
+            apply_pool_tier_gain(&fixture.env, BackstopTier::BlndUsdc, &first, 50 * SCALAR_7);
+        });
+        assert_eq!(
+            candidate.pool_ongoing_emissions(&first).active_blnd_usdc,
+            100 * SCALAR_7
+        );
+        assert_eq!(
+            candidate.ongoing_emission_state().last_distribution,
+            Some(1_050)
+        );
+    }
+
     #[test]
     fn reward_zone_is_permissionless_bounded_and_checkpoint_gated() {
         let fixture = RewardZoneFixture::create();
         let candidate = fixture.client();
+        let blnd_amount = SCALAR_7;
+        let qualifying_usdc = ACTIVATION_ENTRY_THRESHOLD_USDC - blnd_amount;
+
+        let usdc_only = fixture.pool();
+        fixture.set_tier_state(
+            &usdc_only,
+            BackstopTier::Usdc,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            0,
+        );
+        assert!(
+            candidate.pool_valuation(&usdc_only).active_values.usdc
+                >= ACTIVATION_ENTRY_THRESHOLD_USDC
+        );
+        assert!(candidate.try_add_reward(&usdc_only, &None).is_err());
+        assert!(candidate.reward_zone().is_empty());
+
         let first = fixture.pool();
+        fixture.set_tier_state(&first, BackstopTier::BlndUsdc, blnd_amount, blnd_amount, 0);
         fixture.set_tier_state(
             &first,
             BackstopTier::Usdc,
-            ACTIVATION_ENTRY_THRESHOLD_USDC - 1,
-            ACTIVATION_ENTRY_THRESHOLD_USDC - 1,
+            qualifying_usdc - 1,
+            qualifying_usdc - 1,
             0,
         );
 
@@ -4461,8 +5597,8 @@ mod tests {
         fixture.set_tier_state(
             &first,
             BackstopTier::Usdc,
-            ACTIVATION_ENTRY_THRESHOLD_USDC,
-            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            qualifying_usdc,
+            qualifying_usdc,
             0,
         );
         candidate.add_reward(&first, &None);
@@ -4477,11 +5613,12 @@ mod tests {
             .is_err());
 
         let second = fixture.pool();
+        fixture.set_tier_state(&second, BackstopTier::BlndUsdc, blnd_amount, blnd_amount, 0);
         fixture.set_tier_state(
             &second,
             BackstopTier::Usdc,
-            ACTIVATION_ENTRY_THRESHOLD_USDC,
-            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            qualifying_usdc,
+            qualifying_usdc,
             0,
         );
         assert!(candidate.try_add_reward(&second, &None).is_err());
@@ -4494,11 +5631,12 @@ mod tests {
             fixture.env.ledger().timestamp() + REWARD_ZONE_CHECKPOINT_MAX_AGE_SECONDS + 1,
         );
         let third = fixture.pool();
+        fixture.set_tier_state(&third, BackstopTier::BlndUsdc, blnd_amount, blnd_amount, 0);
         fixture.set_tier_state(
             &third,
             BackstopTier::Usdc,
-            ACTIVATION_ENTRY_THRESHOLD_USDC,
-            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            qualifying_usdc,
+            qualifying_usdc,
             0,
         );
         assert!(candidate.try_add_reward(&third, &None).is_err());
@@ -4507,11 +5645,12 @@ mod tests {
         candidate.add_reward(&third, &None);
         while candidate.reward_zone().len() < MAX_REWARD_ZONE_SIZE {
             let pool = fixture.pool();
+            fixture.set_tier_state(&pool, BackstopTier::BlndUsdc, blnd_amount, blnd_amount, 0);
             fixture.set_tier_state(
                 &pool,
                 BackstopTier::Usdc,
-                ACTIVATION_ENTRY_THRESHOLD_USDC,
-                ACTIVATION_ENTRY_THRESHOLD_USDC,
+                qualifying_usdc,
+                qualifying_usdc,
                 0,
             );
             candidate.add_reward(&pool, &None);
@@ -4521,9 +5660,16 @@ mod tests {
         let overflow = fixture.pool();
         fixture.set_tier_state(
             &overflow,
+            BackstopTier::BlndUsdc,
+            blnd_amount,
+            blnd_amount,
+            0,
+        );
+        fixture.set_tier_state(
+            &overflow,
             BackstopTier::Usdc,
-            ACTIVATION_ENTRY_THRESHOLD_USDC,
-            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            qualifying_usdc,
+            qualifying_usdc,
             0,
         );
         assert!(candidate.try_add_reward(&overflow, &None).is_err());
@@ -4605,11 +5751,13 @@ mod tests {
         let fixture = RewardZoneFixture::create();
         let candidate = fixture.client();
         let pool = fixture.pool();
+        let blnd_amount = SCALAR_7;
+        fixture.set_tier_state(&pool, BackstopTier::BlndUsdc, blnd_amount, blnd_amount, 0);
         fixture.set_tier_state(
             &pool,
             BackstopTier::Usdc,
-            ACTIVATION_ENTRY_THRESHOLD_USDC,
-            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            ACTIVATION_ENTRY_THRESHOLD_USDC - blnd_amount,
+            ACTIVATION_ENTRY_THRESHOLD_USDC - blnd_amount,
             0,
         );
         candidate.add_reward(&pool, &None);
@@ -4617,8 +5765,8 @@ mod tests {
         fixture.set_tier_state(
             &pool,
             BackstopTier::Usdc,
-            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 1,
-            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 1,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - blnd_amount - 1,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - blnd_amount - 1,
             0,
         );
         assert!(candidate.try_remove_reward(&pool).is_err());
@@ -4627,8 +5775,8 @@ mod tests {
         fixture.set_tier_state(
             &pool,
             BackstopTier::Usdc,
-            ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
-            ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - blnd_amount,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - blnd_amount,
             0,
         );
         assert!(candidate.try_remove_reward(&pool).is_err());
@@ -4636,8 +5784,36 @@ mod tests {
         fixture.set_tier_state(
             &pool,
             BackstopTier::Usdc,
-            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 1,
-            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 1,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - blnd_amount - 1,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - blnd_amount - 1,
+            0,
+        );
+        candidate.remove_reward(&pool);
+        assert!(candidate.reward_zone().is_empty());
+    }
+
+    #[test]
+    fn zero_blnd_reward_zone_member_is_removable_without_checkpoint() {
+        let fixture = RewardZoneFixture::create();
+        let candidate = fixture.client();
+        let pool = fixture.pool();
+        fixture.set_tier_state(&pool, BackstopTier::BlndUsdc, SCALAR_7, SCALAR_7, 0);
+        fixture.set_tier_state(
+            &pool,
+            BackstopTier::Usdc,
+            ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7,
+            ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7,
+            0,
+        );
+        candidate.add_reward(&pool, &None);
+        assert_eq!(candidate.reward_zone_checkpoint(), None);
+
+        fixture.set_tier_state(&pool, BackstopTier::BlndUsdc, 0, 0, 0);
+        fixture.set_tier_state(
+            &pool,
+            BackstopTier::Usdc,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
+            ACTIVATION_ENTRY_THRESHOLD_USDC,
             0,
         );
         candidate.remove_reward(&pool);
@@ -5235,6 +6411,19 @@ mod tests {
         assert_eq!(
             candidate.scheduled_backfill(),
             QUEUE_SECONDS as i128 * BLND_SCALAR
+        );
+        assert_eq!(
+            candidate.ongoing_emission_state(),
+            OngoingEmissionState {
+                backstop_allocated: 0,
+                backstop_carry: 0,
+                last_distribution: Some(unlock),
+                pool_allocated: 0,
+                pool_carry: 0,
+                split_carry: 0,
+                total_claimed: 0,
+                total_received: 0,
+            }
         );
         assert!(candidate.try_finalize_migration().is_err());
         assert!(candidate.try_sync_migration().is_err());
@@ -5873,12 +7062,30 @@ mod tests {
         let blnd_usdc_entry = candidate.queue_blnd_usdc_withdrawal(&first, &pool, &40);
         let blnd_xlm_entry = candidate.queue_blnd_xlm_withdrawal(&first, &pool, &40);
         let usdc_entry = candidate.queue_usdc_withdrawal(&first, &pool, &40);
+        assert_eq!(
+            candidate.pool_ongoing_emissions(&pool),
+            PoolOngoingEmissions {
+                accrued_backstop: 0,
+                accrued_pool: 0,
+                active_blnd_usdc: 60,
+                active_blnd_xlm: 60,
+            }
+        );
 
         env.as_contract(&candidate_id, || {
             for (tier, _) in &tiers {
                 apply_pool_tier_loss(&env, *tier, &pool, 60);
             }
         });
+        assert_eq!(
+            candidate.pool_ongoing_emissions(&pool),
+            PoolOngoingEmissions {
+                accrued_backstop: 0,
+                accrued_pool: 0,
+                active_blnd_usdc: 24,
+                active_blnd_xlm: 24,
+            }
+        );
         for (tier, _) in &tiers {
             assert_eq!(
                 candidate.pool_tier_state(tier, &pool),
@@ -5907,6 +7114,15 @@ mod tests {
         candidate.deposit_blnd_usdc(&second, &pool, &10);
         candidate.deposit_blnd_xlm(&second, &pool, &10);
         candidate.deposit_usdc(&second, &pool, &10);
+        assert_eq!(
+            candidate.pool_ongoing_emissions(&pool),
+            PoolOngoingEmissions {
+                accrued_backstop: 0,
+                accrued_pool: 0,
+                active_blnd_usdc: 34,
+                active_blnd_xlm: 34,
+            }
+        );
         assert_eq!(
             candidate.migration_position(&second, &pool),
             MigrationPosition {
@@ -5976,6 +7192,15 @@ mod tests {
             assert_eq!(candidate.total_tier_assets(tier), expected_total_assets);
             assert_eq!(TokenClient::new(&env, token).balance(&recipient), 16);
         }
+        assert_eq!(
+            candidate.pool_ongoing_emissions(&pool),
+            PoolOngoingEmissions {
+                accrued_backstop: 0,
+                accrued_pool: 0,
+                active_blnd_usdc: 34,
+                active_blnd_xlm: 34,
+            }
+        );
         assert_eq!(
             candidate.migration_position(&first, &pool),
             MigrationPosition {

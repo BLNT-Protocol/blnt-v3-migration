@@ -64,7 +64,9 @@ require v3 source code to compile against intermediate SDK versions.
 - Ongoing BLND-emission distribution.
 - Pre-migration backfill accounting.
 - V2-to-v3 emitter migration.
-- Continuous BLND:USDC tier deposits and withdrawals across migration.
+- Continuous BLND:USDC tier deposits and withdrawals across migration, except
+  for the bounded fail-closed interval after a direct emitter swap and before
+  candidate synchronization.
 - Deployment and testing of candidate pools and supporting contracts.
 
 ### 2.2 Out of scope for the first milestone
@@ -276,6 +278,30 @@ deadline can leave the emitter pointing to a candidate whose lifecycle remains
 `Prepared`; this draft accepts that bounded operational risk rather than adding
 a governance recovery path.
 
+Because the emitter exposes no immutable timestamp for a direct swap,
+recovery-path synchronization MUST cap migration backfill at the currently
+verified queue's unlock time. Canonical candidate finalization continues to
+end backfill at its atomic swap-and-activation timestamp. The recovery cutoff
+may omit backfill between unlock and a later direct swap, but it guarantees
+that no interval can receive both migration backfill and ongoing BLND emitted
+after the direct swap.
+
+BLND:USDC deposits at or after the currently verified queue's unlock MUST
+remain ordinary tier capital but receive zero migration-backfill weight for
+that queue. This prevents a post-cutoff deposit timestamp from making the
+recovery-path aggregate weight negative. If a replacement queue is later
+verified, new deposits before that replacement unlock are eligible from their
+deposit time; an earlier ineligible deposit does not become eligible
+retroactively.
+
+If the emitter already points to the candidate while its lifecycle remains
+`Prepared`, every BLND:USDC or BLND:XLM weight mutation and every reward-zone
+edit MUST fail until `sync_migration()` succeeds. Plain-USDC operations remain
+available because they affect neither migration backfill nor ongoing BLND
+weight. This temporary fail-closed boundary prevents the unsynchronized
+interval from being reweighted and guarantees that candidate mutations cannot
+strand recovery.
+
 The canonical queue-creation path MUST call `candidate.begin_migration()`.
 That operation atomically invokes the legacy emitter's permissionless
 `queue_swap_backstop` and records the returned queue as the candidate's
@@ -422,16 +448,18 @@ Before migration succeeds, the same shares additionally:
 
 - Contribute their tokens to the candidate's direct legacy-emitter qualifying
   balance.
-- Accumulate migration-backfill weight while they remain deposited.
+- Accumulate migration-backfill weight while they remain deposited and their
+  deposit precedes the currently verified queue's unlock.
 
 Once an exchange rate differs from one token per share, the position stores
 backfill-eligible BLND:USDC principal separately from its tier shares. New
-pre-migration deposits add their actual LP-token amount to backfill principal,
-not the possibly larger or smaller number of shares minted. A withdrawal
-forfeits principal and time basis pro rata to the shares burned. Loss absorption
-does not forfeit backfill principal: those LP tokens remained committed and
-were consumed protecting the attributed candidate pool rather than withdrawn
-by the depositor.
+pre-unlock deposits add their actual LP-token amount to backfill principal, not
+the possibly larger or smaller number of shares minted. Deposits at or after
+the verified unlock add no principal for that queue. A withdrawal forfeits
+principal and time basis pro rata to the shares burned. Loss absorption does
+not forfeit backfill principal: those LP tokens remained committed and were
+consumed protecting the attributed candidate pool rather than withdrawn by the
+depositor.
 
 Emitter migration freezes only the temporary backfill weight. It MUST NOT
 redeem, convert, reissue, or change ownership of the tier shares. Deposits made
@@ -1289,13 +1317,14 @@ The remainder of the emitter's 50 million BLND ceiling, including the
 otherwise available allocation of up to 40 million BLND, MUST remain
 undistributed.
 
-Backfill eligibility MUST be proportional to each surviving migration
-position's BLND:USDC tier shares multiplied by their holding duration. Only
-shares still deposited when emitter migration succeeds are eligible. A
-withdrawal before emitter migration succeeds MUST forfeit the withdrawn
-shares' complete accumulated weight, and that weight MUST NOT remain in the
-denominator. A partial withdrawal MUST forfeit only the withdrawn shares'
-proportional weight. Re-deposited shares begin a new holding period.
+Backfill eligibility MUST be proportional to each surviving, pre-unlock
+migration position's BLND:USDC tier shares multiplied by their holding
+duration. Only eligible shares still deposited when emitter migration succeeds
+are included. A withdrawal before emitter migration succeeds MUST forfeit the
+withdrawn shares' complete accumulated weight, and that weight MUST NOT remain
+in the denominator. A partial withdrawal MUST forfeit only the withdrawn
+shares' proportional weight. Re-deposited shares begin a new holding period
+only when the new deposit precedes the current verified unlock.
 
 The final allocation weight for position \(i\) is:
 
@@ -1304,9 +1333,11 @@ W_i = \sum_k A_{i,k}(T_{\mathrm{end}} - T_{i,k})
 \]
 
 where \(A_{i,k}\) and \(T_{i,k}\) are the amount and effective deposit time of
-each surviving tranche, and \(T_{\mathrm{end}}\) is the earlier of activation
-or the absolute recovery-horizon end. The effective deposit time MUST be the
-actual deposit time. Prefunding used to establish the candidate's qualifying
+each eligible surviving tranche, and \(T_{\mathrm{end}}\) is the earlier of
+activation or the absolute recovery-horizon end. For an eligible tranche, the
+effective deposit time MUST be the actual deposit time. A tranche deposited at
+or after the currently verified unlock has zero weight for that queue and is
+omitted from this sum. Prefunding used to establish the candidate's qualifying
 balance therefore earns proportional allocation weight before the original
 queue begins, while the 31-day campaign limit prevents unbounded early-weight
 accumulation. Prefunding weight changes only how scheduled BLND is divided; it
@@ -1325,14 +1356,15 @@ iterate over all depositors. The funding transaction MUST reject an amount
 other than the immutable scheduled backfill obligation and MUST NOT create a
 separate migration award.
 
-The candidate MUST store the BLND token address immutably at construction.
+The candidate MUST store the BLND token address immutably at construction and
+MUST expose whether that binding has been verified.
 After migration activation, any caller MAY invoke the one-time backfill-funding
 entry point. The candidate MUST call the legacy emitter's initial-drop facility
 with exactly one recipient, the candidate itself, and exactly the scheduled
 amount \(B\). It MUST verify that its configured BLND balance increased by
-exactly \(B\) before committing the funded reserve. A failed emitter call,
-unexpected token-balance delta, missing eligible weight, or repeat funding
-attempt MUST fail atomically.
+exactly \(B\) before committing the funded reserve and BLND-binding proof. A
+failed emitter call, unexpected token-balance delta, missing eligible weight, or
+repeat funding attempt MUST fail atomically.
 
 Claims MUST use the frozen global weight and frozen per-position checkpoint in
 constant time. The position owner MUST authorize the claim and MAY select its
@@ -1352,6 +1384,45 @@ changes recipients. No interval or position may earn under both regimes unless
 the specification explicitly intends and tests that result. Ongoing-emission
 accounting MUST exclude the remaining backfill reserve even though both balances
 are held by the top-level candidate.
+
+Before the distributor may use accumulated-balance reconciliation, the
+configured BLND token MUST have been verified by one of two exact-delta paths:
+
+- Successful backfill funding verifies that the configured-token balance
+  increased by exactly the initial-drop amount.
+- If backfill funding has not verified the binding, the first successful
+  ongoing distribution MUST snapshot the configured-token balance immediately
+  before invoking the emitter, require a positive emitter-reported amount, and
+  require the balance to increase by exactly that amount.
+
+The candidate MUST persist and expose the successful proof. A failed proof MUST
+roll back the emitter invocation and every candidate state change. Prefunding
+the configured token MUST NOT bypass either exact current-call delta. A
+successful migration with zero eligible backfill weight MUST therefore remain
+able to verify BLND through its first positive ongoing distribution even though
+backfill funding remains unavailable. Ongoing BLND delivered directly before
+the proof succeeds remains unaccounted until that successful distribution
+reconciles the complete balance.
+
+The permissionless distributor MUST invoke the emitter and then reconcile the
+candidate's actual BLND balance against the remaining backfill reserve and
+previously accounted, unclaimed ongoing BLND. This permits the candidate to
+account for an emitter distribution invoked directly before the candidate
+entry point. The emitter-reported amount for the current invocation MUST NOT
+exceed the reconciled receipt, and the emitter checkpoint MUST advance without
+exceeding ledger time. Matching v2, standalone permissionless distribution
+calls require at least five seconds since the preceding emitter checkpoint.
+An operation that changes a reward-zone pool's active BLND:USDC or BLND:XLM
+amount MUST observe a completed production distribution checkpoint no more than
+five seconds old or fail closed. The candidate deliberately does not combine a
+maximum-30-pool distribution with the weight mutation because that combined
+invocation exceeds the Protocol-27 resource envelope. This guard limits any
+unresolved interval that can observe the changed weight to one five-second
+ledger window instead of allowing an arbitrarily stale interval to be
+reassigned.
+Any other unaccounted BLND transferred directly to the candidate is
+deliberately treated as donated ongoing emissions rather than being left
+outside protocol accounting.
 
 ### 10.1 Ongoing backstop-depositor emissions
 
@@ -1380,24 +1451,39 @@ it MUST NOT assign split dust to a discretionary recipient. The ratio is
 hard-coded and has no operator, administrator, governance, or runtime
 configuration path.
 
-This section's pool and user weighting applies only to
-\(E_{\mathrm{backstop}}\). The 30% \(E_{\mathrm{pool}}\) tranche remains
+Both tranches use the same reward-zone pool weight, preserving v2's pool-level
+allocation shape. Within each pool, \(E_{\mathrm{backstop}}\) follows the
+backstop user weighting in this section, while \(E_{\mathrm{pool}}\) remains
 segregated for pool supply and borrow positions and follows the v2-compatible
 configuration rule below.
 
 The candidate MUST preserve v2's bounded reward-zone shape:
 
 - The reward zone contains at most 30 registered pools.
-- Any caller may add a nonmember that meets the 12,500-USDC entry threshold.
+- Any caller may add a nonmember that meets the 12,500-USDC entry threshold and
+  has strictly positive eligible underlying BLND.
 - Any caller may remove a member that falls below the 10,000-USDC maintenance
   threshold.
+- Any caller may remove a member with zero eligible underlying BLND regardless
+  of its remaining activation value and without a distribution checkpoint.
+  Zero-weight removal is allocation-neutral and is the fail-open liveness path
+  if all of a member's BLND-bearing capital becomes queued, withdrawn, or
+  impaired.
 - If the zone is full, an addition must name one existing member to remove and
   the entrant must have strictly greater eligible underlying-BLND weight than
   that member.
 - A pool cannot appear twice.
 - Reward-zone edits after the first entry require a distribution checkpoint
   within the preceding hour, matching v2's protection against retroactive
-  disruption.
+  disruption, except for the allocation-neutral removal of a zero-weight
+  member. This separately inherited rule means any weight-bearing membership
+  edit can affect an unresolved interval of up to one hour.
+
+Pool activation remains independent of reward-zone admission. A pool backed
+only by at least 12,500 USDC can activate, but it earns no BLND and cannot enter
+the reward zone until an active, nonqueued BLND:USDC or BLND:XLM position gives
+it positive eligible underlying-BLND weight. It may be admitted permissionlessly
+after that deposit under the ordinary checkpoint rule.
 
 Stored pool status is not an additional reward-zone or distribution gate.
 Admin On-Ice, On-Ice, Admin Frozen, or Frozen status does not by itself remove
@@ -1418,9 +1504,17 @@ B_{p,\mathrm{BLND:XLM}}
 Plain USDC contributes zero BLND-emission weight. The pool allocation is:
 
 \[
-E_p =
+E_{\mathrm{backstop},p} =
 \left\lfloor
 E_{\mathrm{backstop}}
+\frac{B_p}{\sum_{q \in \mathrm{reward\ zone}} B_q}
+\right\rfloor
+\]
+
+\[
+E_{\mathrm{pool},p} =
+\left\lfloor
+E_{\mathrm{pool}}
 \frac{B_p}{\sum_{q \in \mathrm{reward\ zone}} B_q}
 \right\rfloor
 \]
@@ -1437,9 +1531,9 @@ B_{p,u,\mathrm{BLND:XLM}}
 and the user's allocation is:
 
 \[
-E_{p,u} =
+E_{\mathrm{backstop},p,u} =
 \left\lfloor
-E_p
+E_{\mathrm{backstop},p}
 \frac{B_{p,u}}{B_p}
 \right\rfloor
 \]
@@ -1479,31 +1573,49 @@ rather than iteration over all pools or depositors. Integer remainder MUST be
 retained at its allocation scope and included in a later distribution at that
 same scope.
 
+After activation, every operation that changes a reward-zone pool's active
+BLND:USDC or BLND:XLM amount MUST require a completed production distribution
+checkpoint within the preceding five seconds. This applies to deposits, Q4W
+queue and dequeue operations, withdrawals that change the active conversion
+result, actual bad-debt loss, and interest-auction gain. A stale mutation fails
+before changing candidate accounting. A weight mutation in a non-reward-zone
+pool and every plain-USDC mutation require no ongoing-emission checkpoint.
+
+Already allocated emissions MUST remain unchanged by a later weight mutation.
+Emissions received after the checkpoint use the weights observed by the next
+distribution, so a mutation may affect at most the unresolved five-second
+window. This bounded one-ledger granularity is an explicit resource-safety
+tradeoff, not an exact intra-ledger time-weighted accumulator.
+
 Queued withdrawals receive zero ongoing BLND-emission weight immediately after
-their emissions are checkpointed at queue time. Dequeueing restores emission
-eligibility only prospectively and MUST NOT grant emissions for the queued
-interval. Capital committed to a pending bad-debt lot remains eligible until an
-auction fill actually transfers tier assets out of the backstop. The fill MUST
-checkpoint emissions before that transfer; only the amount actually
-transferred loses weight prospectively. Mere commitment, later discount, or
-stale release MUST NOT retroactively change emissions.
+the guarded queue mutation. Dequeueing restores emission eligibility after the
+same guard and MUST NOT grant emissions for an earlier queued interval beyond
+the explicit one-ledger boundary above. Capital committed to a pending bad-debt
+lot remains eligible until an auction fill actually transfers tier assets out
+of the backstop. The fill MUST satisfy the recent-checkpoint guard before that
+transfer; only the amount actually transferred loses weight. Mere commitment,
+later discount, or stale release MUST NOT change already allocated emissions.
 
 A position MUST NOT earn simultaneously through both tiers or through both
 active and ineligible accounting. Changes in balances, underlying BLND per LP
-share, reward-zone membership, or pool status MUST NOT retroactively alter
-already accrued emissions.
+share, reward-zone membership, or pool status MUST NOT alter already allocated
+emissions. Active tier-amount mutations follow the five-second boundary above;
+reward-zone membership follows the separately documented v2-compatible
+one-hour boundary.
 
-The claimable backstop-depositor amount remains exactly \(E_{p,u}\) under the
-pool and user formulas above. Claim realization MUST NOT redirect, reweight, or
-recompute that entitlement based on a preferred tier. No rule that compounds
-every claim into BLND:XLM or another single v3 tier is introduced here.
+The claimable backstop-depositor amount remains exactly
+\(E_{\mathrm{backstop},p,u}\) under the pool and user formulas above. Claim
+realization MUST NOT redirect, reweight, or recompute that entitlement based
+on a preferred tier. No rule that compounds every claim into BLND:XLM or
+another single v3 tier is introduced here.
 
 ### 10.2 Pool supply and borrow emissions
 
-The 30% \(E_{\mathrm{pool}}\) tranche follows v2. Each reserve has a supply
-token identifier and a debt token identifier. The transferable pool admin may
-configure any nonempty set of valid identifiers with positive relative
-weights. On each pool emission gulp:
+The 30% pool tranche follows v2 after its reward-zone allocation
+\(E_{\mathrm{pool},p}\). Each reserve has a supply token identifier and a debt
+token identifier. The transferable pool admin may configure any nonempty set
+of valid identifiers with positive relative weights. On each pool emission
+gulp:
 
 - disabled configured reserves are omitted;
 - the remaining positive weights are normalized against their sum;
@@ -1713,12 +1825,13 @@ coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
 local run, the public-testnet exercise, a production LP valuation source for
-non-emission policy, and ongoing BLND-emission accrual remain intentionally
-unimplemented. Milestone 10's policy arithmetic, admin and pending-loss
-policies, canonical spot-composition read boundary, and permissionless
-maximum-30 reward-zone membership are implemented. Emitter funding, the
-production distribution checkpoint writer, accumulators, supply/borrow
-emission configuration, and claims remain unimplemented.
+non-emission policy, and user-level ongoing BLND-emission accrual remain
+intentionally unimplemented. Milestone 10's policy arithmetic, admin and
+pending-loss policies, canonical spot-composition read boundary,
+permissionless maximum-30 reward-zone membership, emitter reconciliation,
+pool-level accrual and carry, and production distribution checkpoint writer
+are implemented. Per-user backstop accumulators, supply/borrow emission
+configuration and reserve-token accumulators, and claims remain unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

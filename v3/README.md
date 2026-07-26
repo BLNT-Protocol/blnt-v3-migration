@@ -28,7 +28,8 @@ See `docs/LOCALNET_MIGRATION.md`.
 The v3 backstop currently implements migration configuration, two verified
 retry queues within an immutable 76-day recovery horizon, emitter finalization,
 bounded per-queue direct-swap synchronization, continuous BLND:USDC tier
-deposits and withdrawals, deterministic 1-BLND-per-second backfill scheduling
+deposits and withdrawals outside the unsynchronized direct-swap gap,
+deterministic 1-BLND-per-second backfill scheduling
 from the original queue start, a bounded 31-day prefunding campaign, and
 time-weighted survivor-allocation quotes. The same accounted BLND:USDC shares
 exist before and after migration; migration freezes only their temporary
@@ -40,18 +41,21 @@ pools that expose the required loss-state callback.
 Validation occurs before token custody or share accounting. The callback is a
 permanent compatibility boundary that factory-approved pool upgrades must
 preserve. After activation, any caller can fund the exact scheduled backfill
-through the published emitter's one-time drop. The immutable BLND token binding
-is used to verify the exact balance delta. Position owners can then direct one
+through the published emitter's one-time drop. Its exact balance delta verifies
+the immutable BLND token binding. If no position has eligible backfill weight,
+the first positive ongoing distribution establishes the same binding with an
+exact current-call delta instead. Position owners can then direct one
 floor-rounded claim per frozen position without iteration; remaining integer
 dust stays segregated in the backfill reserve. The backstop can reserve and
-settle a single-tier bad-debt auction by transferring the time-scaled tier
-token directly to the filler and impairing the pool-tier exchange rate by
-exactly that transferred amount. It also allocates accrued reserve credit with
-canonical `5:5:4` tier weighting and realizes it through one cyclic
-tier-specific interest auction per pool. A filler donates the selected tier
+settle a single-tier bad-debt auction by transferring the time-scaled tier token
+directly to the filler and impairing the pool-tier exchange rate by exactly that
+transferred amount. It also allocates accrued reserve credit with canonical
+`5:5:4` tier weighting and realizes it through one cyclic tier-specific
+interest auction per pool. A filler donates the selected tier
 token without receiving shares, so the common active-and-queued exchange rate
-appreciates automatically. Ongoing-emission accrual remains unimplemented. The
-pool implements next-step bad-debt continuation as a separate
+appreciates automatically. Pool-level ongoing-emission distribution is
+implemented; per-user and reserve-token accrual and claims remain. The pool
+implements next-step bad-debt continuation as a separate
 permissionless transaction: it either commits the next eligible strict-tier
 lot or, after a verified no-eligible-tier quote, reduces affected reserves'
 bToken exchange rates using Blend v2's supplier-default arithmetic.
@@ -71,7 +75,7 @@ pool's `backstop_withdrawal_allowed` interface; missing, failed, and false
 responses block the transfer. Queued shares remain in custody and retain
 migration-backfill eligibility until actual withdrawal. Active-share queries
 exclude them from the raw active-share view. Canonical activation converts that
-view to redeemable assets, and ongoing-emission integration will use the same
+view to redeemable assets, and ongoing-emission pool weighting uses the same
 separation. Queued shares remain take-rate eligible until actual withdrawal,
 and remain proportionally exposed to tier losses through the same exchange
 rate as active shares, matching the inherited v2 economics. Total accounted
@@ -151,8 +155,8 @@ bid worth 120% of the reserve lot. Partial fills use the inherited 400-ledger
 curve and leave the time discount in persistent pending credit; stale deletion
 after 500 ledgers releases the unfilled reservation without rewriting that
 credit. Bid donation mints no shares and requires no depositor claim. Ongoing
-BLND-emission accrual is still required before the pool is a complete lending
-market.
+BLND-emission user and reserve-token accrual and claims are still required
+before the pool is a complete lending market.
 
 The v3 pool factory stores immutable backstop and pool-WASM configuration,
 deploys pools with explicit transferable admins, initial lending
@@ -210,15 +214,30 @@ equal-USDC activation accounting. Permissionless next-tier sequencing and
 v2-style supplier residual settlement are implemented as a separate bounded
 continuation call. Take-rate accrual remains implementation work.
 
-The backstop also exposes arithmetic-only ongoing BLND-emission quotes for the
-backstop-depositor tranche. Reward-zone pools are weighted by eligible
-underlying BLND across BLND:USDC and BLND:XLM positions, and users within each
-pool are weighted by their underlying BLND across those same tiers. Plain USDC
-receives no BLND-emission weight. The top-level split is immutable at 70%
-backstop depositors and 30% pool supply/borrow positions. Permissionless
-maximum-30 reward-zone membership, threshold entry/removal, and spot-BLND
-replacement are implemented. Emitter funding, the production distribution
-checkpoint writer, accumulators, and claims remain implementation work.
+The backstop implements permissionless ongoing BLND distribution after
+migration. Reward-zone pools are weighted by eligible underlying BLND across
+active BLND:USDC and BLND:XLM positions; plain USDC and queued shares receive
+no BLND-emission weight. A USDC-only pool can still activate, but reward-zone
+entry additionally requires positive eligible underlying BLND. A member whose
+BLND weight reaches zero can be removed permissionlessly without a checkpoint,
+preventing it from blocking the distributor. Each actual unaccounted BLND
+receipt uses the immutable 70% backstop-depositor and 30% pool supply/borrow
+split. Both tranches are allocated across the maximum-30 reward zone by the same
+pool weight, with separately scoped carry, before the completed distribution
+writes the production checkpoint. Before accumulated-balance reconciliation is
+enabled, either backfill funding or the first positive ongoing emitter call must
+verify the configured BLND token by exact current-call balance delta. This keeps
+ongoing distribution available after a zero-backfill-weight migration while
+preventing another prefunded token from substituting for BLND. Any ongoing BLND
+received before verification is reconciled afterward. The segregated
+migration-backfill reserve and previously accounted ongoing BLND are excluded
+from new receipts. Active BLND:USDC and BLND:XLM amount changes—including
+deposits, Q4W changes, withdrawals, actual losses, and interest gains—require
+the completed production checkpoint to be no more than five seconds old. Stale
+mutations fail before changing accounting, which bounds the unresolved
+allocation window to one ledger. Per-user backstop accumulators, the 30%
+supply/borrow configuration and reserve-token accumulators, and claims remain
+implementation work.
 
 The contract extends its code and instance TTL to 90 days at construction and
 renews it whenever fewer than 89 days remain. This does not change the
@@ -271,12 +290,19 @@ deadline is seven days after the verified queue's unlock time, not seven days
 after the direct swap. A late direct swap therefore has less than seven days
 remaining.
 
-Once the direct emitter swap succeeds, later migration-position withdrawals or
-loss of the candidate's strictly-greater legacy-token balance do not prevent
-synchronization. If synchronization is not invoked before the fixed deadline,
-the emitter can remain pointed at a candidate whose lifecycle is still
-`Prepared`. This migration design addresses that case through operational
-monitoring rather than a governance-authorized recovery mechanism.
+Once the direct emitter swap succeeds, BLND-bearing tier-weight mutations and
+reward-zone edits fail until synchronization, preventing the unresolved
+ongoing-emission interval from being reweighted. Plain-USDC operations remain
+available. Loss of the candidate's strictly-greater legacy-token balance does
+not prevent synchronization. If synchronization is not invoked before the
+fixed deadline, the emitter can remain pointed at a candidate whose lifecycle
+is still `Prepared`. This migration design addresses that case through
+operational monitoring rather than a governance-authorized recovery mechanism.
+
+BLND:USDC deposited at or after the currently verified queue unlock remains
+ordinary backstop capital but receives zero migration-backfill weight for that
+queue. A later verified replacement queue permits new deposits to begin earning
+weight again before its unlock; eligibility is never granted retroactively.
 
 The historical v2 contracts remain in the repository root and continue to use
 their SDK-22 toolchain. Do not move v3 code into the root workspace or upgrade

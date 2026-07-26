@@ -41,6 +41,16 @@ The test suite must verify:
 - The candidate can synchronize its lifecycle after the permissionless emitter
   swap is invoked directly within the seven-day synchronization grace period
   without changing the original recovery anchor.
+- Recovery synchronization caps backfill at the verified queue unlock, while
+  ongoing reconciliation includes BLND received after the direct swap; tests
+  prove the synchronization delay cannot be rewarded under both regimes.
+- BLND:USDC deposited at or after the current verified unlock remains usable
+  tier capital but receives zero backfill weight for that queue, so its later
+  deposit timestamp cannot make recovery weight negative.
+- Once a direct swap makes the candidate the emitter recipient, BLND-bearing
+  tier-weight mutations and reward-zone edits fail until synchronization;
+  synchronization remains permissionless and succeeds without those
+  mutations reweighting the unresolved ongoing-emission interval.
 - The canonical `candidate.finalize_migration()` path performs the emitter swap
   and candidate activation atomically; direct emitter finalization followed by
   `candidate.sync_migration()` is tested only as the bypass-recovery path.
@@ -72,8 +82,8 @@ The test suite must verify:
 - Scheduled backfill starts exactly 31 days before the original unlock, accrues
   at 1 BLND per second, and is capped at 10 million BLND.
 - Prefunding begins at candidate construction, the original queue must start
-  within 31 days, and every surviving deposit is weighted from its actual
-  deposit time.
+  within 31 days, and every eligible surviving pre-unlock deposit is weighted
+  from its actual deposit time.
 - A candidate whose original queue begins after the 31-day prefunding campaign
   is rejected rather than receiving unbounded early-weight credit.
 - The complete 107-day original-queue-plus-recovery horizon schedules
@@ -161,7 +171,9 @@ The v3 tests must verify:
   forfeit the depositor's backfill history.
 - Pre-migration and post-migration BLND:USDC deposits follow the same
   activation, waterfall, take-rate, and ongoing-emission eligibility rules,
-  except that ongoing emissions cannot accrue before the emitter migrates.
+  except that ongoing emissions cannot accrue before the emitter migrates,
+  direct-swap recovery temporarily fails closed until synchronization, and
+  deposits at or after a verified unlock receive no backfill for that queue.
 - Migration activation freezes only backfill weight. A later BLND:USDC deposit
   joins the tier without changing the depositor's or system's finalized
   backfill weight.
@@ -606,18 +618,44 @@ The v3 tests must verify:
 - The two floor-rounded tranches plus top-level carry exactly conserve the
   input, and the carry remains scoped to the next top-level split.
 - The reward zone contains at most 30 registered pools.
-- Entry requires the 12,500-USDC threshold, while an existing member remains
-  eligible at or above the 10,000-USDC maintenance threshold.
+- Entry requires both the 12,500-USDC threshold and strictly positive eligible
+  underlying BLND. A USDC-only pool can activate but cannot enter the reward
+  zone until BLND:USDC or BLND:XLM is deposited.
+- An existing positive-weight member remains eligible at or above the
+  10,000-USDC maintenance threshold.
+- A zero-BLND member is permissionlessly removable despite remaining above the
+  maintenance threshold and requires no distribution checkpoint.
 - Permissionless full-zone replacement requires the entrant to have strictly
   more eligible underlying BLND than the named member.
 - Every reward-zone edit after its first member requires a distribution
-  checkpoint within the preceding hour.
-- Until the ongoing distributor is implemented, optimized-WASM coverage proves
-  that the first member can enter and every later edit fails closed because no
-  production checkpoint writer exists.
+  checkpoint within the preceding hour except allocation-neutral zero-weight
+  removal.
+- The permissionless production distributor writes that checkpoint only after
+  emitter reconciliation, every bounded pool allocation, carry update, and
+  aggregate conservation check succeeds.
+- Successful exact-delta backfill funding verifies the configured BLND token.
+- If backfill has not been funded, the first successful ongoing distribution
+  verifies a positive exact balance delta around its own emitter invocation
+  before enabling accumulated-balance reconciliation. Prefunding a wrong
+  configured token cannot bypass this proof, and failure leaves the emitter
+  checkpoint unchanged.
+- A migration qualified entirely by direct BLND:USDC transfers can activate
+  with zero backfill weight. Backfill funding remains unavailable, but a later
+  positive ongoing distribution verifies BLND and proceeds normally.
+- Distribution excludes both the remaining migration-backfill reserve and
+  previously accounted, unclaimed ongoing BLND.
+- A direct emitter invocation followed by candidate distribution reconciles
+  the accumulated actual receipt exactly once.
+- A failed balance, BLND-binding, or timestamp check rolls back the emitter
+  call and leaves the prior production checkpoint unchanged.
+- Standalone distribution checkpoints enforce the v2-compatible five-second
+  interval. Every active BLND:USDC or BLND:XLM amount mutation in a reward-zone
+  pool requires a completed production checkpoint no more than five seconds old
+  and fails before changing accounting when that checkpoint is stale.
 - Stored Active, On-Ice, or Frozen status is not a separate distribution gate.
-- Only reward-zone pools receive the backstop-depositor BLND tranche.
-- Pool allocation is proportional to eligible underlying BLND across
+- Only reward-zone pools receive ongoing BLND.
+- Both the backstop-depositor and pool supply/borrow tranches are allocated
+  among reward-zone pools in proportion to eligible underlying BLND across
   BLND:USDC and BLND:XLM backstop positions.
 - BLND held through either eligible tier has equal emission weight per
   underlying BLND.
@@ -631,15 +669,19 @@ The v3 tests must verify:
   rejected; large proportional multiplication is handled with wide arithmetic.
 - Pool-level and user-level integer remainders are conserved and carried
   forward only within the same allocation scope.
-- Balance, LP-rate, and activation changes do not retroactively alter accrued
-  emissions.
-- Queueing checkpoints emissions through the queue timestamp, after which the
-  queued shares receive zero ongoing BLND emissions.
-- Dequeueing restores ongoing-emission eligibility prospectively without
-  awarding emissions for the queued interval.
+- Balance, LP-rate, and activation changes do not alter already allocated
+  emissions; tests bound the unresolved interval that can observe a new weight
+  to at most five seconds.
+- A deposit into an existing reward-zone pool fails after a stale checkpoint,
+  succeeds within five seconds of distribution, and affects later allocation.
+- Queueing and dequeueing fail after a stale checkpoint and succeed within five
+  seconds of distribution. Queued shares then receive zero ongoing BLND weight,
+  and dequeueing restores that weight without changing prior allocations.
 - Capital committed to a pending bad-debt lot remains eligible until an actual
-  fill transfers tier assets. The fill checkpoints first, and only the amount
-  transferred loses weight prospectively.
+  fill transfers tier assets. The fill requires a recent checkpoint, and only
+  the amount transferred loses weight.
+- Interest-auction gains require a recent checkpoint and increase active
+  emission weight without changing prior allocations.
 - Underlying BLND is floor-rounded from each Comet's current BLND reserve and
   total LP supply in the same invocation.
 - Zero or negative LP supply, negative reserve/LP amounts, an LP amount above
@@ -657,6 +699,10 @@ The v3 tests must verify:
   tranche and are claimable to an authorized user's chosen destination.
 - A backstop claim equals the existing pool/user underlying-BLND formula and is
   not redirected or reweighted into one preferred tier.
+- An optimized-WASM distribution over the maximum 30-pool reward zone remains
+  within the Protocol-27 mainnet transaction-resource limits.
+- An optimized-WASM eligible-tier deposit following a recent maximum-30-pool
+  checkpoint also remains within those limits.
 
 ## Execution environments
 

@@ -106,9 +106,23 @@ BLND reserve and total supply of the BLND:USDC and BLND:XLM Comet contracts.
 That same-invocation composition is an intentional spot policy and therefore
 accepts reserve-ratio manipulation risk at a checkpoint. Permissionless,
 maximum-30 reward-zone membership, threshold entry/removal, and spot-BLND
-replacement are implemented. Emitter funding, the production distribution
-checkpoint writer, bounded pool/user accrual, supply/borrow emission
-configuration, and claims remain unimplemented.
+replacement are implemented. USDC alone can activate a pool, but reward-zone
+entry requires positive eligible underlying BLND; a zero-BLND member can be
+removed without a checkpoint so it cannot block distribution. After migration,
+the permissionless distributor verifies the configured BLND token through
+either exact-delta backfill funding or an exact delta around the first positive
+ongoing emitter call. The latter keeps ongoing distribution available when a
+direct-transfer-only migration has zero eligible backfill weight. The
+distributor then reconciles the candidate's actual unaccounted BLND balance,
+excludes the segregated backfill reserve, allocates both tranches across the
+bounded reward zone by current eligible underlying BLND, carries each floor
+remainder at its own scope, and writes the production distribution checkpoint
+only after the complete allocation succeeds. Active BLND-tier deposits, Q4W
+changes, withdrawals, losses, and gains require that completed checkpoint to be
+no more than five seconds old before changing pool weight, bounding the
+unresolved allocation window to one ledger. Per-user backstop accumulators, the
+30% supply/borrow configuration and reserve-token accumulators, and claims
+remain unimplemented.
 
 Run both lanes:
 

@@ -1540,7 +1540,71 @@ E_{\mathrm{backstop},p}
 
 BLND held through either eligible tier earns at the same rate per underlying
 BLND. The USDC or XLM component of an LP position does not contribute emission
-weight.
+weight. The formula above states the economic weighting; its bounded on-chain
+realization uses one accumulator per eligible tier and scoped integer carry as
+follows.
+
+At the same distribution checkpoint that fixes
+\(E_{\mathrm{backstop},p}\), the candidate MUST split that pool allocation
+between BLND:USDC and BLND:XLM using the checkpoint's underlying-BLND
+composition:
+
+\[
+E_{p,t} =
+\left\lfloor
+(E_{\mathrm{backstop},p} + C_{p,\mathrm{tier}})
+\frac{B_{p,t}}{B_p}
+\right\rfloor
+\]
+
+The sum not assigned by the two floor operations becomes the next
+pool-local tier-split carry \(C_{p,\mathrm{tier}}\). This freezes tier
+attribution in the distribution invocation; a later Comet-composition change
+MUST NOT rewrite it.
+
+Each eligible tier uses a \(10^{14}\)-scaled cumulative per-share index. For
+active, nonqueued tier shares \(S_{p,t}\), the index update is:
+
+\[
+N_{p,t} = E_{p,t}10^{14} + C_{p,t,\mathrm{index}}
+\]
+
+\[
+\Delta I_{p,t} =
+\left\lfloor \frac{N_{p,t}}{S_{p,t}} \right\rfloor
+\]
+
+\[
+C'_{p,t,\mathrm{index}} =
+N_{p,t} - \Delta I_{p,t}S_{p,t}
+\]
+
+The index carry remains in that pool and tier. For user active shares
+\(S_{p,t,u}\), checkpointing against an index change realizes:
+
+\[
+N_{p,t,u} =
+S_{p,t,u}(I_{p,t}-I^{\mathrm{last}}_{p,t,u})
++ C_{p,t,u}
+\]
+
+\[
+\Delta E_{p,t,u} =
+\left\lfloor \frac{N_{p,t,u}}{10^{14}} \right\rfloor
+\]
+
+\[
+C'_{p,t,u} =
+N_{p,t,u} - \Delta E_{p,t,u}10^{14}
+\]
+
+The user's claimable amount is the sum of accrued BLND from the two eligible
+tier checkpoints. A user's index MUST be checkpointed before any deposit,
+queue, dequeue, or withdrawal changes that user's active eligible shares. A
+new depositor starts at the current index and cannot receive prior accrual.
+Queueing first realizes accrual through the current index and then makes the
+queued shares ineligible; dequeueing starts those shares again at the current
+index without retroactive credit.
 
 At every emission-allocation checkpoint, the candidate MUST derive the current
 underlying BLND in each BLND-bearing tier directly from that Comet contract's
@@ -1603,9 +1667,14 @@ emissions. Active tier-amount mutations follow the five-second boundary above;
 reward-zone membership follows the separately documented v2-compatible
 one-hour boundary.
 
-The claimable backstop-depositor amount remains exactly
-\(E_{\mathrm{backstop},p,u}\) under the pool and user formulas above. Claim
-realization MUST NOT redirect, reweight, or recompute that entitlement based
+The claimable backstop-depositor amount is the exact result of the pool,
+tier-index, and user-checkpoint formulas above, including their scoped carry.
+The position owner MUST authorize a claim and MAY choose its BLND recipient.
+One claim checkpoints and realizes both eligible tiers for one pool. It MUST
+reduce only that pool's accrued 70% backstop tranche, update the aggregate
+backstop-claimed and total-claimed counters, and transfer BLND atomically. It
+MUST NOT include migration backfill or the pool's 30% supply/borrow tranche.
+Claim realization MUST NOT redirect, reweight, or recompute entitlement based
 on a preferred tier. No rule that compounds every claim into BLND:XLM or
 another single v3 tier is introduced here.
 
@@ -1825,13 +1894,14 @@ coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
 local run, the public-testnet exercise, a production LP valuation source for
-non-emission policy, and user-level ongoing BLND-emission accrual remain
+non-emission policy, and the 30% supply/borrow emission path remain
 intentionally unimplemented. Milestone 10's policy arithmetic, admin and
 pending-loss policies, canonical spot-composition read boundary,
 permissionless maximum-30 reward-zone membership, emitter reconciliation,
-pool-level accrual and carry, and production distribution checkpoint writer
-are implemented. Per-user backstop accumulators, supply/borrow emission
-configuration and reserve-token accumulators, and claims remain unimplemented.
+pool-level accrual and carry, production distribution checkpoint writer,
+two-tier per-share indexes, per-user backstop checkpoints, and owner-authorized
+backstop claims are implemented. Supply/borrow emission configuration,
+reserve-token accumulators, and their claims remain unimplemented.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

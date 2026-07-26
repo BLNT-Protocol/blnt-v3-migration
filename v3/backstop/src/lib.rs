@@ -51,6 +51,7 @@ const INTEREST_LOT_PREMIUM_DENOMINATOR: i128 = 5;
 const BACKSTOP_EMISSION_NUMERATOR: i128 = 7;
 const POOL_EMISSION_NUMERATOR: i128 = 3;
 const EMISSION_SPLIT_DENOMINATOR: i128 = 10;
+const EMISSION_INDEX_SCALE: i128 = 100_000_000_000_000;
 const MAX_REWARD_ZONE_SIZE: u32 = 30;
 const MIN_DISTRIBUTION_INTERVAL_SECONDS: u64 = 5;
 const WEIGHT_CHANGE_CHECKPOINT_MAX_AGE_SECONDS: u64 = MIN_DISTRIBUTION_INTERVAL_SECONDS;
@@ -93,6 +94,7 @@ enum DataKey {
     LastOngoingDistribution,
     OngoingTotalReceived,
     OngoingTotalClaimed,
+    OngoingBackstopClaimed,
     OngoingBackstopAllocated,
     OngoingPoolAllocated,
     OngoingSplitCarry,
@@ -120,6 +122,7 @@ enum PersistentKey {
     PoolTierQueuedShares(BackstopTier, Address),
     PoolTierAssets(BackstopTier, Address),
     PoolOngoingEmissions(Address),
+    UserOngoingEmissions(BackstopTier, Address, Address),
 }
 
 #[derive(Clone)]
@@ -193,6 +196,7 @@ pub enum BackstopError {
     DistributionCheckpointRequired = 1248,
     DistributionTooSoon = 1249,
     InvalidOngoingBalance = 1250,
+    NoOngoingEmissions = 1251,
 }
 
 #[derive(Clone)]
@@ -405,7 +409,23 @@ pub struct PoolOngoingEmissions {
     pub accrued_backstop: i128,
     pub accrued_pool: i128,
     pub active_blnd_usdc: i128,
+    pub active_blnd_usdc_shares: i128,
     pub active_blnd_xlm: i128,
+    pub active_blnd_xlm_shares: i128,
+    pub backstop_tier_carry: i128,
+    pub blnd_usdc_index: i128,
+    pub blnd_usdc_index_carry: i128,
+    pub blnd_xlm_index: i128,
+    pub blnd_xlm_index_carry: i128,
+}
+
+/// One user's bounded ongoing-BLND checkpoint in one BLND-bearing tier.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UserOngoingEmissions {
+    pub accrued: i128,
+    pub carry: i128,
+    pub index: i128,
 }
 
 /// Auditable aggregate accounting for ongoing BLND held by the candidate.
@@ -414,6 +434,7 @@ pub struct PoolOngoingEmissions {
 pub struct OngoingEmissionState {
     pub backstop_allocated: i128,
     pub backstop_carry: i128,
+    pub backstop_claimed: i128,
     pub last_distribution: Option<u64>,
     pub pool_allocated: i128,
     pub pool_carry: i128,
@@ -652,6 +673,15 @@ pub struct OngoingBlndDistributed {
     pub received: i128,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OngoingBlndClaimed {
+    pub amount: i128,
+    pub pool: Address,
+    pub recipient: Address,
+    pub user: Address,
+}
+
 #[contract]
 pub struct BackstopContract;
 
@@ -861,6 +891,38 @@ impl BackstopContract {
         extend_instance_ttl(&env);
         require_registered_pool(&env, &pool);
         get_pool_ongoing_emissions(&env, &pool)
+    }
+
+    /// Return one user's current checkpointed and pending ongoing BLND for an
+    /// eligible backstop tier without changing storage.
+    pub fn user_ongoing_emissions(
+        env: Env,
+        user: Address,
+        pool: Address,
+        tier: BackstopTier,
+    ) -> UserOngoingEmissions {
+        extend_instance_ttl(&env);
+        require_emission_tier(&env, tier);
+        require_registered_pool(&env, &pool);
+        preview_user_ongoing_emissions(&env, tier, &user, &pool)
+    }
+
+    /// Claim one pool's accrued backstop-depositor BLND to a chosen recipient.
+    ///
+    /// The position owner authorizes the claim. Both eligible tiers are
+    /// checkpointed, but neither the 30% pool tranche nor migration backfill is
+    /// included.
+    pub fn claim_ongoing_blnd(env: Env, user: Address, pool: Address, recipient: Address) -> i128 {
+        extend_instance_ttl(&env);
+        let amount = claim_user_ongoing_blnd(&env, &user, &pool, &recipient);
+        OngoingBlndClaimed {
+            amount,
+            pool,
+            recipient,
+            user,
+        }
+        .publish(&env);
+        amount
     }
 
     /// Deposit BLND:XLM LP into its pool-attributed second-loss tier.
@@ -2474,6 +2536,7 @@ fn activate(env: &Env, requested_backfill_end: u64) -> u64 {
         &OngoingEmissionState {
             backstop_allocated: 0,
             backstop_carry: 0,
+            backstop_claimed: 0,
             last_distribution: Some(last_distribution),
             pool_allocated: 0,
             pool_carry: 0,
@@ -2521,6 +2584,7 @@ fn deposit_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: i
     let shares = shares_from_assets(env, amount, &state);
     require_positive(env, shares);
     require_recent_ongoing_checkpoint_for_weight_change(env, BackstopTier::BlndUsdc, &pool);
+    checkpoint_user_ongoing_for_weight_change(env, BackstopTier::BlndUsdc, &from, &pool);
 
     // Keep companion withdrawal state live whenever the position is touched.
     get_blnd_usdc_q4w(env, &from, &pool);
@@ -2596,6 +2660,7 @@ fn deposit_standard_tier(
     let shares = shares_from_assets(env, amount, &state);
     require_positive(env, shares);
     require_recent_ongoing_checkpoint_for_weight_change(env, tier, &pool);
+    checkpoint_user_ongoing_for_weight_change(env, tier, &from, &pool);
 
     // Keep the companion queue live whenever its position is touched.
     get_tier_q4w(env, tier, &from, &pool);
@@ -2660,6 +2725,7 @@ fn queue_standard_tier_withdrawal(
         panic_with_error!(env, BackstopError::TooManyQ4WEntries);
     }
     require_recent_ongoing_checkpoint_for_weight_change(env, tier, &pool);
+    checkpoint_user_ongoing_for_weight_change(env, tier, &from, &pool);
 
     let expires_at = env
         .ledger()
@@ -2700,6 +2766,7 @@ fn dequeue_standard_tier_withdrawal(
     let mut queue = get_tier_q4w(env, tier, &from, &pool);
     consume_tier_queue_from_back(env, &mut queue, shares);
     require_recent_ongoing_checkpoint_for_weight_change(env, tier, &pool);
+    checkpoint_user_ongoing_for_weight_change(env, tier, &from, &pool);
     set_tier_q4w(env, tier, &from, &pool, &queue);
     add_pool_tier_queued_shares(env, tier, &pool, -shares);
     refresh_pool_ongoing_assets_for_tier(env, tier, &pool);
@@ -2735,6 +2802,7 @@ fn withdraw_standard_tier(
     let state = get_pool_tier_state(env, tier, &pool);
     let assets = assets_from_shares(env, shares, &state);
     require_recent_ongoing_checkpoint_for_weight_change(env, tier, &pool);
+    checkpoint_user_ongoing_for_weight_change(env, tier, &from, &pool);
     consume_expired_tier_q4w(env, tier, &from, &pool, shares);
     let user_shares = get_tier_shares(env, tier, &from, &pool);
     if shares > user_shares {
@@ -2788,6 +2856,12 @@ fn withdraw_standard_tier(
 
 fn require_standard_tier(env: &Env, tier: BackstopTier) {
     if tier == BackstopTier::BlndUsdc {
+        panic_with_error!(env, BackstopError::InvalidTier);
+    }
+}
+
+fn require_emission_tier(env: &Env, tier: BackstopTier) {
+    if tier == BackstopTier::Usdc {
         panic_with_error!(env, BackstopError::InvalidTier);
     }
 }
@@ -2989,13 +3063,27 @@ fn get_pool_ongoing_emissions(env: &Env, pool: &Address) -> PoolOngoingEmissions
             accrued_backstop: 0,
             accrued_pool: 0,
             active_blnd_usdc: 0,
+            active_blnd_usdc_shares: 0,
             active_blnd_xlm: 0,
+            active_blnd_xlm_shares: 0,
+            backstop_tier_carry: 0,
+            blnd_usdc_index: 0,
+            blnd_usdc_index_carry: 0,
+            blnd_xlm_index: 0,
+            blnd_xlm_index_carry: 0,
         });
     extend_persistent_ttl_if_present(env, &key);
     if state.accrued_backstop < 0
         || state.accrued_pool < 0
         || state.active_blnd_usdc < 0
+        || state.active_blnd_usdc_shares < 0
         || state.active_blnd_xlm < 0
+        || state.active_blnd_xlm_shares < 0
+        || state.backstop_tier_carry < 0
+        || state.blnd_usdc_index < 0
+        || state.blnd_usdc_index_carry < 0
+        || state.blnd_xlm_index < 0
+        || state.blnd_xlm_index_carry < 0
     {
         panic_with_error!(env, BackstopError::InvalidEmissionValue);
     }
@@ -3006,7 +3094,14 @@ fn set_pool_ongoing_emissions(env: &Env, pool: &Address, state: &PoolOngoingEmis
     if state.accrued_backstop < 0
         || state.accrued_pool < 0
         || state.active_blnd_usdc < 0
+        || state.active_blnd_usdc_shares < 0
         || state.active_blnd_xlm < 0
+        || state.active_blnd_xlm_shares < 0
+        || state.backstop_tier_carry < 0
+        || state.blnd_usdc_index < 0
+        || state.blnd_usdc_index_carry < 0
+        || state.blnd_xlm_index < 0
+        || state.blnd_xlm_index_carry < 0
     {
         panic_with_error!(env, BackstopError::InvalidEmissionValue);
     }
@@ -3019,8 +3114,14 @@ fn set_pool_ongoing_emissions(env: &Env, pool: &Address, state: &PoolOngoingEmis
 
 fn refresh_pool_ongoing_assets(env: &Env, pool: &Address) {
     let mut state = get_pool_ongoing_emissions(env, pool);
-    state.active_blnd_usdc = pool_active_emission_assets(env, BackstopTier::BlndUsdc, pool);
-    state.active_blnd_xlm = pool_active_emission_assets(env, BackstopTier::BlndXlm, pool);
+    let blnd_usdc = get_pool_tier_state(env, BackstopTier::BlndUsdc, pool);
+    state.active_blnd_usdc_shares =
+        checked_nonnegative_sub_i128(env, blnd_usdc.shares, blnd_usdc.queued_shares);
+    state.active_blnd_usdc = assets_from_shares(env, state.active_blnd_usdc_shares, &blnd_usdc);
+    let blnd_xlm = get_pool_tier_state(env, BackstopTier::BlndXlm, pool);
+    state.active_blnd_xlm_shares =
+        checked_nonnegative_sub_i128(env, blnd_xlm.shares, blnd_xlm.queued_shares);
+    state.active_blnd_xlm = assets_from_shares(env, state.active_blnd_xlm_shares, &blnd_xlm);
     set_pool_ongoing_emissions(env, pool, &state);
 }
 
@@ -3028,6 +3129,180 @@ fn refresh_pool_ongoing_assets_for_tier(env: &Env, tier: BackstopTier, pool: &Ad
     if tier != BackstopTier::Usdc {
         refresh_pool_ongoing_assets(env, pool);
     }
+}
+
+fn pool_ongoing_index(env: &Env, state: &PoolOngoingEmissions, tier: BackstopTier) -> i128 {
+    match tier {
+        BackstopTier::BlndUsdc => state.blnd_usdc_index,
+        BackstopTier::BlndXlm => state.blnd_xlm_index,
+        BackstopTier::Usdc => panic_with_error!(env, BackstopError::InvalidTier),
+    }
+}
+
+fn get_user_ongoing_emissions(
+    env: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool: &Address,
+) -> UserOngoingEmissions {
+    require_emission_tier(env, tier);
+    let key = PersistentKey::UserOngoingEmissions(tier, user.clone(), pool.clone());
+    let state = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(UserOngoingEmissions {
+            accrued: 0,
+            carry: 0,
+            index: 0,
+        });
+    extend_persistent_ttl_if_present(env, &key);
+    if state.accrued < 0
+        || state.carry < 0
+        || state.carry >= EMISSION_INDEX_SCALE
+        || state.index < 0
+    {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    state
+}
+
+fn set_user_ongoing_emissions(
+    env: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool: &Address,
+    state: &UserOngoingEmissions,
+) {
+    require_emission_tier(env, tier);
+    if state.accrued < 0
+        || state.carry < 0
+        || state.carry >= EMISSION_INDEX_SCALE
+        || state.index < 0
+    {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    let key = PersistentKey::UserOngoingEmissions(tier, user.clone(), pool.clone());
+    env.storage().persistent().set(&key, state);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
+}
+
+fn user_active_emission_shares(
+    env: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool: &Address,
+) -> i128 {
+    match tier {
+        BackstopTier::BlndUsdc => {
+            let shares = get_position(env, user, pool).amount;
+            let queued = queued_shares(env, &get_blnd_usdc_q4w(env, user, pool));
+            checked_nonnegative_sub_i128(env, shares, queued)
+        }
+        BackstopTier::BlndXlm => {
+            let shares = get_tier_shares(env, tier, user, pool);
+            let queued = queued_shares(env, &get_tier_q4w(env, tier, user, pool));
+            checked_nonnegative_sub_i128(env, shares, queued)
+        }
+        BackstopTier::Usdc => panic_with_error!(env, BackstopError::InvalidTier),
+    }
+}
+
+fn accrue_user_ongoing_emissions(
+    env: &Env,
+    mut state: UserOngoingEmissions,
+    active_shares: i128,
+    current_index: i128,
+) -> UserOngoingEmissions {
+    if active_shares < 0 || current_index < state.index {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    let index_delta = checked_sub_i128(env, current_index, state.index);
+    let numerator = I256::from_i128(env, active_shares)
+        .mul(&I256::from_i128(env, index_delta))
+        .add(&I256::from_i128(env, state.carry));
+    let scale = I256::from_i128(env, EMISSION_INDEX_SCALE);
+    let accrued = numerator
+        .div(&scale)
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError));
+    let carry = numerator
+        .sub(&I256::from_i128(env, accrued).mul(&scale))
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError));
+    state.accrued = checked_add_i128(env, state.accrued, accrued);
+    state.carry = carry;
+    state.index = current_index;
+    state
+}
+
+fn preview_user_ongoing_emissions(
+    env: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool: &Address,
+) -> UserOngoingEmissions {
+    let pool_state = get_pool_ongoing_emissions(env, pool);
+    accrue_user_ongoing_emissions(
+        env,
+        get_user_ongoing_emissions(env, tier, user, pool),
+        user_active_emission_shares(env, tier, user, pool),
+        pool_ongoing_index(env, &pool_state, tier),
+    )
+}
+
+fn checkpoint_user_ongoing_emissions(
+    env: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool: &Address,
+) -> UserOngoingEmissions {
+    let state = preview_user_ongoing_emissions(env, tier, user, pool);
+    set_user_ongoing_emissions(env, tier, user, pool, &state);
+    state
+}
+
+fn checkpoint_user_ongoing_for_weight_change(
+    env: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool: &Address,
+) {
+    if tier != BackstopTier::Usdc {
+        checkpoint_user_ongoing_emissions(env, tier, user, pool);
+    }
+}
+
+fn claim_user_ongoing_blnd(env: &Env, user: &Address, pool: &Address, recipient: &Address) -> i128 {
+    user.require_auth();
+    require_registered_pool(env, pool);
+
+    let mut blnd_usdc = checkpoint_user_ongoing_emissions(env, BackstopTier::BlndUsdc, user, pool);
+    let mut blnd_xlm = checkpoint_user_ongoing_emissions(env, BackstopTier::BlndXlm, user, pool);
+    let amount = checked_add_i128(env, blnd_usdc.accrued, blnd_xlm.accrued);
+    if amount <= 0 {
+        panic_with_error!(env, BackstopError::NoOngoingEmissions);
+    }
+    blnd_usdc.accrued = 0;
+    blnd_xlm.accrued = 0;
+    set_user_ongoing_emissions(env, BackstopTier::BlndUsdc, user, pool, &blnd_usdc);
+    set_user_ongoing_emissions(env, BackstopTier::BlndXlm, user, pool, &blnd_xlm);
+
+    let mut pool_state = get_pool_ongoing_emissions(env, pool);
+    pool_state.accrued_backstop =
+        checked_nonnegative_sub_i128(env, pool_state.accrued_backstop, amount);
+    set_pool_ongoing_emissions(env, pool, &pool_state);
+
+    let mut ongoing = get_ongoing_emission_state(env);
+    ongoing.backstop_claimed = checked_add_i128(env, ongoing.backstop_claimed, amount);
+    ongoing.total_claimed = checked_add_i128(env, ongoing.total_claimed, amount);
+    set_ongoing_emission_state(env, &ongoing);
+
+    let blnd: Address = env.storage().instance().get(&DataKey::BlndToken).unwrap();
+    TokenClient::new(env, &blnd).transfer(&env.current_contract_address(), recipient, &amount);
+    amount
 }
 
 fn get_ongoing_emission_state(env: &Env) -> OngoingEmissionState {
@@ -3041,6 +3316,11 @@ fn get_ongoing_emission_state(env: &Env) -> OngoingEmissionState {
             .storage()
             .instance()
             .get(&DataKey::OngoingBackstopCarry)
+            .unwrap_or(0),
+        backstop_claimed: env
+            .storage()
+            .instance()
+            .get(&DataKey::OngoingBackstopClaimed)
             .unwrap_or(0),
         last_distribution: env
             .storage()
@@ -3077,13 +3357,21 @@ fn get_ongoing_emission_state(env: &Env) -> OngoingEmissionState {
 fn set_ongoing_emission_state(env: &Env, state: &OngoingEmissionState) {
     if state.backstop_allocated < 0
         || state.backstop_carry < 0
+        || state.backstop_claimed < 0
         || state.pool_allocated < 0
         || state.pool_carry < 0
         || state.split_carry < 0
         || state.total_claimed < 0
         || state.total_received < 0
+        || state.backstop_claimed > state.backstop_allocated
+        || state.backstop_claimed > state.total_claimed
         || state.total_claimed > state.total_received
     {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    let pool_claimed =
+        checked_nonnegative_sub_i128(env, state.total_claimed, state.backstop_claimed);
+    if pool_claimed > state.pool_allocated {
         panic_with_error!(env, BackstopError::InvalidEmissionValue);
     }
     let accounted = checked_add_i128(
@@ -3106,6 +3394,9 @@ fn set_ongoing_emission_state(env: &Env, state: &OngoingEmissionState) {
     env.storage()
         .instance()
         .set(&DataKey::OngoingBackstopCarry, &state.backstop_carry);
+    env.storage()
+        .instance()
+        .set(&DataKey::OngoingBackstopClaimed, &state.backstop_claimed);
     env.storage()
         .instance()
         .set(&DataKey::OngoingPoolAllocated, &state.pool_allocated);
@@ -3216,6 +3507,79 @@ fn require_no_unsynchronized_emitter_recipient(env: &Env) {
     }
 }
 
+fn advance_ongoing_emission_index(
+    env: &Env,
+    allocation: i128,
+    active_shares: i128,
+    index: i128,
+    carry: i128,
+) -> (i128, i128) {
+    if allocation < 0 || active_shares < 0 || index < 0 || carry < 0 {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    if active_shares == 0 {
+        if allocation != 0 {
+            panic_with_error!(env, BackstopError::InvalidEmissionValue);
+        }
+        return (index, carry);
+    }
+
+    let numerator = I256::from_i128(env, allocation)
+        .mul(&I256::from_i128(env, EMISSION_INDEX_SCALE))
+        .add(&I256::from_i128(env, carry));
+    let denominator = I256::from_i128(env, active_shares);
+    let index_increment = numerator
+        .div(&denominator)
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError));
+    let next_carry = numerator
+        .sub(&I256::from_i128(env, index_increment).mul(&denominator))
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError));
+    (checked_add_i128(env, index, index_increment), next_carry)
+}
+
+fn allocate_pool_backstop_emissions(
+    env: &Env,
+    state: &mut PoolOngoingEmissions,
+    values: &BlndEmissionValues,
+    allocation: i128,
+) {
+    if allocation < 0 {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    let total_weight = eligible_blnd(env, values);
+    let distribution = checked_add_i128(env, allocation, state.backstop_tier_carry);
+    if total_weight <= 0 {
+        if distribution != 0 {
+            panic_with_error!(env, BackstopError::InvalidEmissionValue);
+        }
+        return;
+    }
+
+    let blnd_usdc = proportional_floor(env, distribution, values.blnd_usdc, total_weight);
+    let blnd_xlm = proportional_floor(env, distribution, values.blnd_xlm, total_weight);
+    state.backstop_tier_carry = checked_nonnegative_sub_i128(
+        env,
+        distribution,
+        checked_add_i128(env, blnd_usdc, blnd_xlm),
+    );
+    (state.blnd_usdc_index, state.blnd_usdc_index_carry) = advance_ongoing_emission_index(
+        env,
+        blnd_usdc,
+        state.active_blnd_usdc_shares,
+        state.blnd_usdc_index,
+        state.blnd_usdc_index_carry,
+    );
+    (state.blnd_xlm_index, state.blnd_xlm_index_carry) = advance_ongoing_emission_index(
+        env,
+        blnd_xlm,
+        state.active_blnd_xlm_shares,
+        state.blnd_xlm_index,
+        state.blnd_xlm_index_carry,
+    );
+}
+
 fn distribute_ongoing_blnd(env: &Env) -> OngoingDistribution {
     if !env.storage().instance().has(&DataKey::ActivatedAt) {
         panic_with_error!(env, BackstopError::MigrationNotActive);
@@ -3254,7 +3618,14 @@ fn distribute_ongoing_blnd(env: &Env) -> OngoingDistribution {
         );
         let pool_weight = checked_add_i128(env, pool_blnd_usdc, pool_blnd_xlm);
         total_eligible_blnd = checked_add_i128(env, total_eligible_blnd, pool_weight);
-        weights.push_back((pool, pool_weight));
+        weights.push_back((
+            pool,
+            pool_weight,
+            BlndEmissionValues {
+                blnd_usdc: pool_blnd_usdc,
+                blnd_xlm: pool_blnd_xlm,
+            },
+        ));
     }
     if total_blnd_usdc > blnd_usdc_supply
         || total_blnd_xlm > blnd_xlm_supply
@@ -3314,12 +3685,13 @@ fn distribute_ongoing_blnd(env: &Env) -> OngoingDistribution {
     let pool_distribution = checked_add_i128(env, split.pool, state.pool_carry);
     let mut backstop_allocated = 0_i128;
     let mut pool_allocated = 0_i128;
-    for (pool, weight) in weights.iter() {
+    for (pool, weight, values) in weights.iter() {
         let backstop_allocation =
             proportional_floor(env, backstop_distribution, weight, total_eligible_blnd);
         let pool_allocation =
             proportional_floor(env, pool_distribution, weight, total_eligible_blnd);
         let mut pool_state = get_pool_ongoing_emissions(env, &pool);
+        allocate_pool_backstop_emissions(env, &mut pool_state, &values, backstop_allocation);
         pool_state.accrued_backstop =
             checked_add_i128(env, pool_state.accrued_backstop, backstop_allocation);
         pool_state.accrued_pool = checked_add_i128(env, pool_state.accrued_pool, pool_allocation);
@@ -3378,6 +3750,7 @@ fn queue_blnd_usdc_withdrawal(env: &Env, from: Address, pool: Address, amount: i
         panic_with_error!(env, BackstopError::TooManyQ4WEntries);
     }
     require_recent_ongoing_checkpoint_for_weight_change(env, BackstopTier::BlndUsdc, &pool);
+    checkpoint_user_ongoing_for_weight_change(env, BackstopTier::BlndUsdc, &from, &pool);
 
     let expires_at = env
         .ledger()
@@ -3420,6 +3793,7 @@ fn dequeue_blnd_usdc_withdrawal(env: &Env, from: Address, pool: Address, amount:
         }
     }
     require_recent_ongoing_checkpoint_for_weight_change(env, BackstopTier::BlndUsdc, &pool);
+    checkpoint_user_ongoing_for_weight_change(env, BackstopTier::BlndUsdc, &from, &pool);
     set_blnd_usdc_q4w(env, &from, &pool, &queue);
     add_pool_blnd_usdc_queued_shares(env, &pool, -amount);
     refresh_pool_ongoing_assets(env, &pool);
@@ -3447,6 +3821,7 @@ fn withdraw_blnd_usdc_position(env: &Env, from: Address, pool: Address, amount: 
     let state = get_pool_tier_state(env, BackstopTier::BlndUsdc, &pool);
     let assets = assets_from_shares(env, amount, &state);
     require_recent_ongoing_checkpoint_for_weight_change(env, BackstopTier::BlndUsdc, &pool);
+    checkpoint_user_ongoing_for_weight_change(env, BackstopTier::BlndUsdc, &from, &pool);
     consume_expired_blnd_usdc_q4w(env, &from, &pool, amount);
     let mut position = get_position(env, &from, &pool);
     if amount > position.amount {
@@ -5098,6 +5473,7 @@ mod tests {
         emitter: Address,
         blnd: Address,
         blnd_usdc: Address,
+        blnd_xlm: Address,
         emitted_blnd: Address,
         pool_factory: Address,
     }
@@ -5108,8 +5484,18 @@ mod tests {
         }
 
         fn create_with_blnd_binding(bind_emitter_blnd: bool) -> Self {
+            Self::create_configured(bind_emitter_blnd, true)
+        }
+
+        fn create_without_auth_mocking() -> Self {
+            Self::create_configured(true, false)
+        }
+
+        fn create_configured(bind_emitter_blnd: bool, mock_all_auths: bool) -> Self {
             let env = Env::default();
-            env.mock_all_auths();
+            if mock_all_auths {
+                env.mock_all_auths();
+            }
             env.ledger().set_timestamp(1_000);
             let incumbent = Address::generate(&env);
             let candidate = Address::generate(&env);
@@ -5170,6 +5556,7 @@ mod tests {
                     &OngoingEmissionState {
                         backstop_allocated: 0,
                         backstop_carry: 0,
+                        backstop_claimed: 0,
                         last_distribution: Some(env.ledger().timestamp()),
                         pool_allocated: 0,
                         pool_carry: 0,
@@ -5185,6 +5572,7 @@ mod tests {
                 emitter,
                 blnd: candidate_blnd,
                 blnd_usdc,
+                blnd_xlm,
                 emitted_blnd,
                 pool_factory,
             }
@@ -5276,7 +5664,14 @@ mod tests {
                 accrued_backstop: 46_666_666,
                 accrued_pool: 2 * SCALAR_7,
                 active_blnd_usdc: 100 * SCALAR_7,
+                active_blnd_usdc_shares: 100 * SCALAR_7,
                 active_blnd_xlm: 0,
+                active_blnd_xlm_shares: 0,
+                backstop_tier_carry: 0,
+                blnd_usdc_index: 4_666_666_600_000,
+                blnd_usdc_index_carry: 0,
+                blnd_xlm_index: 0,
+                blnd_xlm_index_carry: 0,
             }
         );
         assert_eq!(
@@ -5285,7 +5680,14 @@ mod tests {
                 accrued_backstop: 23_333_333,
                 accrued_pool: SCALAR_7,
                 active_blnd_usdc: 0,
+                active_blnd_usdc_shares: 0,
                 active_blnd_xlm: 100 * SCALAR_7,
+                active_blnd_xlm_shares: 100 * SCALAR_7,
+                backstop_tier_carry: 0,
+                blnd_usdc_index: 0,
+                blnd_usdc_index_carry: 0,
+                blnd_xlm_index: 2_333_333_300_000,
+                blnd_xlm_index_carry: 0,
             }
         );
         assert_eq!(
@@ -5293,6 +5695,7 @@ mod tests {
             OngoingEmissionState {
                 backstop_allocated: 7 * SCALAR_7 - 1,
                 backstop_carry: 1,
+                backstop_claimed: 0,
                 last_distribution: Some(1_010),
                 pool_allocated: 3 * SCALAR_7,
                 pool_carry: 0,
@@ -5326,6 +5729,7 @@ mod tests {
             OngoingEmissionState {
                 backstop_allocated: 105_000_000,
                 backstop_carry: 0,
+                backstop_claimed: 0,
                 last_distribution: Some(1_015),
                 pool_allocated: 45_000_000,
                 pool_carry: 0,
@@ -5333,6 +5737,255 @@ mod tests {
                 total_claimed: 0,
                 total_received: 15 * SCALAR_7 + 1,
             }
+        );
+    }
+
+    #[test]
+    fn ongoing_users_claim_only_the_two_backstop_tier_allocations() {
+        let fixture = OngoingFixture::create();
+        let candidate = fixture.client();
+        let pool = fixture.pool(0, 0);
+        let blnd_usdc_user = Address::generate(&fixture.env);
+        let blnd_xlm_user = Address::generate(&fixture.env);
+        let blnd_usdc_recipient = Address::generate(&fixture.env);
+        let blnd_xlm_recipient = Address::generate(&fixture.env);
+        let deposit = 100 * SCALAR_7;
+        MockCometClient::new(&fixture.env, &fixture.blnd_usdc).mint(&blnd_usdc_user, &deposit);
+        MockCometClient::new(&fixture.env, &fixture.blnd_xlm).mint(&blnd_xlm_user, &deposit);
+        candidate.deposit_blnd_usdc(&blnd_usdc_user, &pool, &deposit);
+        candidate.deposit_blnd_xlm(&blnd_xlm_user, &pool, &deposit);
+        fixture.set_reward_zone(&soroban_sdk::vec![&fixture.env, pool.clone()]);
+
+        fixture.env.ledger().set_timestamp(1_010);
+        assert_eq!(candidate.distribute().received, 10 * SCALAR_7);
+        let blnd_usdc_pending =
+            candidate.user_ongoing_emissions(&blnd_usdc_user, &pool, &BackstopTier::BlndUsdc);
+        let blnd_xlm_pending =
+            candidate.user_ongoing_emissions(&blnd_xlm_user, &pool, &BackstopTier::BlndXlm);
+        assert_eq!(blnd_usdc_pending.accrued, 46_666_666);
+        assert_eq!(blnd_xlm_pending.accrued, 23_333_333);
+        assert!(candidate
+            .try_user_ongoing_emissions(&blnd_usdc_user, &pool, &BackstopTier::Usdc)
+            .is_err());
+
+        // Later spot-composition changes cannot rewrite an allocation already
+        // frozen into the two tier indexes.
+        MockCometClient::new(&fixture.env, &fixture.blnd_usdc)
+            .set_composition(&(1_000_000 * SCALAR_7), &(1_000_000 * SCALAR_7));
+        MockCometClient::new(&fixture.env, &fixture.blnd_xlm)
+            .set_composition(&(1_000_000 * SCALAR_7), &(10_000_000 * SCALAR_7));
+        assert_eq!(
+            candidate
+                .user_ongoing_emissions(&blnd_usdc_user, &pool, &BackstopTier::BlndUsdc)
+                .accrued,
+            blnd_usdc_pending.accrued
+        );
+        assert_eq!(
+            candidate
+                .user_ongoing_emissions(&blnd_xlm_user, &pool, &BackstopTier::BlndXlm)
+                .accrued,
+            blnd_xlm_pending.accrued
+        );
+
+        assert_eq!(
+            candidate.claim_ongoing_blnd(&blnd_usdc_user, &pool, &blnd_usdc_recipient),
+            46_666_666
+        );
+        assert_eq!(
+            candidate.claim_ongoing_blnd(&blnd_xlm_user, &pool, &blnd_xlm_recipient),
+            23_333_333
+        );
+        assert_eq!(
+            TokenClient::new(&fixture.env, &fixture.blnd).balance(&blnd_usdc_recipient),
+            46_666_666
+        );
+        assert_eq!(
+            TokenClient::new(&fixture.env, &fixture.blnd).balance(&blnd_xlm_recipient),
+            23_333_333
+        );
+        let pool_state = candidate.pool_ongoing_emissions(&pool);
+        assert_eq!(pool_state.accrued_backstop, 1);
+        assert_eq!(pool_state.accrued_pool, 3 * SCALAR_7);
+        let ongoing = candidate.ongoing_emission_state();
+        assert_eq!(ongoing.backstop_claimed, 7 * SCALAR_7 - 1);
+        assert_eq!(ongoing.total_claimed, 7 * SCALAR_7 - 1);
+        assert_eq!(
+            TokenClient::new(&fixture.env, &fixture.blnd).balance(&fixture.candidate),
+            3 * SCALAR_7 + 1
+        );
+        assert!(candidate
+            .try_claim_ongoing_blnd(&blnd_usdc_user, &pool, &blnd_usdc_recipient)
+            .is_err());
+    }
+
+    #[test]
+    fn ongoing_user_checkpoints_exclude_late_deposits_and_q4w_shares() {
+        let fixture = OngoingFixture::create();
+        let candidate = fixture.client();
+        let pool = fixture.pool(0, 0);
+        let incumbent = Address::generate(&fixture.env);
+        let late = Address::generate(&fixture.env);
+        let recipient = Address::generate(&fixture.env);
+        let deposit = 100 * SCALAR_7;
+        let token = MockCometClient::new(&fixture.env, &fixture.blnd_usdc);
+        token.mint(&incumbent, &deposit);
+        token.mint(&late, &deposit);
+        candidate.deposit_blnd_usdc(&incumbent, &pool, &deposit);
+        fixture.set_reward_zone(&soroban_sdk::vec![&fixture.env, pool.clone()]);
+
+        fixture.env.ledger().set_timestamp(1_010);
+        candidate.distribute();
+        candidate.deposit_blnd_usdc(&late, &pool, &deposit);
+        assert_eq!(
+            candidate
+                .user_ongoing_emissions(&late, &pool, &BackstopTier::BlndUsdc)
+                .accrued,
+            0
+        );
+
+        fixture.env.ledger().set_timestamp(1_015);
+        candidate.distribute();
+        assert_eq!(
+            candidate.claim_ongoing_blnd(&incumbent, &pool, &recipient),
+            87_500_000
+        );
+        assert_eq!(
+            candidate.claim_ongoing_blnd(&late, &pool, &recipient),
+            17_500_000
+        );
+
+        fixture.env.ledger().set_timestamp(1_020);
+        candidate.distribute();
+        candidate.queue_blnd_usdc_withdrawal(&late, &pool, &deposit);
+        let late_before = candidate
+            .user_ongoing_emissions(&late, &pool, &BackstopTier::BlndUsdc)
+            .accrued;
+        fixture.env.ledger().set_timestamp(1_025);
+        candidate.distribute();
+        assert_eq!(
+            candidate
+                .user_ongoing_emissions(&late, &pool, &BackstopTier::BlndUsdc)
+                .accrued,
+            late_before
+        );
+        assert!(
+            candidate
+                .user_ongoing_emissions(&incumbent, &pool, &BackstopTier::BlndUsdc)
+                .accrued
+                > late_before
+        );
+    }
+
+    #[test]
+    fn ongoing_tier_indexes_and_users_carry_fractional_dust_forward() {
+        let fixture = OngoingFixture::create();
+        let candidate = fixture.client();
+        let pool = fixture.pool(3, 0);
+        let first = Address::generate(&fixture.env);
+        let second = Address::generate(&fixture.env);
+        let recipient = Address::generate(&fixture.env);
+        fixture.env.as_contract(&fixture.candidate, || {
+            set_position(
+                &fixture.env,
+                &first,
+                &pool,
+                &MigrationPosition {
+                    amount: 1,
+                    backfill_amount: 0,
+                    backfill_claimed: false,
+                    frozen_weight: Some(0),
+                    time_basis: 0,
+                },
+            );
+            set_position(
+                &fixture.env,
+                &second,
+                &pool,
+                &MigrationPosition {
+                    amount: 2,
+                    backfill_amount: 0,
+                    backfill_claimed: false,
+                    frozen_weight: Some(0),
+                    time_basis: 0,
+                },
+            );
+        });
+        fixture.set_reward_zone(&soroban_sdk::vec![&fixture.env, pool.clone()]);
+
+        fixture.env.ledger().set_timestamp(1_005);
+        candidate.distribute();
+        let pool_after_first = candidate.pool_ongoing_emissions(&pool);
+        assert_eq!(pool_after_first.blnd_usdc_index_carry, 2);
+        let first_pending =
+            candidate.user_ongoing_emissions(&first, &pool, &BackstopTier::BlndUsdc);
+        let second_pending =
+            candidate.user_ongoing_emissions(&second, &pool, &BackstopTier::BlndUsdc);
+        assert_eq!(first_pending.accrued, 11_666_666);
+        assert_eq!(second_pending.accrued, 23_333_333);
+        assert!(first_pending.carry > 0);
+        assert!(second_pending.carry > 0);
+        assert_eq!(
+            candidate.claim_ongoing_blnd(&first, &pool, &recipient)
+                + candidate.claim_ongoing_blnd(&second, &pool, &recipient),
+            35_000_000 - 1
+        );
+        assert_eq!(candidate.pool_ongoing_emissions(&pool).accrued_backstop, 1);
+
+        fixture.env.ledger().set_timestamp(1_010);
+        candidate.distribute();
+        assert_eq!(
+            candidate.claim_ongoing_blnd(&first, &pool, &recipient)
+                + candidate.claim_ongoing_blnd(&second, &pool, &recipient),
+            35_000_000
+        );
+        assert_eq!(candidate.pool_ongoing_emissions(&pool).accrued_backstop, 1);
+    }
+
+    #[test]
+    fn ongoing_claim_requires_position_owner_authorization() {
+        let fixture = OngoingFixture::create_without_auth_mocking();
+        let candidate = fixture.client();
+        let pool = fixture.pool(100 * SCALAR_7, 0);
+        let user = Address::generate(&fixture.env);
+        let recipient = Address::generate(&fixture.env);
+        fixture.env.as_contract(&fixture.candidate, || {
+            set_position(
+                &fixture.env,
+                &user,
+                &pool,
+                &MigrationPosition {
+                    amount: 100 * SCALAR_7,
+                    backfill_amount: 0,
+                    backfill_claimed: false,
+                    frozen_weight: Some(0),
+                    time_basis: 0,
+                },
+            );
+        });
+        fixture.set_reward_zone(&soroban_sdk::vec![&fixture.env, pool.clone()]);
+        fixture.env.ledger().set_timestamp(1_010);
+        candidate.distribute();
+
+        assert!(candidate
+            .try_claim_ongoing_blnd(&user, &pool, &recipient)
+            .is_err());
+        assert_eq!(
+            TokenClient::new(&fixture.env, &fixture.blnd).balance(&recipient),
+            0
+        );
+        assert_eq!(
+            candidate
+                .mock_auths(&[MockAuth {
+                    address: &user,
+                    invoke: &MockAuthInvoke {
+                        contract: &fixture.candidate,
+                        fn_name: "claim_ongoing_blnd",
+                        args: (&user, &pool, &recipient).into_val(&fixture.env),
+                        sub_invokes: &[],
+                    },
+                }])
+                .claim_ongoing_blnd(&user, &pool, &recipient),
+            7 * SCALAR_7
         );
     }
 
@@ -5367,6 +6020,7 @@ mod tests {
             OngoingEmissionState {
                 backstop_allocated: 0,
                 backstop_carry: 0,
+                backstop_claimed: 0,
                 last_distribution: Some(1_000),
                 pool_allocated: 0,
                 pool_carry: 0,
@@ -6417,6 +7071,7 @@ mod tests {
             OngoingEmissionState {
                 backstop_allocated: 0,
                 backstop_carry: 0,
+                backstop_claimed: 0,
                 last_distribution: Some(unlock),
                 pool_allocated: 0,
                 pool_carry: 0,
@@ -7068,7 +7723,14 @@ mod tests {
                 accrued_backstop: 0,
                 accrued_pool: 0,
                 active_blnd_usdc: 60,
+                active_blnd_usdc_shares: 60,
                 active_blnd_xlm: 60,
+                active_blnd_xlm_shares: 60,
+                backstop_tier_carry: 0,
+                blnd_usdc_index: 0,
+                blnd_usdc_index_carry: 0,
+                blnd_xlm_index: 0,
+                blnd_xlm_index_carry: 0,
             }
         );
 
@@ -7083,7 +7745,14 @@ mod tests {
                 accrued_backstop: 0,
                 accrued_pool: 0,
                 active_blnd_usdc: 24,
+                active_blnd_usdc_shares: 60,
                 active_blnd_xlm: 24,
+                active_blnd_xlm_shares: 60,
+                backstop_tier_carry: 0,
+                blnd_usdc_index: 0,
+                blnd_usdc_index_carry: 0,
+                blnd_xlm_index: 0,
+                blnd_xlm_index_carry: 0,
             }
         );
         for (tier, _) in &tiers {
@@ -7120,7 +7789,14 @@ mod tests {
                 accrued_backstop: 0,
                 accrued_pool: 0,
                 active_blnd_usdc: 34,
+                active_blnd_usdc_shares: 85,
                 active_blnd_xlm: 34,
+                active_blnd_xlm_shares: 85,
+                backstop_tier_carry: 0,
+                blnd_usdc_index: 0,
+                blnd_usdc_index_carry: 0,
+                blnd_xlm_index: 0,
+                blnd_xlm_index_carry: 0,
             }
         );
         assert_eq!(
@@ -7198,7 +7874,14 @@ mod tests {
                 accrued_backstop: 0,
                 accrued_pool: 0,
                 active_blnd_usdc: 34,
+                active_blnd_usdc_shares: 85,
                 active_blnd_xlm: 34,
+                active_blnd_xlm_shares: 85,
+                backstop_tier_carry: 0,
+                blnd_usdc_index: 0,
+                blnd_usdc_index_carry: 0,
+                blnd_xlm_index: 0,
+                blnd_xlm_index_carry: 0,
             }
         );
         assert_eq!(

@@ -722,6 +722,34 @@ fn optimized_v3_distributes_ongoing_blnd_across_maximum_reward_zone() {
         candidate.ongoing_emission_state().total_received,
         30 * SCALAR_7
     );
+
+    let recipient = Address::generate(&env);
+    let claimable = candidate
+        .user_ongoing_emissions(&depositor, &first, &v3_backstop::BackstopTier::BlndUsdc)
+        .accrued;
+    let accrued_pool_before = first_after.accrued_pool;
+    let candidate_balance_before = TokenClient::new(&env, &blnd).balance(&candidate_id);
+    assert!(claimable > 0);
+    env.cost_estimate().budget().reset_unlimited();
+    assert_eq!(
+        candidate.claim_ongoing_blnd(&depositor, &first, &recipient),
+        claimable
+    );
+    assert_mainnet_invocation_limits!(env.cost_estimate().resources());
+    assert_eq!(TokenClient::new(&env, &blnd).balance(&recipient), claimable);
+    assert_eq!(
+        TokenClient::new(&env, &blnd).balance(&candidate_id),
+        candidate_balance_before - claimable
+    );
+    let first_claimed = candidate.pool_ongoing_emissions(&first);
+    assert_eq!(first_claimed.accrued_pool, accrued_pool_before);
+    assert_eq!(
+        first_claimed.accrued_backstop,
+        first_after.accrued_backstop - claimable
+    );
+    let ongoing = candidate.ongoing_emission_state();
+    assert_eq!(ongoing.backstop_claimed, claimable);
+    assert_eq!(ongoing.total_claimed, claimable);
 }
 
 #[test]

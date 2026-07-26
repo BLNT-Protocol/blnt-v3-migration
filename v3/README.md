@@ -54,7 +54,10 @@ transferred amount. It also allocates accrued reserve credit with canonical
 interest auction per pool. A filler donates the selected tier
 token without receiving shares, so the common active-and-queued exchange rate
 appreciates automatically. Pool-level ongoing-emission distribution is
-implemented; per-user and reserve-token accrual and claims remain. The pool
+implemented, including BLND:USDC and BLND:XLM per-share indexes,
+mutation-time user checkpoints, and owner-authorized claims of the 70%
+backstop tranche. Reserve-token accrual and claims for the 30% pool tranche
+remain. The pool
 implements next-step bad-debt continuation as a separate
 permissionless transaction: it either commits the next eligible strict-tier
 lot or, after a verified no-eligible-tier quote, reduces affected reserves'
@@ -154,9 +157,9 @@ select qualifying tiers cyclically at a $200 minimum, and commit a tier-token
 bid worth 120% of the reserve lot. Partial fills use the inherited 400-ledger
 curve and leave the time discount in persistent pending credit; stale deletion
 after 500 ledgers releases the unfilled reservation without rewriting that
-credit. Bid donation mints no shares and requires no depositor claim. Ongoing
-BLND-emission user and reserve-token accrual and claims are still required
-before the pool is a complete lending market.
+credit. Bid donation mints no shares and requires no depositor claim.
+Supply/borrow reserve-token BLND accrual and claims are still required before
+the pool is a complete lending market.
 
 The v3 pool factory stores immutable backstop and pool-WASM configuration,
 deploys pools with explicit transferable admins, initial lending
@@ -235,9 +238,15 @@ from new receipts. Active BLND:USDC and BLND:XLM amount changes—including
 deposits, Q4W changes, withdrawals, actual losses, and interest gains—require
 the completed production checkpoint to be no more than five seconds old. Stale
 mutations fail before changing accounting, which bounds the unresolved
-allocation window to one ledger. Per-user backstop accumulators, the 30%
-supply/borrow configuration and reserve-token accumulators, and claims remain
-implementation work.
+allocation window to one ledger. Each pool's 70% allocation is split between
+BLND:USDC and BLND:XLM using that same checkpoint's underlying BLND, then
+advanced through \(10^{14}\)-scaled per-share indexes with pool, tier-index,
+and user carry. User checkpoints before active-share mutations prevent late
+deposits and queued shares from receiving prior accrual. Position owners can
+claim both eligible tiers' accrued BLND for one pool to a selected recipient;
+migration backfill and the 30% pool tranche remain segregated. The 30%
+supply/borrow configuration, reserve-token accumulators, and their claims
+remain implementation work.
 
 The contract extends its code and instance TTL to 90 days at construction and
 renews it whenever fewer than 89 days remain. This does not change the

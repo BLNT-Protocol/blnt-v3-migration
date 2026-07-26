@@ -692,6 +692,20 @@ The v3 tests must verify:
 - Direct LP-token transfers without candidate tier shares receive zero
   emission weight.
 - Accrual and claims use bounded accumulator/checkpoint accounting.
+- The pool's 70% allocation is frozen into BLND:USDC and BLND:XLM tier indexes
+  using the same checkpoint's underlying-BLND composition. Later Comet changes
+  do not rewrite that attribution.
+- Tier indexes use \(10^{14}\) scaling with pool-and-tier index carry; user
+  checkpoints retain sub-unit carry and conserve it within that user position.
+- Deposits checkpoint before minting active shares so a late depositor cannot
+  claim earlier BLND. Queue, dequeue, and withdrawal checkpoint before changing
+  active eligibility, and queued shares earn nothing during the queued
+  interval.
+- One owner-authorized backstop claim checkpoints both eligible tiers for one
+  pool, pays BLND to the selected recipient, updates pool and aggregate claimed
+  accounting, and cannot include migration backfill or the 30% pool tranche.
+- A second claim without new accrual fails, and failed authorization or token
+  transfer rolls the complete claim back.
 - The pool admin can configure positive relative weights among valid supply and
   debt token identifiers for the 30% tranche; disabled reserves are omitted and
   remaining weights renormalize as in v2.
@@ -703,6 +717,8 @@ The v3 tests must verify:
   within the Protocol-27 mainnet transaction-resource limits.
 - An optimized-WASM eligible-tier deposit following a recent maximum-30-pool
   checkpoint also remains within those limits.
+- An optimized-WASM owner claim following maximum-zone distribution remains
+  within those limits and leaves the pool's 30% tranche untouched.
 
 ## Execution environments
 

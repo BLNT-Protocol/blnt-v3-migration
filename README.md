@@ -120,9 +120,12 @@ remainder at its own scope, and writes the production distribution checkpoint
 only after the complete allocation succeeds. Active BLND-tier deposits, Q4W
 changes, withdrawals, losses, and gains require that completed checkpoint to be
 no more than five seconds old before changing pool weight, bounding the
-unresolved allocation window to one ledger. Per-user backstop accumulators, the
-30% supply/borrow configuration and reserve-token accumulators, and claims
-remain unimplemented.
+unresolved allocation window to one ledger. The 70% pool allocation is frozen
+into scaled BLND:USDC and BLND:XLM per-share indexes in that same distribution;
+user checkpoints exclude late deposits and queued shares, preserve scoped
+rounding carry, and support owner-authorized BLND claims to a selected
+recipient. The 30% supply/borrow configuration, reserve-token accumulators, and
+their claims remain unimplemented.
 
 Run both lanes:
 

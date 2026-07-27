@@ -29,7 +29,9 @@ See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the candidate requirements,
 [docs/V2_PARITY.md](docs/V2_PARITY.md) for the v2 parity matrix,
 [docs/BASELINE.md](docs/BASELINE.md) for the baseline policy, and
 [docs/MIGRATION_TEST_PLAN.md](docs/MIGRATION_TEST_PLAN.md) for the migration
-test requirements.
+test requirements. Operational instructions live in
+[docs/LOCALNET_MIGRATION.md](docs/LOCALNET_MIGRATION.md) and
+[docs/TESTNET_MIGRATION.md](docs/TESTNET_MIGRATION.md).
 
 ## Toolchain lanes
 

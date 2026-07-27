@@ -6,16 +6,23 @@ testnet Soroban resource limits. It records contract IDs, transaction results,
 CLI `--cost` output, balances, and final invariants below the ignored
 `.localnet/` directory.
 
-The runner uses independently issued local assets:
+The same transaction assembly is reused by the isolated public-testnet wrapper
+documented in [TESTNET_MIGRATION.md](TESTNET_MIGRATION.md). Network-specific
+state and keys remain separate.
+
+The runner uses independently issued local assets and real Comet contracts:
 
 - `BLND`
-- `BLNDUSDC`, representing the legacy BLND:USDC backstop token
-- `BLNDXLM`, representing the candidate's next designated token and second
-  backstop tier
+- A BLND:USDC Comet LP, representing the legacy backstop token
+- A BLND:XLM Comet LP, representing the candidate's next designated token and
+  second backstop tier
 - `USDC`, representing the plain-USDC third backstop tier
+- `XLM`, representing the isolated pair asset for the next Comet LP
 
-These assets test token custody and migration behavior. They do not attempt to
-reproduce Comet pricing or liquidity behavior.
+The two LPs execute the checked-in Comet WASM and expose real current reserve
+composition to the candidate's emission calculation. Their isolated initial
+balances and the test valuation adapter remain deterministic fixtures; they do
+not represent production market pricing or liquidity.
 
 The runner also deploys a test-only immutable valuation adapter. It values
 each configured LP token one-for-one in both USDC and underlying BLND so the
@@ -24,15 +31,18 @@ the same one-USDC fixture price through the lending-oracle interface. This
 fixture is not a production oracle and MUST NOT be used as a production pricing
 source.
 
-The migration runner deploys its registered pool with an empty immutable
-reserve list because this lane tests migration operations rather than lending.
-Optimized-WASM compatibility tests separately deploy a configured two-reserve
-pool and exercise supply, collateral supply, borrow, health, and status
-enforcement.
+The migration runner deploys its registered pool with one isolated
+`BLNDUSDC` reserve. It deposits enough plain USDC to cross the candidate's
+$12,500 activation threshold, retains positive BLND:USDC weight, moves the
+pool to Admin Active, adds it to the reward zone, configures the reserve's
+supply side for emissions, and seeds a depositor supply position. This makes
+the same wall-clock fixture capable of exercising ongoing BLND distribution
+after migration.
 
 The classic-asset issuer/operator and candidate depositor use separate local
-identities. The runner creates the depositor's `BLNDUSDC` trustline explicitly
-before minting and depositing the candidate's qualifying balance.
+identities. The runner creates the depositor's `BLND`, `USDC`, and `XLM`
+trustlines explicitly, initializes both Comet pools, and mints the legacy LP
+position before funding the candidate backstop and lending supply position.
 
 The local operator pays for deployment and migration transactions but receives
 no continuing protocol authority. The exercise uses only the legacy emitter's
@@ -56,7 +66,10 @@ undistributed.
 The runner uses the exact published emitter WASM embedded by
 `blend-contract-sdk` 1.22.0 and verifies its SHA-256 digest before deployment.
 It builds the incumbent through the frozen root workspace and the candidate
-through the independent `v3/` workspace.
+through the independent `v3/` workspace. Candidate source documentation is
+retained for native Rust builds but omitted from the deployed contract-spec
+section to preserve Protocol-27 upload headroom. `make build-v3` rejects an
+optimized backstop above the conservative 120,000-byte deployment guard.
 
 ## Commands
 
@@ -94,8 +107,8 @@ make localnet-keepalive
 ```
 
 This explicitly extends the legacy emitter instance, incumbent distribution
-checkpoint, valuation-adapter instance, and all four configured asset-contract
-instances for ten local days. It also refreshes the queued swap, candidate,
+checkpoint, valuation-adapter instance, both Comets, and all three configured
+classic-asset contract instances for ten local days. It also refreshes the queued swap, candidate,
 factory registration, pool, depositor position, and relevant token balances
 through their supported access paths. Before reporting success, it verifies
 the saved queue target, next designated token, unlock time, and the candidate's
@@ -134,8 +147,8 @@ verifies:
 - The emitter queue is empty.
 - The candidate is active.
 - The candidate, factory, and deployed pool retain their immutable bindings.
-- The deployed pool retains its transferable v2-style local admin and remains in Setup
-  until an authorized status transition occurs.
+- The deployed pool retains its transferable v2-style local admin and remains
+  Admin Active.
 - The pool remains registered.
 - The legacy and next designated tokens match the deployment plan.
 - Incumbent and candidate balances are conserved.
@@ -145,6 +158,22 @@ Verification can be repeated independently:
 
 ```bash
 make localnet-verify
+```
+
+After verification, exercise the committed v2-compatible 70/30 ongoing
+emission path:
+
+```bash
+make localnet-emissions
+```
+
+That command waits for a positive emitter interval, invokes the candidate's
+permissionless distribution, verifies positive 70% and 30% allocations,
+claims the backstop-depositor tranche, and gulps the pool tranche into its
+seven-day reserve-token stream. After the reported expiration:
+
+```bash
+make localnet-claim-emissions
 ```
 
 Stop the ephemeral container when the exercise is complete:
@@ -159,9 +188,13 @@ network.
 
 ## Evidence
 
-`.localnet/state.json` contains public deployment identifiers and lifecycle
-timestamps. Every upload, deployment, invocation, and view stores its result
-and `--cost` diagnostics in the run directory recorded by that state file.
+`.localnet/state.json` contains the source commit, dirty-source indicator,
+source-patch digest, artifact digests, public deployment identifiers, and
+lifecycle timestamps. A dirty deployment also retains the contract-source
+patch in its run directory. The runner rejects untracked files below `v3/`,
+because `git diff` cannot include their contents in that patch. Every upload,
+deployment, invocation, and view stores its result and `--cost` diagnostics in
+the run directory recorded by that state file.
 When an operation label is reused, the runner adds a UTC timestamp and, if
 needed, a numeric suffix rather than overwriting earlier evidence.
 Secrets are held only in the isolated ignored Stellar CLI configuration and

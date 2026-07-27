@@ -1,5 +1,7 @@
 default: build
 
+V3_BACKSTOP_MAX_WASM_BYTES := 120000
+
 test: build
 	cargo test --all --tests
 
@@ -41,8 +43,47 @@ localnet-finalize:
 localnet-verify:
 	bash scripts/localnet-migration.sh verify
 
+localnet-emissions:
+	bash scripts/localnet-migration.sh emissions
+
+localnet-claim-emissions:
+	bash scripts/localnet-migration.sh claim-emissions
+
 localnet-stop:
 	bash scripts/localnet-migration.sh stop
+
+testnet-plan:
+	bash scripts/testnet-migration.sh plan
+
+testnet-validate:
+	bash scripts/testnet-migration.sh validate
+
+testnet-deploy:
+	bash scripts/testnet-migration.sh deploy
+
+testnet-run:
+	bash scripts/testnet-migration.sh run
+
+testnet-status:
+	bash scripts/testnet-migration.sh status
+
+testnet-keepalive:
+	bash scripts/testnet-migration.sh keepalive
+
+testnet-prepare:
+	bash scripts/testnet-migration.sh prepare
+
+testnet-finalize:
+	bash scripts/testnet-migration.sh finalize
+
+testnet-verify:
+	bash scripts/testnet-migration.sh verify
+
+testnet-emissions:
+	bash scripts/testnet-migration.sh emissions
+
+testnet-claim-emissions:
+	bash scripts/testnet-migration.sh claim-emissions
 
 build-v3:
 	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-backstop --target wasm32v1-none --release --locked
@@ -54,6 +95,10 @@ build-v3:
 	stellar contract optimize \
 		--wasm v3/target/wasm32v1-none/release/blend_v3_backstop.wasm \
 		--wasm-out v3/target/wasm32v1-none/optimized/blend_v3_backstop.wasm
+	@test "$$(wc -c < v3/target/wasm32v1-none/optimized/blend_v3_backstop.wasm)" \
+		-le "$(V3_BACKSTOP_MAX_WASM_BYTES)" || \
+		(printf 'error: optimized v3 backstop exceeds %s-byte deployment guard\n' \
+			"$(V3_BACKSTOP_MAX_WASM_BYTES)" >&2; exit 1)
 	stellar contract optimize \
 		--wasm v3/target/wasm32v1-none/release/blend_v3_pool.wasm \
 		--wasm-out v3/target/wasm32v1-none/optimized/blend_v3_pool.wasm

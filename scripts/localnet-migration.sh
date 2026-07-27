@@ -3,25 +3,55 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORK_DIR="${BLEND_LOCALNET_WORK_DIR:-${ROOT_DIR}/.localnet}"
+NETWORK_MODE="${BLEND_MIGRATION_NETWORK:-local}"
+case "${NETWORK_MODE}" in
+    local)
+        NETWORK_LABEL="Local"
+        WORK_DIR="${BLEND_LOCALNET_WORK_DIR:-${ROOT_DIR}/.localnet}"
+        RPC_PORT="${BLEND_LOCALNET_RPC_PORT:-8000}"
+        RPC_URL="${BLEND_MIGRATION_RPC_URL:-http://127.0.0.1:${RPC_PORT}/soroban/rpc}"
+        NETWORK_PASSPHRASE="Standalone Network ; February 2017"
+        OPERATOR_IDENTITY="${BLEND_MIGRATION_OPERATOR_IDENTITY:-blend-v3-local-operator}"
+        DEPOSITOR_IDENTITY="${BLEND_MIGRATION_DEPOSITOR_IDENTITY:-blend-v3-local-depositor}"
+        LEDGER_SECONDS=1
+        ;;
+    testnet)
+        NETWORK_LABEL="Public testnet"
+        WORK_DIR="${BLEND_TESTNET_WORK_DIR:-${ROOT_DIR}/.testnet}"
+        RPC_PORT=""
+        RPC_URL="${BLEND_MIGRATION_RPC_URL:-https://soroban-testnet.stellar.org}"
+        NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
+        OPERATOR_IDENTITY="${BLEND_MIGRATION_OPERATOR_IDENTITY:-blend-v3-testnet-operator}"
+        DEPOSITOR_IDENTITY="${BLEND_MIGRATION_DEPOSITOR_IDENTITY:-blend-v3-testnet-depositor}"
+        LEDGER_SECONDS=5
+        ;;
+    *)
+        printf 'error: unsupported BLEND_MIGRATION_NETWORK: %s\n' "${NETWORK_MODE}" >&2
+        exit 2
+        ;;
+esac
 CONFIG_DIR="${WORK_DIR}/stellar-config"
 STATE_FILE="${WORK_DIR}/state.json"
 CONTAINER_NAME="${BLEND_LOCALNET_CONTAINER:-blend-v3-local}"
 QUICKSTART_CONTAINER_NAME="stellar-${CONTAINER_NAME}"
-RPC_PORT="${BLEND_LOCALNET_RPC_PORT:-8000}"
-RPC_URL="http://localhost:${RPC_PORT}/soroban/rpc"
-NETWORK_PASSPHRASE="Standalone Network ; February 2017"
-OPERATOR_IDENTITY="blend-v3-local-operator"
-DEPOSITOR_IDENTITY="blend-v3-local-depositor"
 
 SCALAR_7=10000000
 INCUMBENT_BALANCE=$((100 * SCALAR_7))
 CANDIDATE_BALANCE=$((INCUMBENT_BALANCE + 1))
+ACTIVATION_USDC_BALANCE=$((12500 * SCALAR_7))
+POOL_SUPPLY_BALANCE=$((1000 * SCALAR_7))
+DEPOSITOR_LEGACY_MINT=$((CANDIDATE_BALANCE + POOL_SUPPLY_BALANCE))
+LEGACY_LP_JOIN_AMOUNT=$((DEPOSITOR_LEGACY_MINT + INCUMBENT_BALANCE))
+COMET_INITIAL_BLND=$((1000 * SCALAR_7))
+COMET_INITIAL_PAIR_TOKEN=$((25 * SCALAR_7))
+DEPOSITOR_BLND_MINT=$((15000 * SCALAR_7))
+DEPOSITOR_USDC_MINT=$((ACTIVATION_USDC_BALANCE + 500 * SCALAR_7))
+DEPOSITOR_XLM_MINT=$((COMET_INITIAL_PAIR_TOKEN))
 PREPARATION_WINDOW_SECONDS=$((7 * 24 * 60 * 60))
-# Quickstart closes one ledger per second. Explicitly renewed legacy entries get
-# ten wall-clock days of TTL, leaving a two-times safety margin for the
-# documented five-day keepalive cadence.
-LOCALNET_TTL_EXTENSION_LEDGERS=$((10 * 24 * 60 * 60))
+EMISSION_START_DELAY_SECONDS=5
+# Explicitly renewed legacy entries get ten wall-clock days of TTL, leaving a
+# two-times safety margin for the documented five-day keepalive cadence.
+MIGRATION_TTL_EXTENSION_LEDGERS="${BLEND_MIGRATION_TTL_EXTENSION_LEDGERS:-$((10 * 24 * 60 * 60 / LEDGER_SECONDS))}"
 
 INCUMBENT_SALT="0000000000000000000000000000000000000000000000000000000000000011"
 CANDIDATE_SALT="0000000000000000000000000000000000000000000000000000000000000022"
@@ -34,6 +64,7 @@ V3_FACTORY_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_pool_fac
 V3_BACKSTOP_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_backstop.wasm"
 V3_POOL_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_pool.wasm"
 V3_TEST_VALUATION_ADAPTER_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_test_valuation_adapter.wasm"
+COMET_WASM="${ROOT_DIR}/comet.wasm"
 
 EXPECTED_EMITTER_SHA256="438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89"
 EMITTER_WASM=""
@@ -47,20 +78,23 @@ Usage: scripts/localnet-migration.sh COMMAND
 Commands:
   plan      Describe the deployment and migration phases without mutation.
   validate  Build artifacts and validate the CLI and published emitter WASM.
-  start     Start Protocol-27 Quickstart with testnet resource limits.
+  start     Start Protocol-27 Quickstart locally; verify RPC on public testnet.
   deploy    Deploy, fund, and begin a new migration on the running network.
-  run       Validate, start, deploy, and report status for a new local network.
+  run       Validate, connect or start, deploy, and report status.
   status    Query balances, queue state, candidate state, and the next time gate.
-  keepalive Refresh TTLs affected by Quickstart's one-second ledger cadence.
-  recover   Restart stalled Stellar Core after host sleep without replacing state.
+  keepalive Refresh the migration's bounded persistent and instance TTLs.
+  recover   Restart stalled local Stellar Core without replacing state.
   prepare   Verify the emitter queue during its final seven-day window.
   finalize  Atomically swap the emitter and activate the prepared candidate.
   verify    Assert final bindings, balances, and migration state.
-  stop      Stop the named ephemeral Quickstart container.
+  emissions Exercise the immediate post-migration 70/30 emission distribution.
+  claim-emissions
+            Claim the completed seven-day pool emission stream.
+  stop      Stop the named local Quickstart container.
 
-The runner never weakens the production 31-day queue. Keep Quickstart running,
-then call prepare and finalize at the timestamps reported by status. Generated
-configuration, public state, results, and cost logs live below .localnet/.
+The runner never weakens the production 31-day queue. Call prepare and finalize
+at the timestamps reported by status. Generated configuration, public state,
+results, and cost logs live below the network-specific ignored work directory.
 EOF
 }
 
@@ -73,8 +107,20 @@ die() {
     exit 1
 }
 
+require_local_mode() {
+    [[ "${NETWORK_MODE}" == "local" ]] ||
+        die "command is local-only; ${NETWORK_LABEL} uses the existing public RPC"
+}
+
 require_command() {
     command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+sha256_file() {
+    local value
+
+    value="$(shasum -a 256 "$1")"
+    printf '%s\n' "${value%% *}"
 }
 
 stellar_cli() {
@@ -110,6 +156,7 @@ validate_tools() {
 
     require_command cargo
     require_command curl
+    require_command git
     require_command jq
     require_command make
     require_command shasum
@@ -121,6 +168,14 @@ validate_tools() {
     major="${version%%.*}"
     [[ "${major}" == "27" ]] ||
         die "Stellar CLI major version 27 is required; found ${version_line}"
+}
+
+validate_source_provenance() {
+    local untracked
+
+    untracked="$(git -C "${ROOT_DIR}" ls-files --others --exclude-standard -- v3)"
+    [[ -z "${untracked}" ]] ||
+        die "untracked candidate source cannot be recorded in source.patch; stage or remove: ${untracked}"
 }
 
 build_artifacts() {
@@ -143,6 +198,7 @@ validate_artifacts() {
         "${V3_BACKSTOP_WASM}" \
         "${V3_POOL_WASM}" \
         "${V3_TEST_VALUATION_ADAPTER_WASM}" \
+        "${COMET_WASM}" \
         "${EMITTER_WASM}"
     do
         [[ -s "${artifact}" ]] || die "missing or empty WASM artifact: ${artifact}"
@@ -177,7 +233,7 @@ network_healthy() {
 
 require_network() {
     network_healthy ||
-        die "local RPC is unavailable or stale at ${RPC_URL}; run recover if the existing Quickstart container survived, otherwise run start"
+        die "${NETWORK_LABEL} RPC is unavailable or stale at ${RPC_URL}"
 }
 
 wait_for_network() {
@@ -202,9 +258,17 @@ new_run_dir() {
 }
 
 load_state() {
+    local saved_mode saved_rpc
+
     [[ -f "${STATE_FILE}" ]] || die "deployment state not found; run deploy first"
     RUN_DIR="$(jq -er '.run_dir' "${STATE_FILE}")"
     [[ -d "${RUN_DIR}" ]] || die "recorded run directory does not exist: ${RUN_DIR}"
+    saved_mode="$(jq -er '.network_mode // "local"' "${STATE_FILE}")"
+    saved_rpc="$(jq -er '.rpc_url' "${STATE_FILE}")"
+    [[ "${saved_mode}" == "${NETWORK_MODE}" ]] ||
+        die "saved network mode ${saved_mode} does not match requested ${NETWORK_MODE}"
+    [[ "${saved_rpc}" == "${RPC_URL}" ]] ||
+        die "saved RPC ${saved_rpc} does not match requested ${RPC_URL}"
 }
 
 state_value() {
@@ -221,21 +285,42 @@ state_set() {
 
 initialize_state() {
     local operator="$1"
+    local source_commit source_dirty source_patch_sha256
 
+    validate_source_provenance
     mkdir -p "${WORK_DIR}"
+    source_commit="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
+    git -C "${ROOT_DIR}" diff --binary HEAD -- v3 >"${RUN_DIR}/source.patch"
+    if [[ -s "${RUN_DIR}/source.patch" ]]; then
+        source_dirty=true
+        source_patch_sha256="$(sha256_file "${RUN_DIR}/source.patch")"
+    else
+        source_dirty=false
+        source_patch_sha256=""
+    fi
     jq -n \
+        --arg network_mode "${NETWORK_MODE}" \
+        --arg network_label "${NETWORK_LABEL}" \
         --arg network_passphrase "${NETWORK_PASSPHRASE}" \
         --arg rpc_url "${RPC_URL}" \
         --arg container_name "${CONTAINER_NAME}" \
         --arg operator "${operator}" \
         --arg run_dir "${RUN_DIR}" \
+        --arg source_commit "${source_commit}" \
+        --argjson source_dirty "${source_dirty}" \
+        --arg source_patch_sha256 "${source_patch_sha256}" \
         --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         '{
+            network_mode: $network_mode,
+            network_label: $network_label,
             network_passphrase: $network_passphrase,
             rpc_url: $rpc_url,
             container_name: $container_name,
             operator: $operator,
             run_dir: $run_dir,
+            source_commit: $source_commit,
+            source_dirty: $source_dirty,
+            source_patch_sha256: $source_patch_sha256,
             created_at: $created_at
         }' >"${STATE_FILE}"
 }
@@ -358,6 +443,19 @@ invoke_transaction() {
         -- "${function_name}" "$@"
 }
 
+invoke_transaction_as() {
+    local label="$1" source_identity="$2" contract_id="$3" function_name="$4"
+    shift 4
+    capture "${label}" \
+        stellar_cli contract invoke \
+        --id "${contract_id}" \
+        --source-account "${source_identity}" \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" \
+        --cost \
+        -- "${function_name}" "$@"
+}
+
 invoke_view() {
     local label="$1" contract_id="$2" function_name="$3"
     shift 3
@@ -392,7 +490,7 @@ extend_contract_instance() {
     capture "${label}" \
         stellar_cli contract extend \
         --id "${contract_id}" \
-        --ledgers-to-extend "${LOCALNET_TTL_EXTENSION_LEDGERS}" \
+        --ledgers-to-extend "${MIGRATION_TTL_EXTENSION_LEDGERS}" \
         --source-account "${OPERATOR_IDENTITY}" \
         --rpc-url "${RPC_URL}" \
         --network-passphrase "${NETWORK_PASSPHRASE}" \
@@ -407,7 +505,7 @@ extend_contract_key_xdr() {
         --id "${contract_id}" \
         --key-xdr "${key_xdr}" \
         --durability persistent \
-        --ledgers-to-extend "${LOCALNET_TTL_EXTENSION_LEDGERS}" \
+        --ledgers-to-extend "${MIGRATION_TTL_EXTENSION_LEDGERS}" \
         --source-account "${OPERATOR_IDENTITY}" \
         --rpc-url "${RPC_URL}" \
         --network-passphrase "${NETWORK_PASSPHRASE}" \
@@ -468,13 +566,13 @@ assert_queued_swap_matches() {
 
 command_plan() {
     cat <<EOF
-Blend v3 local migration plan
+Blend v3 ${NETWORK_LABEL} migration plan
 
 Network:
   Protocol: 27
-  Soroban limits: testnet
+  Mode: ${NETWORK_MODE}
   RPC: ${RPC_URL}
-  Container: ${CONTAINER_NAME}
+  Work directory: ${WORK_DIR}
 
 Artifacts:
   Frozen incumbent: SDK 22 pool, pool factory, and backstop
@@ -482,31 +580,42 @@ Artifacts:
   Candidate: SDK 27 pool, pool factory, backstop, and test valuation adapter
 
 Deployment:
-  1. Create and fund isolated local issuer/operator and depositor identities.
-  2. Issue local BLND, BLNDUSDC, BLNDXLM, and USDC assets.
+  1. Create and fund isolated issuer/operator and depositor identities.
+  2. Issue isolated BLND, USDC, and XLM assets and deploy BLND:USDC and BLND:XLM Comet pools.
   3. Deploy the legacy emitter and a coherent SDK-22 incumbent stack.
   4. Predict the candidate address, bind its immutable factory, and deploy it.
-  5. Deploy a registered v3 pool with a transferable v2-style admin, an empty migration-fixture reserve list, and deposit ${CANDIDATE_BALANCE} BLNDUSDC units.
-  6. Fund the incumbent with ${INCUMBENT_BALANCE} BLNDUSDC units.
-  7. Assert strict candidate qualification and call begin_migration.
+  5. Deploy a registered v3 pool with a transferable v2-style admin and one isolated BLNDUSDC reserve.
+  6. Deposit ${CANDIDATE_BALANCE} BLNDUSDC and ${ACTIVATION_USDC_BALANCE} USDC units into its backstop, activate it, add it to the reward zone, and seed one supply position.
+  7. Fund the incumbent with ${INCUMBENT_BALANCE} BLNDUSDC units.
+  8. Assert strict candidate qualification and call begin_migration.
 
 Time-gated continuation:
-  8. Call prepare during the final seven days of the production 31-day queue.
-  9. Call finalize at or after unlock.
- 10. Verify the emitter, candidate, pool, balances, and cleared queue.
+  9. Call prepare during the final seven days of the production 31-day queue.
+ 10. Call finalize at or after unlock.
+ 11. Verify the emitter, candidate, pool, balances, and cleared queue.
+ 12. Distribute ongoing BLND, claim the backstop 70%, and gulp the pool 30%.
+ 13. Claim the pool stream after its seven-day vesting period.
 
-Mutation is limited to the named ephemeral container and ${WORK_DIR}.
+Mutation is limited to ${NETWORK_LABEL} and ${WORK_DIR}.
 EOF
 }
 
 command_validate() {
     validate_tools
+    validate_source_provenance
     build_artifacts
     validate_artifacts
 }
 
 command_start() {
     validate_tools
+    if [[ "${NETWORK_MODE}" == "testnet" ]]; then
+        mkdir -p "${CONFIG_DIR}"
+        require_network
+        note "${NETWORK_LABEL} RPC is healthy at ${RPC_URL}."
+        return
+    fi
+    require_local_mode
     require_docker
     mkdir -p "${CONFIG_DIR}"
     network_healthy && die "a network already responds at ${RPC_URL}; refusing to replace it"
@@ -522,22 +631,27 @@ command_start() {
 }
 
 command_deploy() {
-    local operator depositor issuer emitter_id blnd_id legacy_token_id next_token_id prefund_token_id
+    local skip_build="${1:-false}"
+    local operator depositor issuer emitter_id blnd_id xlm_id legacy_token_id next_token_id
+    local prefund_token_id
     local v2_pool_hash incumbent_id v2_factory_id deployed_incumbent_id
     local valuation_adapter_id v3_pool_hash candidate_id v3_factory_id deployed_candidate_id
     local pool_id pool_raw
-    local incumbent_balance candidate_balance begin_raw epoch_start queued_swap unlock_time
+    local incumbent_balance candidate_balance pool_status begin_raw epoch_start queued_swap unlock_time
     local queued_candidate queued_next_token
 
     validate_tools
+    validate_source_provenance
     require_network
     [[ ! -e "${STATE_FILE}" ]] ||
         die "deployment state already exists at ${STATE_FILE}; refusing to overwrite it"
-    build_artifacts
+    if [[ "${skip_build}" != "true" ]]; then
+        build_artifacts
+    fi
     validate_artifacts
     new_run_dir
 
-    note "Creating and funding isolated local operator ${OPERATOR_IDENTITY}..."
+    note "Creating and funding isolated ${NETWORK_LABEL} operator ${OPERATOR_IDENTITY}..."
     stellar_cli keys generate "${OPERATOR_IDENTITY}" \
         --overwrite \
         --fund \
@@ -547,8 +661,17 @@ command_deploy() {
     issuer="${operator}"
     initialize_state "${operator}"
     state_set "emitter_wasm_sha256" "${EXPECTED_EMITTER_SHA256}"
+    state_set "v2_factory_wasm_sha256" "$(sha256_file "${V2_FACTORY_WASM}")"
+    state_set "v2_backstop_wasm_sha256" "$(sha256_file "${V2_BACKSTOP_WASM}")"
+    state_set "v2_pool_wasm_sha256" "$(sha256_file "${V2_POOL_WASM}")"
+    state_set "v3_factory_wasm_sha256" "$(sha256_file "${V3_FACTORY_WASM}")"
+    state_set "v3_backstop_wasm_sha256" "$(sha256_file "${V3_BACKSTOP_WASM}")"
+    state_set "v3_pool_wasm_sha256" "$(sha256_file "${V3_POOL_WASM}")"
+    state_set "valuation_adapter_wasm_sha256" \
+        "$(sha256_file "${V3_TEST_VALUATION_ADAPTER_WASM}")"
+    state_set "comet_wasm_sha256" "$(sha256_file "${COMET_WASM}")"
 
-    note "Creating and funding isolated local depositor ${DEPOSITOR_IDENTITY}..."
+    note "Creating and funding isolated ${NETWORK_LABEL} depositor ${DEPOSITOR_IDENTITY}..."
     stellar_cli keys generate "${DEPOSITOR_IDENTITY}" \
         --overwrite \
         --fund \
@@ -561,10 +684,12 @@ command_deploy() {
     state_set "emitter" "${emitter_id}"
 
     blnd_id="$(deploy_asset "deploy-asset-blnd" "BLND" "${issuer}")"
-    legacy_token_id="$(deploy_asset "deploy-asset-blnd-usdc" "BLNDUSDC" "${issuer}")"
-    next_token_id="$(deploy_asset "deploy-asset-blnd-xlm" "BLNDXLM" "${issuer}")"
     prefund_token_id="$(deploy_asset "deploy-asset-usdc" "USDC" "${issuer}")"
+    xlm_id="$(deploy_asset "deploy-asset-xlm" "XLM" "${issuer}")"
+    legacy_token_id="$(deploy_wasm "deploy-comet-blnd-usdc" "${COMET_WASM}" "")"
+    next_token_id="$(deploy_wasm "deploy-comet-blnd-xlm" "${COMET_WASM}" "")"
     state_set "blnd_token" "${blnd_id}"
+    state_set "xlm_token" "${xlm_id}"
     state_set "legacy_backstop_token" "${legacy_token_id}"
     state_set "next_backstop_token" "${next_token_id}"
     state_set "prefund_token" "${prefund_token_id}"
@@ -576,6 +701,51 @@ command_deploy() {
         --blnd_usdc "${legacy_token_id}" \
         --blnd_xlm "${next_token_id}")"
     state_set "valuation_adapter" "${valuation_adapter_id}"
+
+    capture "create-depositor-blnd-trustline" \
+        stellar_cli tx new change-trust \
+        --source-account "${DEPOSITOR_IDENTITY}" \
+        --line "BLND:${issuer}" \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+    capture "create-depositor-usdc-trustline" \
+        stellar_cli tx new change-trust \
+        --source-account "${DEPOSITOR_IDENTITY}" \
+        --line "USDC:${issuer}" \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+    capture "create-depositor-xlm-trustline" \
+        stellar_cli tx new change-trust \
+        --source-account "${DEPOSITOR_IDENTITY}" \
+        --line "XLM:${issuer}" \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+    invoke_transaction "mint-depositor-blnd" "${blnd_id}" mint \
+        --to "${depositor}" --amount "${DEPOSITOR_BLND_MINT}" >/dev/null
+    invoke_transaction "mint-depositor-usdc" "${prefund_token_id}" mint \
+        --to "${depositor}" --amount "${DEPOSITOR_USDC_MINT}" >/dev/null
+    invoke_transaction "mint-depositor-xlm" "${xlm_id}" mint \
+        --to "${depositor}" --amount "${DEPOSITOR_XLM_MINT}" >/dev/null
+    invoke_transaction_as "initialize-comet-blnd-usdc" \
+        "${DEPOSITOR_IDENTITY}" "${legacy_token_id}" init \
+        --controller "${depositor}" \
+        --tokens "[\"${blnd_id}\",\"${prefund_token_id}\"]" \
+        --weights '["8000000","2000000"]' \
+        --balances "[\"${COMET_INITIAL_BLND}\",\"${COMET_INITIAL_PAIR_TOKEN}\"]" \
+        --swap_fee 30000 >/dev/null
+    invoke_transaction_as "initialize-comet-blnd-xlm" \
+        "${DEPOSITOR_IDENTITY}" "${next_token_id}" init \
+        --controller "${depositor}" \
+        --tokens "[\"${blnd_id}\",\"${xlm_id}\"]" \
+        --weights '["8000000","2000000"]' \
+        --balances "[\"${COMET_INITIAL_BLND}\",\"${COMET_INITIAL_PAIR_TOKEN}\"]" \
+        --swap_fee 30000 >/dev/null
+    invoke_transaction_as "join-comet-blnd-usdc" \
+        "${DEPOSITOR_IDENTITY}" "${legacy_token_id}" join_pool \
+        --pool_amount_out "${LEGACY_LP_JOIN_AMOUNT}" \
+        --max_amounts_in \
+        "[\"$((13000 * SCALAR_7))\",\"$((500 * SCALAR_7))\"]" \
+        --user "${depositor}" >/dev/null
 
     invoke_transaction "set-emitter-as-blnd-admin" "${blnd_id}" set_admin \
         --new_admin "${emitter_id}" >/dev/null
@@ -635,33 +805,41 @@ command_deploy() {
     pool_raw="$(invoke_transaction "deploy-v3-pool" "${v3_factory_id}" deploy \
         --admin "${operator}" \
         --lending_config "{\"backstop_take_rate\":0,\"max_positions\":4,\"min_collateral\":\"0\",\"oracle\":\"${valuation_adapter_id}\",\"price_decimals\":7}" \
-        --reserves '[]' \
+        --reserves "[{\"asset\":\"${legacy_token_id}\",\"c_factor\":8000000,\"decimals\":7,\"enabled\":true,\"index\":0,\"l_factor\":9000000,\"max_util\":9500000,\"r_base\":100000,\"r_one\":500000,\"r_three\":15000000,\"r_two\":5000000,\"reactivity\":20,\"supply_cap\":\"1000000000000000\",\"util\":7500000}]" \
         --salt "${POOL_SALT}")"
     pool_id="$(normalize_scalar "${pool_raw}")"
     require_contract_id "${pool_id}" "deployed v3 pool"
     state_set "v3_pool" "${pool_id}"
 
-    capture "create-depositor-blnd-usdc-trustline" \
-        stellar_cli tx new change-trust \
-        --source-account "${DEPOSITOR_IDENTITY}" \
-        --line "BLNDUSDC:${issuer}" \
-        --rpc-url "${RPC_URL}" \
-        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
-    invoke_transaction "mint-incumbent-legacy-token" "${legacy_token_id}" mint \
-        --to "${incumbent_id}" --amount "${INCUMBENT_BALANCE}" >/dev/null
-    invoke_transaction "mint-candidate-depositor-legacy-token" "${legacy_token_id}" mint \
-        --to "${depositor}" --amount "${CANDIDATE_BALANCE}" >/dev/null
-    capture "deposit-candidate-legacy-token" \
-        stellar_cli contract invoke \
-        --id "${candidate_id}" \
-        --source-account "${DEPOSITOR_IDENTITY}" \
-        --rpc-url "${RPC_URL}" \
-        --network-passphrase "${NETWORK_PASSPHRASE}" \
-        --cost \
-        -- deposit_blnd_usdc \
+    invoke_transaction_as "fund-incumbent-legacy-token" \
+        "${DEPOSITOR_IDENTITY}" "${legacy_token_id}" transfer \
+        --from "${depositor}" \
+        --to "${incumbent_id}" \
+        --amount "${INCUMBENT_BALANCE}" >/dev/null
+    invoke_transaction_as "deposit-candidate-legacy-token" \
+        "${DEPOSITOR_IDENTITY}" "${candidate_id}" deposit_blnd_usdc \
         --from "${depositor}" \
         --pool "${pool_id}" \
         --amount "${CANDIDATE_BALANCE}" >/dev/null
+    invoke_transaction_as "deposit-candidate-usdc" \
+        "${DEPOSITOR_IDENTITY}" "${candidate_id}" deposit_usdc \
+        --from "${depositor}" \
+        --pool "${pool_id}" \
+        --amount "${ACTIVATION_USDC_BALANCE}" >/dev/null
+    pool_status="$(normalize_scalar "$(invoke_transaction \
+        "activate-v3-pool" "${pool_id}" set_pool_status --requested_status 0)")"
+    assert_equal "0" "${pool_status}" "activated pool status"
+    invoke_transaction "add-v3-pool-to-reward-zone" "${candidate_id}" add_reward \
+        --to_add "${pool_id}" \
+        --to_remove null >/dev/null
+    invoke_transaction "configure-v3-pool-emissions" "${pool_id}" set_emissions_config \
+        --metadata '[{"res_index":0,"res_type":1,"share":1}]' >/dev/null
+    invoke_transaction_as "seed-v3-pool-supply" \
+        "${DEPOSITOR_IDENTITY}" "${pool_id}" submit \
+        --from "${depositor}" \
+        --spender "${depositor}" \
+        --to "${depositor}" \
+        --requests "[{\"address\":\"${legacy_token_id}\",\"amount\":\"${POOL_SUPPLY_BALANCE}\",\"request_type\":0}]" >/dev/null
 
     incumbent_balance="$(normalize_scalar "$(invoke_view \
         "query-incumbent-legacy-balance" "${legacy_token_id}" balance --id "${incumbent_id}")")"
@@ -689,6 +867,8 @@ command_deploy() {
     state_set "prepare_not_before" "$((unlock_time - PREPARATION_WINDOW_SECONDS))"
     state_set "incumbent_balance" "${INCUMBENT_BALANCE}"
     state_set "candidate_balance" "${CANDIDATE_BALANCE}"
+    state_set "activation_usdc_balance" "${ACTIVATION_USDC_BALANCE}"
+    state_set "pool_supply_balance" "${POOL_SUPPLY_BALANCE}"
     state_set "phase" "open"
 
     stellar_cli ledger latest \
@@ -703,7 +883,7 @@ command_status() {
     local emitter_id incumbent_id candidate_id pool_id next_token_id legacy_token_id
     local unlock_time prepare_not_before phase
     local emitter_backstop incumbent_balance candidate_balance queued_swap migration_status
-    local pool_operator pool_status now
+    local pool_operator pool_status now expiration
 
     validate_tools
     require_network
@@ -735,12 +915,16 @@ command_status() {
     if [[ "${queued_swap}" != "null" ]]; then
         assert_queued_swap_matches \
             "${queued_swap}" "${candidate_id}" "${next_token_id}" "${unlock_time}"
-    elif [[ "${phase}" != "active" && "${phase}" != "verified" ]]; then
+    elif [[ "${phase}" != "active" &&
+        "${phase}" != "verified" &&
+        "${phase}" != "emissions_streaming" &&
+        "${phase}" != "emissions_claimed" ]]
+    then
         die "legacy emitter queue is absent while saved phase is ${phase}"
     fi
 
     cat <<EOF
-Local migration status
+${NETWORK_LABEL} migration status
   emitter backstop: ${emitter_backstop}
   incumbent: ${incumbent_id}
   candidate: ${candidate_id}
@@ -754,7 +938,27 @@ Local migration status
   unlock: $(format_timestamp "${unlock_time}") (${unlock_time})
 EOF
 
-    if (( now < prepare_not_before )); then
+    if [[ "${queued_swap}" == "null" ]]; then
+        case "${phase}" in
+            active)
+                note "Emitter swap completed. Next action: run verify."
+                ;;
+            verified)
+                note "Migration verified. Next action: run emissions."
+                ;;
+            emissions_streaming)
+                expiration="$(state_value pool_emission_expiration)"
+                if (( now < expiration )); then
+                    note "Pool emissions are streaming. Claim opens in $((expiration - now)) seconds."
+                else
+                    note "Pool emission stream has expired. Next action: run claim-emissions."
+                fi
+                ;;
+            emissions_claimed)
+                note "Migration and the ongoing-emission exercise are complete."
+                ;;
+        esac
+    elif (( now < prepare_not_before )); then
         note "Next action: prepare in $((prepare_not_before - now)) seconds."
     elif (( now < unlock_time )); then
         note "Next action: run prepare now; finalization opens in $((unlock_time - now)) seconds."
@@ -765,7 +969,7 @@ EOF
 
 command_keepalive() {
     local emitter_id incumbent_id candidate_id factory_id pool_id valuation_adapter_id depositor
-    local blnd_id legacy_token_id next_token_id prefund_token_id unlock_time
+    local blnd_id xlm_id legacy_token_id next_token_id prefund_token_id unlock_time
     local stamp prefix last_distro_key blnd_admin queued_swap
     local incumbent_balance candidate_balance
 
@@ -780,6 +984,7 @@ command_keepalive() {
     valuation_adapter_id="$(state_value valuation_adapter)"
     depositor="$(state_value depositor)"
     blnd_id="$(state_value blnd_token)"
+    xlm_id="$(state_value xlm_token)"
     legacy_token_id="$(state_value legacy_backstop_token)"
     next_token_id="$(state_value next_backstop_token)"
     prefund_token_id="$(state_value prefund_token)"
@@ -810,8 +1015,39 @@ command_keepalive() {
         "${candidate_id}" blnd_usdc_shares \
         --user "${depositor}" \
         --pool "${pool_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-usdc-position" \
+        "${candidate_id}" tier_shares \
+        --tier Usdc \
+        --user "${depositor}" \
+        --pool "${pool_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-legacy-tier-state" \
+        "${candidate_id}" pool_tier_state \
+        --tier BlndUsdc \
+        --pool "${pool_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-usdc-tier-state" \
+        "${candidate_id}" pool_tier_state \
+        --tier Usdc \
+        --pool "${pool_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-reward-zone" \
+        "${candidate_id}" reward_zone >/dev/null
+    invoke_forced_transaction "${prefix}-pool-reserves" \
+        "${pool_id}" reserve_list >/dev/null
+    invoke_forced_transaction "${prefix}-pool-reserve" \
+        "${pool_id}" reserve --asset "${legacy_token_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-pool-position" \
+        "${pool_id}" positions --user "${depositor}" >/dev/null
+    invoke_forced_transaction "${prefix}-pool-emissions-config" \
+        "${pool_id}" emissions_config >/dev/null
     extend_contract_instance "${prefix}-legacy-token-instance" \
         "${legacy_token_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-legacy-token-supply" \
+        "${legacy_token_id}" get_total_supply >/dev/null
+    invoke_forced_transaction "${prefix}-legacy-token-list" \
+        "${legacy_token_id}" get_tokens >/dev/null
+    invoke_forced_transaction "${prefix}-legacy-token-blnd-reserve" \
+        "${legacy_token_id}" get_balance --token "${blnd_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-legacy-token-usdc-reserve" \
+        "${legacy_token_id}" get_balance --token "${prefund_token_id}" >/dev/null
     incumbent_balance="$(normalize_scalar "$(invoke_forced_transaction \
         "${prefix}-incumbent-balance" \
         "${legacy_token_id}" balance --id "${incumbent_id}")")"
@@ -824,24 +1060,47 @@ command_keepalive() {
         die "invalid candidate legacy-token balance: ${candidate_balance}"
     (( candidate_balance > incumbent_balance )) ||
         die "candidate no longer strictly exceeds incumbent legacy-token balance"
+    invoke_forced_transaction "${prefix}-pool-token-balance" \
+        "${legacy_token_id}" balance --id "${pool_id}" >/dev/null
     extend_contract_instance "${prefix}-blnd-instance" \
         "${blnd_id}" >/dev/null
+    extend_contract_instance "${prefix}-xlm-instance" \
+        "${xlm_id}" >/dev/null
     extend_contract_instance "${prefix}-next-token-instance" \
         "${next_token_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-next-token-supply" \
+        "${next_token_id}" get_total_supply >/dev/null
+    invoke_forced_transaction "${prefix}-next-token-list" \
+        "${next_token_id}" get_tokens >/dev/null
+    invoke_forced_transaction "${prefix}-next-token-blnd-reserve" \
+        "${next_token_id}" get_balance --token "${blnd_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-next-token-xlm-reserve" \
+        "${next_token_id}" get_balance --token "${xlm_id}" >/dev/null
     extend_contract_instance "${prefix}-prefund-token-instance" \
         "${prefund_token_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-candidate-usdc-balance" \
+        "${prefund_token_id}" balance --id "${candidate_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-legacy-comet-blnd-balance" \
+        "${blnd_id}" balance --id "${legacy_token_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-next-comet-blnd-balance" \
+        "${blnd_id}" balance --id "${next_token_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-legacy-comet-usdc-balance" \
+        "${prefund_token_id}" balance --id "${legacy_token_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-next-comet-xlm-balance" \
+        "${xlm_id}" balance --id "${next_token_id}" >/dev/null
     blnd_admin="$(normalize_scalar "$(invoke_view \
         "${prefix}-blnd-admin" "${blnd_id}" admin)")"
     assert_equal "${emitter_id}" "${blnd_admin}" "BLND administrator"
 
     state_set "last_keepalive_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    note "Local migration TTL keepalive completed. Run this at least every five days; daily is recommended."
+    note "${NETWORK_LABEL} migration TTL keepalive completed. Run this at least every five days; daily is recommended."
 }
 
 command_recover() {
     local running
 
     validate_tools
+    require_local_mode
     require_docker
     running="$(
         docker inspect \
@@ -894,7 +1153,7 @@ command_verify() {
     local valuation_adapter_id legacy_token_id next_token_id emitter_backstop
     local candidate_legacy_token candidate_next_token candidate_valuation_adapter
     local factory_backstop pool_backstop pool_operator pool_registered pool_status
-    local incumbent_balance candidate_balance queued_swap migration_status activated_at
+    local incumbent_balance candidate_balance queued_swap migration_status activated_at saved_phase
 
     validate_tools
     require_network
@@ -908,6 +1167,7 @@ command_verify() {
     valuation_adapter_id="$(state_value valuation_adapter)"
     legacy_token_id="$(state_value legacy_backstop_token)"
     next_token_id="$(state_value next_backstop_token)"
+    saved_phase="$(state_value phase)"
 
     emitter_backstop="$(normalize_scalar "$(invoke_view \
         "verify-emitter-backstop" "${emitter_id}" get_backstop)")"
@@ -945,7 +1205,7 @@ command_verify() {
     assert_equal "${candidate_id}" "${factory_backstop}" "v3 factory binding"
     assert_equal "${candidate_id}" "${pool_backstop}" "v3 pool binding"
     assert_equal "${operator}" "${pool_operator}" "v3 pool admin"
-    assert_equal "6" "${pool_status}" "unactivated v3 pool status"
+    assert_equal "0" "${pool_status}" "active v3 pool status"
     assert_equal "true" "${pool_registered}" "v3 pool registration"
     assert_equal "${INCUMBENT_BALANCE}" "${incumbent_balance}" "incumbent retained balance"
     assert_equal "${CANDIDATE_BALANCE}" "${candidate_balance}" "candidate retained balance"
@@ -959,7 +1219,10 @@ command_verify() {
     ' >/dev/null || die "candidate is not active: ${migration_status}"
     [[ "${activated_at}" =~ ^[0-9]+$ ]] || die "candidate activation timestamp is absent"
 
-    state_set "phase" "verified"
+    case "${saved_phase}" in
+        emissions_streaming|emissions_claimed) ;;
+        *) state_set "phase" "verified" ;;
+    esac
     state_set "verified_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     stellar_cli ledger latest \
         --rpc-url "${RPC_URL}" \
@@ -967,7 +1230,7 @@ command_verify() {
         --output json-formatted >"${RUN_DIR}/ledger-after-verification.json"
 
     cat <<EOF
-Local migration verified
+${NETWORK_LABEL} migration verified
   operator: ${operator}
   incumbent SDK-22 backstop: ${incumbent_id}
   legacy emitter: ${emitter_id}
@@ -982,8 +1245,112 @@ Local migration verified
 EOF
 }
 
+command_emissions() {
+    local phase candidate_id pool_id depositor distribution received
+    local backstop_allocated pool_allocated backstop_claimed pool_gulped stream expiration
+
+    validate_tools
+    require_network
+    load_state
+    phase="$(state_value phase)"
+    [[ "${phase}" == "verified" ]] ||
+        die "ongoing emissions require a verified migration; saved phase is ${phase}"
+    candidate_id="$(state_value candidate_backstop)"
+    pool_id="$(state_value v3_pool)"
+    depositor="$(state_value depositor)"
+
+    note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds for a positive emitter interval..."
+    sleep "${EMISSION_START_DELAY_SECONDS}"
+    distribution="$(invoke_transaction \
+        "distribute-ongoing-blnd" "${candidate_id}" distribute)"
+    received="$(printf '%s' "${distribution}" | jq -er '.received | tostring')"
+    backstop_allocated="$(
+        printf '%s' "${distribution}" | jq -er '.backstop_allocated | tostring'
+    )"
+    pool_allocated="$(
+        printf '%s' "${distribution}" | jq -er '.pool_allocated | tostring'
+    )"
+    [[ "${received}" =~ ^[0-9]+$ ]] && (( received > 0 )) ||
+        die "ongoing distribution did not receive positive BLND: ${distribution}"
+    [[ "${backstop_allocated}" =~ ^[0-9]+$ ]] && (( backstop_allocated > 0 )) ||
+        die "ongoing distribution did not allocate the backstop tranche: ${distribution}"
+    [[ "${pool_allocated}" =~ ^[0-9]+$ ]] && (( pool_allocated >= SCALAR_7 )) ||
+        die "pool tranche is below the one-BLND gulp minimum: ${distribution}"
+
+    backstop_claimed="$(normalize_scalar "$(invoke_transaction_as \
+        "claim-backstop-ongoing-blnd" "${DEPOSITOR_IDENTITY}" \
+        "${candidate_id}" claim_ongoing_blnd \
+        --user "${depositor}" \
+        --pool "${pool_id}" \
+        --recipient "${depositor}")")"
+    [[ "${backstop_claimed}" =~ ^[0-9]+$ ]] && (( backstop_claimed > 0 )) ||
+        die "backstop depositor did not claim positive BLND: ${backstop_claimed}"
+
+    pool_gulped="$(normalize_scalar "$(invoke_transaction \
+        "gulp-pool-ongoing-blnd" "${pool_id}" gulp_emissions)")"
+    [[ "${pool_gulped}" =~ ^[0-9]+$ ]] && (( pool_gulped >= SCALAR_7 )) ||
+        die "pool did not gulp at least one BLND: ${pool_gulped}"
+    stream="$(invoke_view \
+        "query-pool-emission-stream" "${pool_id}" reserve_emission \
+        --reserve_token_id 1)"
+    expiration="$(printf '%s' "${stream}" | jq -er '.expiration | tostring')"
+    [[ "${expiration}" =~ ^[0-9]+$ ]] ||
+        die "pool emission stream has no expiration: ${stream}"
+
+    state_set "ongoing_received" "${received}"
+    state_set "ongoing_backstop_allocated" "${backstop_allocated}"
+    state_set "ongoing_pool_allocated" "${pool_allocated}"
+    state_set "ongoing_backstop_claimed" "${backstop_claimed}"
+    state_set "ongoing_pool_gulped" "${pool_gulped}"
+    state_set "pool_emission_expiration" "${expiration}"
+    state_set "phase" "emissions_streaming"
+    state_set "emissions_started_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    cat <<EOF
+${NETWORK_LABEL} post-migration emissions verified
+  emitter BLND received: ${received}
+  backstop 70% allocated: ${backstop_allocated}
+  backstop depositor claimed: ${backstop_claimed}
+  pool 30% allocated: ${pool_allocated}
+  pool stream reserved: ${pool_gulped}
+  pool stream expiration: $(format_timestamp "${expiration}") (${expiration})
+  next action: run claim-emissions after the stream expires
+EOF
+}
+
+command_claim_emissions() {
+    local phase pool_id depositor expiration now claimed
+
+    validate_tools
+    require_network
+    load_state
+    phase="$(state_value phase)"
+    [[ "${phase}" == "emissions_streaming" ]] ||
+        die "pool emissions must be streaming before claim; saved phase is ${phase}"
+    pool_id="$(state_value v3_pool)"
+    depositor="$(state_value depositor)"
+    expiration="$(state_value pool_emission_expiration)"
+    now="$(date +%s)"
+    (( now >= expiration )) ||
+        die "pool emission stream remains locked for $((expiration - now)) seconds"
+
+    claimed="$(normalize_scalar "$(invoke_transaction_as \
+        "claim-pool-ongoing-blnd" "${DEPOSITOR_IDENTITY}" "${pool_id}" claim \
+        --user "${depositor}" \
+        --reserve_token_ids '[1]' \
+        --recipient "${depositor}")")"
+    [[ "${claimed}" =~ ^[0-9]+$ ]] && (( claimed > 0 )) ||
+        die "pool supplier did not claim positive BLND: ${claimed}"
+    state_set "ongoing_pool_claimed" "${claimed}"
+    state_set "phase" "emissions_claimed"
+    state_set "emissions_claimed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    note "${NETWORK_LABEL} seven-day pool emission claim succeeded: ${claimed} BLND base units."
+}
+
 command_stop() {
     validate_tools
+    require_local_mode
     require_docker
     note "Stopping ephemeral container ${CONTAINER_NAME}."
     stellar_cli container stop \
@@ -995,7 +1362,7 @@ command_stop() {
 command_run() {
     command_validate
     command_start
-    command_deploy
+    command_deploy true
 }
 
 main() {
@@ -1011,6 +1378,8 @@ main() {
         prepare) command_prepare ;;
         finalize) command_finalize ;;
         verify) command_verify ;;
+        emissions) command_emissions ;;
+        claim-emissions) command_claim_emissions ;;
         stop) command_stop ;;
         -h|--help|help) usage ;;
         *) usage >&2; exit 2 ;;

@@ -1903,8 +1903,8 @@ implemented:
     and bounded pool/user accrual and claims.
 
 Milestones 1 through 5, the bounded-Q4W and canonical-loss-state-boundary
-portions of milestone 6, the reproducible deployment runner for the local
-portion of milestone 7, and milestones 8 and 9 are
+portions of milestone 6, the reproducible local and public-testnet runners for
+the queue-open portion of milestone 7, and milestones 8 and 9 are
 represented by the frozen v2 baseline, isolated Protocol-27 backstop crate,
 cross-version legacy-emitter migration harness, the candidate's
 pool-attributed continuous BLND:USDC shares, time-weighted migration
@@ -1936,12 +1936,17 @@ pool-and-reserve-isolated pending interest credit and carry, canonical
 `5:5:4` credit allocation, cyclic single-tier interest-auction selection,
 120%-value tier-token bids, v2-curve partial fills, share-free bid donation,
 and permissionless stale-lot recovery.
-The local runner deploys independently issued assets, a
-coherent
+The local runner and isolated public-testnet wrapper deploy independently
+issued assets, a coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
-limits while recording transaction and cost evidence. A completed wall-clock
-local run, the public-testnet exercise, a production LP valuation source for
-non-emission policy remain intentionally unimplemented. Milestone 10's policy
+limits while recording source commits, artifact digests, transaction results,
+and cost evidence. The deployable backstop spec omits prose documentation from
+the WASM target while retaining it in native Rust documentation, and the build
+enforces a conservative 120,000-byte optimized-WASM ceiling after deployment
+testing found that the earlier 126,044-byte artifact exceeded Protocol-27
+testnet CPU limits during upload. A completed wall-clock local run, a completed
+public-testnet exercise, and a production LP valuation source for non-emission
+policy remain intentionally unimplemented. Milestone 10's policy
 arithmetic, admin and pending-loss policies, canonical spot-composition read
 boundary,
 permissionless maximum-30 reward-zone membership, emitter reconciliation,

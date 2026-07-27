@@ -58,7 +58,10 @@ const MIN_DISTRIBUTION_INTERVAL_SECONDS: u64 = 5;
 const WEIGHT_CHANGE_CHECKPOINT_MAX_AGE_SECONDS: u64 = MIN_DISTRIBUTION_INTERVAL_SECONDS;
 const REWARD_ZONE_CHECKPOINT_MAX_AGE_SECONDS: u64 = 60 * 60;
 
-/// The candidate's fixed three-tier backstop set in first-loss order.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" The candidate's fixed three-tier backstop set in first-loss order."#
+)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[contracttype]
 pub enum BackstopTier {
@@ -212,20 +215,38 @@ pub struct EmitterSwap {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
-/// One continuous BLND:USDC tier position plus temporary backfill metadata.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" One continuous BLND:USDC tier position plus temporary backfill metadata."#
+)]
 pub struct MigrationPosition {
-    /// Tier shares owned by this position.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Tier shares owned by this position."#
+    )]
     pub amount: i128,
-    /// Actual BLND:USDC contributed before migration and still backfill
-    /// eligible. This remains separate from shares once the exchange rate
-    /// differs from one token per share.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Actual BLND:USDC contributed before migration and still backfill"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" eligible. This remains separate from shares once the exchange rate"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" differs from one token per share."#
+    )]
     pub backfill_amount: i128,
     pub backfill_claimed: bool,
     pub frozen_weight: Option<i128>,
     pub time_basis: i128,
 }
 
-/// One bounded tier withdrawal-queue entry, denominated in shares.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" One bounded tier withdrawal-queue entry, denominated in shares."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct Q4WEntry {
@@ -233,7 +254,10 @@ pub struct Q4WEntry {
     pub expires_at: u64,
 }
 
-/// Accounted assets and shares for one pool in one backstop tier.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Accounted assets and shares for one pool in one backstop tier."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct PoolTierState {
@@ -242,23 +266,47 @@ pub struct PoolTierState {
     pub shares: i128,
 }
 
-/// Canonical pool-local lot for one bad-debt auction.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Canonical pool-local lot for one bad-debt auction."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct BadDebtLotQuote {
-    /// USDC value of the remaining selected assets after any partial fill.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" USDC value of the remaining selected assets after any partial fill."#
+    )]
     pub committed_value: i128,
-    /// Oracle-valued bad debt supplied at auction creation.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Oracle-valued bad debt supplied at auction creation."#
+    )]
     pub debt_value: i128,
-    /// The single waterfall tier selected for this auction.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The single waterfall tier selected for this auction."#
+    )]
     pub tier: BackstopTier,
-    /// Remaining base token units selected from the tier.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Remaining base token units selected from the tier."#
+    )]
     pub lot_amount: i128,
-    /// Creation-time 120% target not filled by available backstop capital.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Creation-time 120% target not filled by available backstop capital."#
+    )]
     pub unfilled_target_value: i128,
-    /// Creation-time inherited 120% target lot value.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Creation-time inherited 120% target lot value."#
+    )]
     pub target_value: i128,
-    /// Creation-time earliest expiry of any LP valuation used by the quote.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Creation-time earliest expiry of any LP valuation used by the quote."#
+    )]
     pub valid_until: u64,
 }
 
@@ -269,21 +317,42 @@ struct BadDebtCommitment {
     quote: BadDebtLotQuote,
 }
 
-/// Canonical tier-token bid for one pool interest auction.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Canonical tier-token bid for one pool interest auction."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct InterestLotQuote {
-    /// Token donated to the selected pool-tier by the filler.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Token donated to the selected pool-tier by the filler."#
+    )]
     pub bid_token: Address,
-    /// Remaining base tier-token amount before the auction time modifier.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Remaining base tier-token amount before the auction time modifier."#
+    )]
     pub bid_amount: i128,
-    /// Oracle-valued reserve-asset lot supplied by the registered pool.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Oracle-valued reserve-asset lot supplied by the registered pool."#
+    )]
     pub lot_value: i128,
-    /// Tier whose token is donated by a successful filler.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Tier whose token is donated by a successful filler."#
+    )]
     pub tier: BackstopTier,
-    /// Creation-time 120% target, denominated in 7-decimal USDC.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Creation-time 120% target, denominated in 7-decimal USDC."#
+    )]
     pub target_value: i128,
-    /// Earliest expiry of the tier-token valuation used by the quote.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Earliest expiry of the tier-token valuation used by the quote."#
+    )]
     pub valid_until: u64,
 }
 
@@ -294,10 +363,19 @@ struct InterestCommitment {
     quote: InterestLotQuote,
 }
 
-/// Verified, pool-specific asset values denominated in 7-decimal USDC units.
-///
-/// Constructing these values from token balances and manipulation-resistant
-/// prices is the responsibility of the canonical valuation layer.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Verified, pool-specific asset values denominated in 7-decimal USDC units."#
+)]
+#[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Constructing these values from token balances and manipulation-resistant"#
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" prices is the responsibility of the canonical valuation layer."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct ActivationValues {
@@ -314,7 +392,10 @@ pub struct ActivationQuote {
     pub required_value: i128,
 }
 
-/// One immutable adapter quote for an LP-token amount.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" One immutable adapter quote for an LP-token amount."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct AssetValuation {
@@ -323,7 +404,10 @@ pub struct AssetValuation {
     pub valid_until: u64,
 }
 
-/// Canonical value of one pool's active and queued backstop positions.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Canonical value of one pool's active and queued backstop positions."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct PoolValuation {
@@ -333,7 +417,10 @@ pub struct PoolValuation {
     pub valid_until: u64,
 }
 
-/// Arithmetic-only quote for one v2-compatible pool-status transition.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Arithmetic-only quote for one v2-compatible pool-status transition."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct PoolStatusQuote {
@@ -345,7 +432,10 @@ pub struct PoolStatusQuote {
     pub transition_allowed: bool,
 }
 
-/// Reward-eligible, pool-specific tier values denominated in 7-decimal USDC.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Reward-eligible, pool-specific tier values denominated in 7-decimal USDC."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct TakeRateValues {
@@ -354,7 +444,10 @@ pub struct TakeRateValues {
     pub usdc: i128,
 }
 
-/// Allocation of one take-rate asset across the three backstop tiers.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Allocation of one take-rate asset across the three backstop tiers."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct TakeRateQuote {
@@ -364,8 +457,14 @@ pub struct TakeRateQuote {
     pub usdc: i128,
 }
 
-/// Eligible underlying BLND held through the two BLND-bearing backstop tiers,
-/// denominated in 7-decimal BLND base units.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Eligible underlying BLND held through the two BLND-bearing backstop tiers,"#
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" denominated in 7-decimal BLND base units."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct BlndEmissionValues {
@@ -373,7 +472,10 @@ pub struct BlndEmissionValues {
     pub blnd_xlm: i128,
 }
 
-/// Arithmetic-only allocation quote for one BLND-emission scope.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Arithmetic-only allocation quote for one BLND-emission scope."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct BlndEmissionQuote {
@@ -381,8 +483,14 @@ pub struct BlndEmissionQuote {
     pub eligible_blnd: i128,
 }
 
-/// Immutable top-level split of ongoing BLND actually received from the
-/// emitter. `carry` remains at this scope for the next split.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Immutable top-level split of ongoing BLND actually received from the"#
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" emitter. `carry` remains at this scope for the next split."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct OngoingBlndSplit {
@@ -392,20 +500,38 @@ pub struct OngoingBlndSplit {
     pub total: i128,
 }
 
-/// Most recent completed distribution checkpoint used to guard reward-zone
-/// membership edits.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Most recent completed distribution checkpoint used to guard reward-zone"#
+)]
+#[cfg_attr(not(target_family = "wasm"), doc = r#" membership edits."#)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct RewardZoneCheckpoint {
     pub timestamp: u64,
 }
 
-/// Pool-local ongoing-emission state.
-///
-/// The active amounts are candidate-accounted LP-token assets, not underlying
-/// BLND. They are synchronized from canonical tier shares and assets whenever
-/// either BLND-bearing tier changes, allowing a maximum-size reward-zone
-/// distribution to read one persistent entry per pool.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Pool-local ongoing-emission state."#
+)]
+#[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" The active amounts are candidate-accounted LP-token assets, not underlying"#
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" BLND. They are synchronized from canonical tier shares and assets whenever"#
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" either BLND-bearing tier changes, allowing a maximum-size reward-zone"#
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" distribution to read one persistent entry per pool."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct PoolOngoingEmissions {
@@ -422,11 +548,23 @@ pub struct PoolOngoingEmissions {
     pub blnd_xlm_index_carry: i128,
 }
 
-/// Pool-owned reservation of the 30% supply/borrow tranche.
-///
-/// A permissionless pool gulp moves accrued pool emissions into this
-/// reservation no more than once per day. The registered pool then consumes
-/// the reservation atomically as its users claim reserve-token emissions.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Pool-owned reservation of the 30% supply/borrow tranche."#
+)]
+#[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" A permissionless pool gulp moves accrued pool emissions into this"#
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" reservation no more than once per day. The registered pool then consumes"#
+)]
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" the reservation atomically as its users claim reserve-token emissions."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct PoolEmissionReservation {
@@ -434,7 +572,10 @@ pub struct PoolEmissionReservation {
     pub last_gulp: Option<u64>,
 }
 
-/// One user's bounded ongoing-BLND checkpoint in one BLND-bearing tier.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" One user's bounded ongoing-BLND checkpoint in one BLND-bearing tier."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct UserOngoingEmissions {
@@ -443,7 +584,10 @@ pub struct UserOngoingEmissions {
     pub index: i128,
 }
 
-/// Auditable aggregate accounting for ongoing BLND held by the candidate.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Auditable aggregate accounting for ongoing BLND held by the candidate."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct OngoingEmissionState {
@@ -458,7 +602,10 @@ pub struct OngoingEmissionState {
     pub total_received: i128,
 }
 
-/// Result of one completed permissionless ongoing-emission distribution.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Result of one completed permissionless ongoing-emission distribution."#
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct OngoingDistribution {
@@ -483,30 +630,48 @@ pub trait Emitter {
     fn swap_backstop(env: Env);
 }
 
-/// Minimal fail-closed loss-state interface required from an attributed pool.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Minimal fail-closed loss-state interface required from an attributed pool."#
+)]
 #[contractclient(name = "PoolLossClient")]
 pub trait PoolLoss {
-    /// Return true only when this backstop has no committed or unresolved loss
-    /// for the pool and its expired queued shares may leave custody.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return true only when this backstop has no committed or unresolved loss"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" for the pool and its expired queued shares may leave custody."#
+    )]
     fn backstop_withdrawal_allowed(env: Env, backstop: Address) -> bool;
 }
 
-/// Immutable registry of pools accepted by this backstop.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Immutable registry of pools accepted by this backstop."#
+)]
 #[contractclient(name = "PoolFactoryClient")]
 pub trait PoolFactory {
     fn backstop(env: Env) -> Address;
     fn is_pool(env: Env, pool: Address) -> bool;
 }
 
-/// Immutable boundary for manipulation-resistant LP valuation.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Immutable boundary for manipulation-resistant LP valuation."#
+)]
 #[contractclient(name = "ValuationAdapterClient")]
 pub trait ValuationAdapter {
     fn version(env: Env) -> u32;
     fn quote(env: Env, token: Address, amount: i128) -> AssetValuation;
 }
 
-/// Minimal current-composition interface implemented by both approved Comet LP
-/// contracts.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    doc = r#" Minimal current-composition interface implemented by both approved Comet LP"#
+)]
+#[cfg_attr(not(target_family = "wasm"), doc = r#" contracts."#)]
 #[contractclient(name = "CometClient")]
 pub trait Comet {
     fn get_balance(env: Env, token: Address) -> i128;
@@ -629,10 +794,16 @@ pub struct BadDebtLotReleased {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BadDebtLotSettled {
     pub auction_id: BytesN<32>,
-    /// Base token amount removed from the auction commitment.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Base token amount removed from the auction commitment."#
+    )]
     pub base_lot_amount: i128,
     pub complete: bool,
-    /// Time-scaled token amount transferred to the filler.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Time-scaled token amount transferred to the filler."#
+    )]
     pub lot_amount: i128,
     pub pool: Address,
     pub tier: BackstopTier,
@@ -777,9 +948,15 @@ impl BackstopContract {
             .set(&DataKey::ValuationAdapter, &valuation_adapter);
     }
 
-    /// Return the legacy token held directly by this contract for migration.
-    ///
-    /// The name preserves the incumbent v2 read interface.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the legacy token held directly by this contract for migration."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The name preserves the incumbent v2 read interface."#
+    )]
     pub fn backstop_token(env: Env) -> Address {
         extend_instance_ttl(&env);
         env.storage()
@@ -793,25 +970,37 @@ impl BackstopContract {
         env.storage().instance().get(&DataKey::Emitter).unwrap()
     }
 
-    /// Return the immutable BLND token used to verify funding and pay claims.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the immutable BLND token used to verify funding and pay claims."#
+    )]
     pub fn blnd_token(env: Env) -> Address {
         extend_instance_ttl(&env);
         env.storage().instance().get(&DataKey::BlndToken).unwrap()
     }
 
-    /// Return whether an exact emitter mint delta has verified the BLND token.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return whether an exact emitter mint delta has verified the BLND token."#
+    )]
     pub fn blnd_binding_verified(env: Env) -> bool {
         extend_instance_ttl(&env);
         env.storage().instance().has(&DataKey::BlndBindingVerified)
     }
 
-    /// Return the immutable registry used to validate attributed pools.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the immutable registry used to validate attributed pools."#
+    )]
     pub fn pool_factory(env: Env) -> Address {
         extend_instance_ttl(&env);
         env.storage().instance().get(&DataKey::PoolFactory).unwrap()
     }
 
-    /// Return the token the emitter will use to qualify the next migration.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the token the emitter will use to qualify the next migration."#
+    )]
     pub fn next_backstop_token(env: Env) -> Address {
         extend_instance_ttl(&env);
         env.storage()
@@ -820,10 +1009,19 @@ impl BackstopContract {
             .unwrap()
     }
 
-    /// Return the immutable plain-USDC backstop token.
-    ///
-    /// The legacy name is retained in the constructor and this read interface
-    /// because this token began as the candidate's isolated prefunding lane.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the immutable plain-USDC backstop token."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The legacy name is retained in the constructor and this read interface"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" because this token began as the candidate's isolated prefunding lane."#
+    )]
     pub fn prefund_token(env: Env) -> Address {
         extend_instance_ttl(&env);
         env.storage()
@@ -832,39 +1030,72 @@ impl BackstopContract {
             .unwrap()
     }
 
-    /// Return the immutable plain-USDC backstop token.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the immutable plain-USDC backstop token."#
+    )]
     pub fn usdc_token(env: Env) -> Address {
         extend_instance_ttl(&env);
         prefund_token(&env)
     }
 
-    /// Return the immutable LP valuation adapter.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the immutable LP valuation adapter."#
+    )]
     pub fn valuation_adapter(env: Env) -> Address {
         extend_instance_ttl(&env);
         valuation_adapter(&env)
     }
 
-    /// Return the bounded v2-compatible reward-zone membership.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the bounded v2-compatible reward-zone membership."#
+    )]
     pub fn reward_zone(env: Env) -> Vec<Address> {
         extend_instance_ttl(&env);
         get_reward_zone(&env)
     }
 
-    /// Return the most recent completed distribution checkpoint, if any.
-    ///
-    /// The ongoing distributor writes this checkpoint only after it has
-    /// accounted through the returned timestamp.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the most recent completed distribution checkpoint, if any."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The ongoing distributor writes this checkpoint only after it has"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" accounted through the returned timestamp."#
+    )]
     pub fn reward_zone_checkpoint(env: Env) -> Option<RewardZoneCheckpoint> {
         extend_instance_ttl(&env);
         get_reward_zone_checkpoint(&env).map(|timestamp| RewardZoneCheckpoint { timestamp })
     }
 
-    /// Add a threshold-qualified, positive-BLND registered pool to the reward zone.
-    ///
-    /// The first member needs no earlier distribution. Every later edit
-    /// requires a completed distribution checkpoint within the preceding hour.
-    /// If all 30 slots are occupied, `to_remove` must name a member with
-    /// strictly less current eligible underlying BLND.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Add a threshold-qualified, positive-BLND registered pool to the reward zone."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The first member needs no earlier distribution. Every later edit"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" requires a completed distribution checkpoint within the preceding hour."#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" If all 30 slots are occupied, `to_remove` must name a member with"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" strictly less current eligible underlying BLND."#
+    )]
     pub fn add_reward(env: Env, to_add: Address, to_remove: Option<Address>) {
         extend_instance_ttl(&env);
         let removed = add_to_reward_zone(&env, &to_add, to_remove.as_ref());
@@ -875,27 +1106,66 @@ impl BackstopContract {
         .publish(&env);
     }
 
-    /// Remove a member below maintenance or with zero eligible BLND.
-    ///
-    /// Zero-weight removal needs no distribution checkpoint because it cannot
-    /// reallocate unresolved emissions.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Remove a member below maintenance or with zero eligible BLND."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Zero-weight removal needs no distribution checkpoint because it cannot"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" reallocate unresolved emissions."#
+    )]
     pub fn remove_reward(env: Env, to_remove: Address) {
         extend_instance_ttl(&env);
         remove_from_reward_zone(&env, &to_remove);
         RewardZoneRemoved { pool: to_remove }.publish(&env);
     }
 
-    /// Reconcile BLND actually held after emitter distribution and account it
-    /// across the bounded reward zone.
-    ///
-    /// The call is permissionless and available only after this candidate is
-    /// the emitter's active backstop. Exact-delta backfill funding may have
-    /// already bound the configured BLND token to the emitter's minted asset;
-    /// otherwise, the first positive ongoing distribution establishes that
-    /// binding atomically from its own emitter-call balance delta. Both the
-    /// immutable 70/30 split and each reward-zone allocation retain their own
-    /// integer carry. The public reward-zone checkpoint is written only after
-    /// every pool accrual and aggregate conservation check succeeds.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Reconcile BLND actually held after emitter distribution and account it"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" across the bounded reward zone."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The call is permissionless and available only after this candidate is"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" the emitter's active backstop. Exact-delta backfill funding may have"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" already bound the configured BLND token to the emitter's minted asset;"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" otherwise, the first positive ongoing distribution establishes that"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" binding atomically from its own emitter-call balance delta. Both the"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" immutable 70/30 split and each reward-zone allocation retain their own"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" integer carry. The public reward-zone checkpoint is written only after"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" every pool accrual and aggregate conservation check succeeds."#
+    )]
     pub fn distribute(env: Env) -> OngoingDistribution {
         extend_instance_ttl(&env);
         let distribution = distribute_ongoing_blnd(&env);
@@ -909,31 +1179,49 @@ impl BackstopContract {
         distribution
     }
 
-    /// Return aggregate ongoing-emission receipts, allocations, and carries.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return aggregate ongoing-emission receipts, allocations, and carries."#
+    )]
     pub fn ongoing_emission_state(env: Env) -> OngoingEmissionState {
         extend_instance_ttl(&env);
         get_ongoing_emission_state(&env)
     }
 
-    /// Return one registered pool's active LP amounts and accrued 70/30
-    /// tranches.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one registered pool's active LP amounts and accrued 70/30"#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#" tranches."#)]
     pub fn pool_ongoing_emissions(env: Env, pool: Address) -> PoolOngoingEmissions {
         extend_instance_ttl(&env);
         require_registered_pool(&env, &pool);
         get_pool_ongoing_emissions(&env, &pool)
     }
 
-    /// Return one registered pool's reserved, unclaimed 30% tranche.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one registered pool's reserved, unclaimed 30% tranche."#
+    )]
     pub fn pool_emission_reservation(env: Env, pool: Address) -> PoolEmissionReservation {
         extend_instance_ttl(&env);
         require_registered_pool(&env, &pool);
         get_pool_emission_reservation(&env, &pool)
     }
 
-    /// Move one pool's accrued 30% tranche into its claim reservation.
-    ///
-    /// The registered pool contract authorizes the call. A positive gulp is
-    /// available at most once per 24 hours, matching v2's pool cadence.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Move one pool's accrued 30% tranche into its claim reservation."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The registered pool contract authorizes the call. A positive gulp is"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" available at most once per 24 hours, matching v2's pool cadence."#
+    )]
     pub fn gulp_pool_emissions(env: Env, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         let amount = gulp_pool_ongoing_emissions(&env, &pool);
@@ -941,11 +1229,23 @@ impl BackstopContract {
         amount
     }
 
-    /// Pay an authorized reserve-token emission claim from a pool reservation.
-    ///
-    /// Only the registered pool contract can consume its reservation. The
-    /// candidate remains the BLND custodian until this atomic payout so its
-    /// exact balance-reconciliation invariant remains intact.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Pay an authorized reserve-token emission claim from a pool reservation."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Only the registered pool contract can consume its reservation. The"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" candidate remains the BLND custodian until this atomic payout so its"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" exact balance-reconciliation invariant remains intact."#
+    )]
     pub fn claim_pool_emissions(env: Env, pool: Address, recipient: Address, amount: i128) {
         extend_instance_ttl(&env);
         claim_reserved_pool_emissions(&env, &pool, &recipient, amount);
@@ -957,8 +1257,14 @@ impl BackstopContract {
         .publish(&env);
     }
 
-    /// Return one user's current checkpointed and pending ongoing BLND for an
-    /// eligible backstop tier without changing storage.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one user's current checkpointed and pending ongoing BLND for an"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" eligible backstop tier without changing storage."#
+    )]
     pub fn user_ongoing_emissions(
         env: Env,
         user: Address,
@@ -971,11 +1277,20 @@ impl BackstopContract {
         preview_user_ongoing_emissions(&env, tier, &user, &pool)
     }
 
-    /// Claim one pool's accrued backstop-depositor BLND to a chosen recipient.
-    ///
-    /// The position owner authorizes the claim. Both eligible tiers are
-    /// checkpointed, but neither the 30% pool tranche nor migration backfill is
-    /// included.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Claim one pool's accrued backstop-depositor BLND to a chosen recipient."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The position owner authorizes the claim. Both eligible tiers are"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" checkpointed, but neither the 30% pool tranche nor migration backfill is"#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#" included."#)]
     pub fn claim_ongoing_blnd(env: Env, user: Address, pool: Address, recipient: Address) -> i128 {
         extend_instance_ttl(&env);
         let amount = claim_user_ongoing_blnd(&env, &user, &pool, &recipient);
@@ -989,23 +1304,41 @@ impl BackstopContract {
         amount
     }
 
-    /// Deposit BLND:XLM LP into its pool-attributed second-loss tier.
-    ///
-    /// Shares are minted at the pool-tier's current exchange rate. The
-    /// attributed pool must be factory registered and expose the permanent
-    /// fail-closed withdrawal callback.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Deposit BLND:XLM LP into its pool-attributed second-loss tier."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Shares are minted at the pool-tier's current exchange rate. The"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" attributed pool must be factory registered and expose the permanent"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" fail-closed withdrawal callback."#
+    )]
     pub fn deposit_blnd_xlm(env: Env, from: Address, pool: Address, amount: i128) {
         extend_instance_ttl(&env);
         deposit_standard_tier(&env, BackstopTier::BlndXlm, from, pool, amount);
     }
 
-    /// Deposit plain USDC into its pool-attributed third-loss tier.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Deposit plain USDC into its pool-attributed third-loss tier."#
+    )]
     pub fn deposit_usdc(env: Env, from: Address, pool: Address, amount: i128) {
         extend_instance_ttl(&env);
         deposit_standard_tier(&env, BackstopTier::Usdc, from, pool, amount);
     }
 
-    /// Queue active BLND:XLM shares for withdrawal after the 17-day lock.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Queue active BLND:XLM shares for withdrawal after the 17-day lock."#
+    )]
     pub fn queue_blnd_xlm_withdrawal(
         env: Env,
         from: Address,
@@ -1016,37 +1349,55 @@ impl BackstopContract {
         queue_standard_tier_withdrawal(&env, BackstopTier::BlndXlm, from, pool, shares)
     }
 
-    /// Queue active USDC shares for withdrawal after the 17-day lock.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Queue active USDC shares for withdrawal after the 17-day lock."#
+    )]
     pub fn queue_usdc_withdrawal(env: Env, from: Address, pool: Address, shares: i128) -> Q4WEntry {
         extend_instance_ttl(&env);
         queue_standard_tier_withdrawal(&env, BackstopTier::Usdc, from, pool, shares)
     }
 
-    /// Return newest queued BLND:XLM shares to active status first.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return newest queued BLND:XLM shares to active status first."#
+    )]
     pub fn dequeue_blnd_xlm_withdrawal(env: Env, from: Address, pool: Address, shares: i128) {
         extend_instance_ttl(&env);
         dequeue_standard_tier_withdrawal(&env, BackstopTier::BlndXlm, from, pool, shares);
     }
 
-    /// Return newest queued USDC shares to active status first.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return newest queued USDC shares to active status first."#
+    )]
     pub fn dequeue_usdc_withdrawal(env: Env, from: Address, pool: Address, shares: i128) {
         extend_instance_ttl(&env);
         dequeue_standard_tier_withdrawal(&env, BackstopTier::Usdc, from, pool, shares);
     }
 
-    /// Withdraw expired BLND:XLM shares after the pool confirms loss safety.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Withdraw expired BLND:XLM shares after the pool confirms loss safety."#
+    )]
     pub fn withdraw_blnd_xlm(env: Env, from: Address, pool: Address, shares: i128, to: Address) {
         extend_instance_ttl(&env);
         withdraw_standard_tier(&env, BackstopTier::BlndXlm, from, pool, shares, to);
     }
 
-    /// Withdraw expired USDC shares after the pool confirms loss safety.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Withdraw expired USDC shares after the pool confirms loss safety."#
+    )]
     pub fn withdraw_usdc(env: Env, from: Address, pool: Address, shares: i128, to: Address) {
         extend_instance_ttl(&env);
         withdraw_standard_tier(&env, BackstopTier::Usdc, from, pool, shares, to);
     }
 
-    /// Return one user's total shares in a fixed backstop tier.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one user's total shares in a fixed backstop tier."#
+    )]
     pub fn tier_shares(env: Env, tier: BackstopTier, user: Address, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         match tier {
@@ -1055,7 +1406,10 @@ impl BackstopContract {
         }
     }
 
-    /// Return one user's queued shares in a fixed backstop tier.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one user's queued shares in a fixed backstop tier."#
+    )]
     pub fn tier_queued_shares(env: Env, tier: BackstopTier, user: Address, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         match tier {
@@ -1064,7 +1418,10 @@ impl BackstopContract {
         }
     }
 
-    /// Return one user's unqueued share basis for activation and emissions.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one user's unqueued share basis for activation and emissions."#
+    )]
     pub fn tier_active_shares(env: Env, tier: BackstopTier, user: Address, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         checked_nonnegative_sub_i128(
@@ -1074,7 +1431,10 @@ impl BackstopContract {
         )
     }
 
-    /// Return one user's bounded withdrawal queue for a fixed tier.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one user's bounded withdrawal queue for a fixed tier."#
+    )]
     pub fn tier_withdrawal_queue(
         env: Env,
         tier: BackstopTier,
@@ -1088,35 +1448,53 @@ impl BackstopContract {
         }
     }
 
-    /// Return all shares allocated to one pool in a fixed tier.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return all shares allocated to one pool in a fixed tier."#
+    )]
     pub fn pool_tier_shares(env: Env, tier: BackstopTier, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         pool_shares(&env, tier, &pool)
     }
 
-    /// Return accounted token base units allocated to one pool and tier.
-    ///
-    /// Direct token transfers are excluded. Assets may be lower than shares
-    /// after a tier absorbs loss.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return accounted token base units allocated to one pool and tier."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Direct token transfers are excluded. Assets may be lower than shares"#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#" after a tier absorbs loss."#)]
     pub fn pool_tier_assets(env: Env, tier: BackstopTier, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         get_pool_tier_assets(&env, tier, &pool)
     }
 
-    /// Return one pool's complete share-to-asset state for a fixed tier.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one pool's complete share-to-asset state for a fixed tier."#
+    )]
     pub fn pool_tier_state(env: Env, tier: BackstopTier, pool: Address) -> PoolTierState {
         extend_instance_ttl(&env);
         get_pool_tier_state(&env, tier, &pool)
     }
 
-    /// Preview shares minted by a token deposit at the current pool-tier rate.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Preview shares minted by a token deposit at the current pool-tier rate."#
+    )]
     pub fn preview_tier_deposit(env: Env, tier: BackstopTier, pool: Address, assets: i128) -> i128 {
         extend_instance_ttl(&env);
         require_positive(&env, assets);
         shares_from_assets(&env, assets, &get_pool_tier_state(&env, tier, &pool))
     }
 
-    /// Preview token base units redeemed by burning pool-tier shares.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Preview token base units redeemed by burning pool-tier shares."#
+    )]
     pub fn preview_tier_withdrawal(
         env: Env,
         tier: BackstopTier,
@@ -1128,7 +1506,10 @@ impl BackstopContract {
         assets_from_shares(&env, shares, &get_pool_tier_state(&env, tier, &pool))
     }
 
-    /// Return all queued shares for one pool in a fixed tier.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return all queued shares for one pool in a fixed tier."#
+    )]
     pub fn pool_tier_queued_shares(env: Env, tier: BackstopTier, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         match tier {
@@ -1137,7 +1518,10 @@ impl BackstopContract {
         }
     }
 
-    /// Return one pool's unqueued share basis for activation and emissions.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one pool's unqueued share basis for activation and emissions."#
+    )]
     pub fn pool_tier_active_shares(env: Env, tier: BackstopTier, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         checked_nonnegative_sub_i128(
@@ -1147,7 +1531,10 @@ impl BackstopContract {
         )
     }
 
-    /// Return all accounted shares in a fixed tier.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return all accounted shares in a fixed tier."#
+    )]
     pub fn total_tier_shares(env: Env, tier: BackstopTier) -> i128 {
         extend_instance_ttl(&env);
         match tier {
@@ -1164,9 +1551,15 @@ impl BackstopContract {
         }
     }
 
-    /// Return all accounted token base units in a fixed tier.
-    ///
-    /// Direct transfers are deliberately excluded.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return all accounted token base units in a fixed tier."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Direct transfers are deliberately excluded."#
+    )]
     pub fn total_tier_assets(env: Env, tier: BackstopTier) -> i128 {
         extend_instance_ttl(&env);
         env.storage()
@@ -1175,19 +1568,28 @@ impl BackstopContract {
             .unwrap_or(0)
     }
 
-    /// Return token base units reserved by this pool's active bad-debt lots.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return token base units reserved by this pool's active bad-debt lots."#
+    )]
     pub fn pool_tier_committed_assets(env: Env, tier: BackstopTier, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         get_pool_tier_committed_assets(&env, tier, &pool)
     }
 
-    /// Return the bounded number of active bad-debt commitments for one pool.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the bounded number of active bad-debt commitments for one pool."#
+    )]
     pub fn pool_bad_debt_commitment_count(env: Env, pool: Address) -> u32 {
         extend_instance_ttl(&env);
         get_pool_bad_debt_commitment_count(&env, &pool)
     }
 
-    /// Return one pool-authorized bad-debt commitment, if present.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one pool-authorized bad-debt commitment, if present."#
+    )]
     pub fn bad_debt_commitment(
         env: Env,
         pool: Address,
@@ -1203,7 +1605,10 @@ impl BackstopContract {
         })
     }
 
-    /// Return one pool-authorized interest commitment, if present.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one pool-authorized interest commitment, if present."#
+    )]
     pub fn interest_commitment(
         env: Env,
         pool: Address,
@@ -1219,7 +1624,10 @@ impl BackstopContract {
         })
     }
 
-    /// Return all queued shares in a fixed tier.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return all queued shares in a fixed tier."#
+    )]
     pub fn total_tier_queued_shares(env: Env, tier: BackstopTier) -> i128 {
         extend_instance_ttl(&env);
         match tier {
@@ -1236,7 +1644,10 @@ impl BackstopContract {
         }
     }
 
-    /// Return the global unqueued share basis for activation and emissions.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the global unqueued share basis for activation and emissions."#
+    )]
     pub fn total_tier_active_shares(env: Env, tier: BackstopTier) -> i128 {
         extend_instance_ttl(&env);
         checked_nonnegative_sub_i128(
@@ -1246,20 +1657,38 @@ impl BackstopContract {
         )
     }
 
-    /// Return one user's total continuous BLND:USDC tier shares.
-    ///
-    /// Includes shares queued for withdrawal. Before migration these shares
-    /// also qualify for migration backfill, and while in custody they remain
-    /// eligible for take-rate accounting and proportionally exposed to losses.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one user's total continuous BLND:USDC tier shares."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Includes shares queued for withdrawal. Before migration these shares"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" also qualify for migration backfill, and while in custody they remain"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" eligible for take-rate accounting and proportionally exposed to losses."#
+    )]
     pub fn blnd_usdc_shares(env: Env, user: Address, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         get_position(&env, &user, &pool).amount
     }
 
-    /// Return one user's unqueued share basis for activation and emissions.
-    ///
-    /// Final eligibility also depends on migration lifecycle, pool status, and
-    /// asset-policy gates.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one user's unqueued share basis for activation and emissions."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Final eligibility also depends on migration lifecycle, pool status, and"#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#" asset-policy gates."#)]
     pub fn blnd_usdc_active_shares(env: Env, user: Address, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         let total = get_position(&env, &user, &pool).amount;
@@ -1270,37 +1699,61 @@ impl BackstopContract {
         )
     }
 
-    /// Return one user's total queued BLND:USDC shares.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one user's total queued BLND:USDC shares."#
+    )]
     pub fn blnd_usdc_queued_shares(env: Env, user: Address, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         queued_shares(&env, &get_blnd_usdc_q4w(&env, &user, &pool))
     }
 
-    /// Return one user's bounded FIFO withdrawal queue.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one user's bounded FIFO withdrawal queue."#
+    )]
     pub fn blnd_usdc_withdrawal_queue(env: Env, user: Address, pool: Address) -> Vec<Q4WEntry> {
         extend_instance_ttl(&env);
         get_blnd_usdc_q4w(&env, &user, &pool)
     }
 
-    /// Return the total accounted BLND:USDC tier shares allocated to one pool.
-    ///
-    /// Includes queued shares and is the canonical share amount for take-rate
-    /// and within-tier loss accounting while those shares remain in custody.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the total accounted BLND:USDC tier shares allocated to one pool."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Includes queued shares and is the canonical share amount for take-rate"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" and within-tier loss accounting while those shares remain in custody."#
+    )]
     pub fn pool_blnd_usdc_shares(env: Env, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         get_pool_blnd_usdc_shares(&env, &pool)
     }
 
-    /// Return one pool's queued BLND:USDC shares.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one pool's queued BLND:USDC shares."#
+    )]
     pub fn pool_blnd_usdc_queued_shares(env: Env, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         get_pool_blnd_usdc_queued_shares(&env, &pool)
     }
 
-    /// Return one pool's unqueued share basis for activation and emissions.
-    ///
-    /// Final eligibility also depends on migration lifecycle, pool status, and
-    /// asset-policy gates.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return one pool's unqueued share basis for activation and emissions."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Final eligibility also depends on migration lifecycle, pool status, and"#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#" asset-policy gates."#)]
     pub fn pool_blnd_usdc_active_shares(env: Env, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         checked_nonnegative_sub_i128(
@@ -1310,11 +1763,20 @@ impl BackstopContract {
         )
     }
 
-    /// Return all accounted BLND:USDC tier shares.
-    ///
-    /// Includes queued shares and is the canonical share amount for take-rate
-    /// and within-tier loss accounting. Direct token transfers do not create
-    /// shares and are excluded.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return all accounted BLND:USDC tier shares."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Includes queued shares and is the canonical share amount for take-rate"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" and within-tier loss accounting. Direct token transfers do not create"#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#" shares and are excluded."#)]
     pub fn total_blnd_usdc_shares(env: Env) -> i128 {
         extend_instance_ttl(&env);
         env.storage()
@@ -1323,7 +1785,10 @@ impl BackstopContract {
             .unwrap_or(0)
     }
 
-    /// Return all queued BLND:USDC tier shares.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return all queued BLND:USDC tier shares."#
+    )]
     pub fn total_blnd_usdc_queued_shares(env: Env) -> i128 {
         extend_instance_ttl(&env);
         env.storage()
@@ -1332,10 +1797,16 @@ impl BackstopContract {
             .unwrap_or(0)
     }
 
-    /// Return the global unqueued share basis for activation and emissions.
-    ///
-    /// Final eligibility also depends on migration lifecycle, pool status, and
-    /// asset-policy gates.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the global unqueued share basis for activation and emissions."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Final eligibility also depends on migration lifecycle, pool status, and"#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#" asset-policy gates."#)]
     pub fn total_blnd_usdc_active_shares(env: Env) -> i128 {
         extend_instance_ttl(&env);
         let total: i128 = env
@@ -1351,30 +1822,48 @@ impl BackstopContract {
         checked_nonnegative_sub_i128(&env, total, queued)
     }
 
-    /// Return the inherited withdrawal-queue lock duration.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the inherited withdrawal-queue lock duration."#
+    )]
     pub fn q4w_lock_seconds(env: Env) -> u64 {
         extend_instance_ttl(&env);
         Q4W_LOCK_SECONDS
     }
 
-    /// Return the threshold an inactive pool must meet to activate.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the threshold an inactive pool must meet to activate."#
+    )]
     pub fn activation_entry_threshold(env: Env) -> i128 {
         extend_instance_ttl(&env);
         ACTIVATION_ENTRY_THRESHOLD_USDC
     }
 
-    /// Return the threshold an active pool must maintain to remain active.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the threshold an active pool must maintain to remain active."#
+    )]
     pub fn activation_maintenance_threshold(env: Env) -> i128 {
         extend_instance_ttl(&env);
         ACTIVATION_MAINTENANCE_THRESHOLD_USDC
     }
 
-    /// Quote verified pool-specific values under the canonical activation
-    /// policy's hysteresis rule.
-    ///
-    /// This function defines policy arithmetic only. Its arguments MUST come
-    /// from the canonical valuation layer before its result is used for pool
-    /// status or reward eligibility.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Quote verified pool-specific values under the canonical activation"#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#" policy's hysteresis rule."#)]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" This function defines policy arithmetic only. Its arguments MUST come"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" from the canonical valuation layer before its result is used for pool"#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#" status or reward eligibility."#)]
     pub fn quote_activation(
         env: Env,
         values: ActivationValues,
@@ -1384,20 +1873,44 @@ impl BackstopContract {
         quote_activation_values(&env, &values, currently_active)
     }
 
-    /// Derive one pool's canonical value from the redeemable assets represented
-    /// by its active and queued shares. LP quotes come only from the immutable
-    /// adapter; plain USDC is valued one-for-one.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Derive one pool's canonical value from the redeemable assets represented"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" by its active and queued shares. LP quotes come only from the immutable"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" adapter; plain USDC is valued one-for-one."#
+    )]
     pub fn pool_valuation(env: Env, pool: Address) -> PoolValuation {
         extend_instance_ttl(&env);
         build_pool_valuation(&env, &pool)
     }
 
-    /// Quote a single-tier 120%-of-debt lot from uncommitted pool capital.
-    ///
-    /// The registered pool is responsible for deriving `debt_value` from its
-    /// immutable reserve oracle. The first tier in strict BLND:USDC,
-    /// BLND:XLM, then USDC order with at least $200 of verified value is
-    /// selected without changing state.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Quote a single-tier 120%-of-debt lot from uncommitted pool capital."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The registered pool is responsible for deriving `debt_value` from its"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" immutable reserve oracle. The first tier in strict BLND:USDC,"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" BLND:XLM, then USDC order with at least $200 of verified value is"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" selected without changing state."#
+    )]
     pub fn quote_bad_debt_lot(
         env: Env,
         pool: Address,
@@ -1408,11 +1921,23 @@ impl BackstopContract {
         build_bad_debt_lot_quote(&env, &pool, debt_value)
     }
 
-    /// Reserve a canonical bad-debt lot for a registered pool.
-    ///
-    /// Only the pool contract itself can authorize this direct cross-contract
-    /// call. Commitment does not transfer assets or impair shares; settlement
-    /// remains a later atomic transition.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Reserve a canonical bad-debt lot for a registered pool."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Only the pool contract itself can authorize this direct cross-contract"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" call. Commitment does not transfer assets or impair shares; settlement"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" remains a later atomic transition."#
+    )]
     pub fn commit_bad_debt_lot(
         env: Env,
         pool: Address,
@@ -1445,9 +1970,15 @@ impl BackstopContract {
         quote
     }
 
-    /// Release one unfilled or stale bad-debt lot back to available capital.
-    ///
-    /// Only the pool that created the commitment can authorize release.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Release one unfilled or stale bad-debt lot back to available capital."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Only the pool that created the commitment can authorize release."#
+    )]
     pub fn release_bad_debt_lot(env: Env, pool: Address, auction_id: BytesN<32>) {
         extend_instance_ttl(&env);
         pool.require_auth();
@@ -1461,12 +1992,27 @@ impl BackstopContract {
         BadDebtLotReleased { auction_id, pool }.publish(&env);
     }
 
-    /// Settle one partial or complete fill of a committed bad-debt lot.
-    ///
-    /// `base_lot_amount` is removed from the stored auction commitment.
-    /// `lot_amount` is the smaller, time-scaled amount actually transferred
-    /// and therefore the only amount that impairs the tier exchange rate.
-    /// Only the registered pool can authorize this transition.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Settle one partial or complete fill of a committed bad-debt lot."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" `base_lot_amount` is removed from the stored auction commitment."#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" `lot_amount` is the smaller, time-scaled amount actually transferred"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" and therefore the only amount that impairs the tier exchange rate."#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Only the registered pool can authorize this transition."#
+    )]
     pub fn settle_bad_debt_lot(
         env: Env,
         pool: Address,
@@ -1528,10 +2074,19 @@ impl BackstopContract {
         remaining
     }
 
-    /// Reserve the selected tier-token bid for one pool interest auction.
-    ///
-    /// Only the registered pool may authorize this state transition. The
-    /// reserve-asset lot remains in pool custody until a later atomic fill.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Reserve the selected tier-token bid for one pool interest auction."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Only the registered pool may authorize this state transition. The"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" reserve-asset lot remains in pool custody until a later atomic fill."#
+    )]
     pub fn commit_interest_lot(
         env: Env,
         pool: Address,
@@ -1567,7 +2122,10 @@ impl BackstopContract {
         quote
     }
 
-    /// Release a stale interest-auction bid without changing tier assets.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Release a stale interest-auction bid without changing tier assets."#
+    )]
     pub fn release_interest_lot(env: Env, pool: Address, auction_id: BytesN<32>) {
         extend_instance_ttl(&env);
         pool.require_auth();
@@ -1581,7 +2139,10 @@ impl BackstopContract {
         InterestLotReleased { auction_id, pool }.publish(&env);
     }
 
-    /// Donate a time-scaled tier-token bid into one pool-tier without shares.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Donate a time-scaled tier-token bid into one pool-tier without shares."#
+    )]
     pub fn settle_interest_lot(
         env: Env,
         pool: Address,
@@ -1653,7 +2214,10 @@ impl BackstopContract {
         remaining
     }
 
-    /// Quote activation from canonical pool accounting and immutable pricing.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Quote activation from canonical pool accounting and immutable pricing."#
+    )]
     pub fn quote_pool_activation(
         env: Env,
         pool: Address,
@@ -1664,7 +2228,10 @@ impl BackstopContract {
         quote_activation_values(&env, &valuation.active_values, currently_active)
     }
 
-    /// Quote a permissionless status refresh from canonical pool accounting.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Quote a permissionless status refresh from canonical pool accounting."#
+    )]
     pub fn quote_pool_status_update(
         env: Env,
         pool: Address,
@@ -1680,10 +2247,16 @@ impl BackstopContract {
         )
     }
 
-    /// Quote a pool-admin status request from canonical pool accounting.
-    ///
-    /// Authorization and stored-status mutation remain the pool's
-    /// responsibility.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Quote a pool-admin status request from canonical pool accounting."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Authorization and stored-status mutation remain the pool's"#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#" responsibility."#)]
     pub fn quote_pool_status_set(
         env: Env,
         pool: Address,
@@ -1701,11 +2274,23 @@ impl BackstopContract {
         )
     }
 
-    /// Quote the permissionless v2-compatible status refresh.
-    ///
-    /// Active and queued values MUST use the same canonical, manipulation-
-    /// resistant USDC valuation. This function defines arithmetic only; the
-    /// production pool remains responsible for storing and enforcing status.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Quote the permissionless v2-compatible status refresh."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Active and queued values MUST use the same canonical, manipulation-"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" resistant USDC valuation. This function defines arithmetic only; the"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" production pool remains responsible for storing and enforcing status."#
+    )]
     pub fn quote_update_pool_status(
         env: Env,
         current_status: u32,
@@ -1716,11 +2301,23 @@ impl BackstopContract {
         quote_update_pool_status_values(&env, current_status, &active_values, &queued_values)
     }
 
-    /// Quote a pool-local admin's v2-compatible status request.
-    ///
-    /// This function performs no authorization and defines arithmetic only.
-    /// The production pool MUST require its current admin and MUST NOT grant
-    /// that admin any protocol-wide or withdrawal-safety authority.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Quote a pool-local admin's v2-compatible status request."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" This function performs no authorization and defines arithmetic only."#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The production pool MUST require its current admin and MUST NOT grant"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" that admin any protocol-wide or withdrawal-safety authority."#
+    )]
     pub fn quote_set_pool_status(
         env: Env,
         current_status: u32,
@@ -1738,16 +2335,28 @@ impl BackstopContract {
         )
     }
 
-    /// Quote one take-rate asset across the three weighted tiers.
-    ///
-    /// The result is arithmetic only. Values MUST come from the canonical
-    /// reward-eligibility layer before the quote is used for accrual.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Quote one take-rate asset across the three weighted tiers."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The result is arithmetic only. Values MUST come from the canonical"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" reward-eligibility layer before the quote is used for accrual."#
+    )]
     pub fn quote_take_rate(env: Env, distribution: i128, values: TakeRateValues) -> TakeRateQuote {
         extend_instance_ttl(&env);
         quote_take_rate_values(&env, distribution, &values)
     }
 
-    /// Allocate a bounded reserve-credit batch from canonical pool-tier value.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Allocate a bounded reserve-credit batch from canonical pool-tier value."#
+    )]
     pub fn quote_pool_take_rate_batch(
         env: Env,
         pool: Address,
@@ -1766,13 +2375,28 @@ impl BackstopContract {
         quotes
     }
 
-    /// Quote a reward-zone pool's share of the backstop-depositor BLND tranche.
-    ///
-    /// `total_reward_zone_blnd` is the eligible underlying BLND across every
-    /// reward-zone pool. This is an arithmetic-only diagnostic boundary.
-    /// Production accrual MUST obtain each tier's values from canonical
-    /// candidate shares and `spot_blnd_emission_values`, not untrusted caller
-    /// input.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Quote a reward-zone pool's share of the backstop-depositor BLND tranche."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" `total_reward_zone_blnd` is the eligible underlying BLND across every"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" reward-zone pool. This is an arithmetic-only diagnostic boundary."#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Production accrual MUST obtain each tier's values from canonical"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" candidate shares and `spot_blnd_emission_values`, not untrusted caller"#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#" input."#)]
     pub fn quote_pool_blnd_emissions(
         env: Env,
         distribution: i128,
@@ -1790,12 +2414,27 @@ impl BackstopContract {
         )
     }
 
-    /// Quote one user's share of a reward-zone pool's BLND-emission allocation.
-    ///
-    /// `pool_eligible_blnd` is the eligible underlying BLND held through both
-    /// BLND-bearing tiers for the pool. This is an arithmetic-only diagnostic
-    /// boundary. Production accrual MUST obtain each tier's values from
-    /// canonical candidate shares and `spot_blnd_emission_values`.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Quote one user's share of a reward-zone pool's BLND-emission allocation."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" `pool_eligible_blnd` is the eligible underlying BLND held through both"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" BLND-bearing tiers for the pool. This is an arithmetic-only diagnostic"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" boundary. Production accrual MUST obtain each tier's values from"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" canonical candidate shares and `spot_blnd_emission_values`."#
+    )]
     pub fn quote_user_blnd_emissions(
         env: Env,
         pool_distribution: i128,
@@ -1806,12 +2445,27 @@ impl BackstopContract {
         quote_user_blnd_emission_values(&env, pool_distribution, &values, pool_eligible_blnd)
     }
 
-    /// Convert current BLND:USDC and BLND:XLM LP-token amounts to underlying
-    /// BLND using each Comet's same-invocation reserve composition.
-    ///
-    /// This is the canonical conversion boundary for ongoing emissions. The
-    /// caller-supplied amounts make this a quote only; production accrual MUST
-    /// supply candidate-accounted active amounts after checkpointing.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Convert current BLND:USDC and BLND:XLM LP-token amounts to underlying"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" BLND using each Comet's same-invocation reserve composition."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" This is the canonical conversion boundary for ongoing emissions. The"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" caller-supplied amounts make this a quote only; production accrual MUST"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" supply candidate-accounted active amounts after checkpointing."#
+    )]
     pub fn spot_blnd_emission_values(
         env: Env,
         blnd_usdc_lp: i128,
@@ -1824,15 +2478,27 @@ impl BackstopContract {
         }
     }
 
-    /// Derive one registered pool's canonical current emission weight from
-    /// accounted active assets in both BLND-bearing tiers.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Derive one registered pool's canonical current emission weight from"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" accounted active assets in both BLND-bearing tiers."#
+    )]
     pub fn pool_spot_blnd_emission_values(env: Env, pool: Address) -> BlndEmissionValues {
         extend_instance_ttl(&env);
         pool_spot_blnd_values(&env, &pool)
     }
 
-    /// Quote the immutable 70% backstop / 30% pool split, including carry
-    /// retained from the preceding top-level split.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Quote the immutable 70% backstop / 30% pool split, including carry"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" retained from the preceding top-level split."#
+    )]
     pub fn quote_ongoing_blnd_split(
         env: Env,
         distribution: i128,
@@ -1855,13 +2521,19 @@ impl BackstopContract {
         }
     }
 
-    /// Return the registered original queue's immutable unlock anchor.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the registered original queue's immutable unlock anchor."#
+    )]
     pub fn original_unlock(env: Env) -> Option<u64> {
         extend_instance_ttl(&env);
         env.storage().instance().get(&DataKey::OriginalUnlock)
     }
 
-    /// Return when the bounded prefunding campaign began.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return when the bounded prefunding campaign began."#
+    )]
     pub fn prefunding_start(env: Env) -> u64 {
         extend_instance_ttl(&env);
         env.storage()
@@ -1870,7 +2542,10 @@ impl BackstopContract {
             .unwrap()
     }
 
-    /// Return the deployment-anchored maximum migration deadline.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the deployment-anchored maximum migration deadline."#
+    )]
     pub fn absolute_migration_deadline(env: Env) -> u64 {
         extend_instance_ttl(&env);
         env.storage()
@@ -1879,13 +2554,19 @@ impl BackstopContract {
             .unwrap()
     }
 
-    /// Return when the original legacy-emitter queue began.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return when the original legacy-emitter queue began."#
+    )]
     pub fn migration_epoch_start(env: Env) -> Option<u64> {
         extend_instance_ttl(&env);
         env.storage().instance().get(&DataKey::MigrationEpochStart)
     }
 
-    /// Return the queue currently approved for finalization or synchronization.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the queue currently approved for finalization or synchronization."#
+    )]
     pub fn verified_queue_unlock(env: Env) -> Option<u64> {
         extend_instance_ttl(&env);
         env.storage().instance().get(&DataKey::VerifiedQueueUnlock)
@@ -1899,7 +2580,10 @@ impl BackstopContract {
             .unwrap_or(0)
     }
 
-    /// Return the absolute end of the two-retry recovery horizon.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the absolute end of the two-retry recovery horizon."#
+    )]
     pub fn backfill_cap(env: Env) -> Option<u64> {
         extend_instance_ttl(&env);
         env.storage()
@@ -1908,30 +2592,54 @@ impl BackstopContract {
             .map(|unlock| recovery_end(&env, unlock))
     }
 
-    /// Return the final time-weighted backfill endpoint after activation.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the final time-weighted backfill endpoint after activation."#
+    )]
     pub fn backfill_end(env: Env) -> Option<u64> {
         extend_instance_ttl(&env);
         env.storage().instance().get(&DataKey::BackfillEnd)
     }
 
-    /// Deposit BLND:USDC into its continuous pool-attributed backstop tier.
-    ///
-    /// Before migration, these same shares also count toward legacy-emitter
-    /// qualification and earn amount-times-time backfill weight until the
-    /// currently verified queue unlocks. Deposits at or after that unlock are
-    /// ordinary tier shares and earn no backfill for that queue.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Deposit BLND:USDC into its continuous pool-attributed backstop tier."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Before migration, these same shares also count toward legacy-emitter"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" qualification and earn amount-times-time backfill weight until the"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" currently verified queue unlocks. Deposits at or after that unlock are"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" ordinary tier shares and earn no backfill for that queue."#
+    )]
     pub fn deposit_blnd_usdc(env: Env, from: Address, pool: Address, amount: i128) {
         extend_instance_ttl(&env);
         deposit_blnd_usdc_position(&env, from, pool, amount);
     }
 
-    /// Compatibility alias for `deposit_blnd_usdc`.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Compatibility alias for `deposit_blnd_usdc`."#
+    )]
     pub fn deposit_migration(env: Env, from: Address, pool: Address, amount: i128) {
         extend_instance_ttl(&env);
         deposit_blnd_usdc_position(&env, from, pool, amount);
     }
 
-    /// Queue active BLND:USDC shares for withdrawal after the 17-day lock.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Queue active BLND:USDC shares for withdrawal after the 17-day lock."#
+    )]
     pub fn queue_blnd_usdc_withdrawal(
         env: Env,
         from: Address,
@@ -1942,24 +2650,45 @@ impl BackstopContract {
         queue_blnd_usdc_withdrawal(&env, from, pool, amount)
     }
 
-    /// Return queued BLND:USDC shares to active status, newest entries first.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return queued BLND:USDC shares to active status, newest entries first."#
+    )]
     pub fn dequeue_blnd_usdc_withdrawal(env: Env, from: Address, pool: Address, amount: i128) {
         extend_instance_ttl(&env);
         dequeue_blnd_usdc_withdrawal(&env, from, pool, amount);
     }
 
-    /// Withdraw expired queued BLND:USDC tier shares, oldest entries first.
-    ///
-    /// Before emitter migration succeeds, withdrawn shares forfeit their
-    /// proportional accumulated backfill weight. The attributed pool must
-    /// affirm that this backstop has no committed or unresolved loss; a failed,
-    /// missing, or false pool response blocks withdrawal.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Withdraw expired queued BLND:USDC tier shares, oldest entries first."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Before emitter migration succeeds, withdrawn shares forfeit their"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" proportional accumulated backfill weight. The attributed pool must"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" affirm that this backstop has no committed or unresolved loss; a failed,"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" missing, or false pool response blocks withdrawal."#
+    )]
     pub fn withdraw_blnd_usdc(env: Env, from: Address, pool: Address, amount: i128, to: Address) {
         extend_instance_ttl(&env);
         withdraw_blnd_usdc_position(&env, from, pool, amount, to);
     }
 
-    /// Compatibility alias for the queued `withdraw_blnd_usdc` operation.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Compatibility alias for the queued `withdraw_blnd_usdc` operation."#
+    )]
     pub fn withdraw_migration(env: Env, from: Address, pool: Address, amount: i128, to: Address) {
         extend_instance_ttl(&env);
         withdraw_blnd_usdc_position(&env, from, pool, amount, to);
@@ -1970,7 +2699,10 @@ impl BackstopContract {
         get_position(&env, &user, &pool)
     }
 
-    /// Return a position's finalized amount-times-seconds allocation weight.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return a position's finalized amount-times-seconds allocation weight."#
+    )]
     pub fn migration_weight(env: Env, user: Address, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         let backfill_end: u64 = env
@@ -1992,7 +2724,10 @@ impl BackstopContract {
             .unwrap_or_else(|| panic_with_error!(&env, BackstopError::MigrationNotActive))
     }
 
-    /// Return the deterministic 1-BLND-per-second backfill scheduled at activation.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the deterministic 1-BLND-per-second backfill scheduled at activation."#
+    )]
     pub fn scheduled_backfill(env: Env) -> i128 {
         extend_instance_ttl(&env);
         env.storage()
@@ -2001,13 +2736,19 @@ impl BackstopContract {
             .unwrap_or_else(|| panic_with_error!(&env, BackstopError::MigrationNotActive))
     }
 
-    /// Return the exact scheduled amount received through the emitter's one-time drop.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the exact scheduled amount received through the emitter's one-time drop."#
+    )]
     pub fn funded_backfill(env: Env) -> Option<i128> {
         extend_instance_ttl(&env);
         env.storage().instance().get(&DataKey::BackfillFundedAmount)
     }
 
-    /// Return the sum of successful position claims.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the sum of successful position claims."#
+    )]
     pub fn total_backfill_claimed(env: Env) -> i128 {
         extend_instance_ttl(&env);
         env.storage()
@@ -2016,7 +2757,10 @@ impl BackstopContract {
             .unwrap_or(0)
     }
 
-    /// Return funded BLND that remains reserved for position claims and rounding dust.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return funded BLND that remains reserved for position claims and rounding dust."#
+    )]
     pub fn remaining_backfill(env: Env) -> i128 {
         extend_instance_ttl(&env);
         let funded: i128 = env
@@ -2032,10 +2776,19 @@ impl BackstopContract {
         checked_nonnegative_sub_i128(&env, funded, claimed)
     }
 
-    /// Permissionlessly fund the exact scheduled backfill through the legacy emitter.
-    ///
-    /// The candidate is the sole drop recipient. The call verifies the exact BLND
-    /// balance delta before recording the reserve and can succeed only once.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Permissionlessly fund the exact scheduled backfill through the legacy emitter."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The candidate is the sole drop recipient. The call verifies the exact BLND"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" balance delta before recording the reserve and can succeed only once."#
+    )]
     pub fn fund_backfill(env: Env) -> i128 {
         extend_instance_ttl(&env);
         if env.storage().instance().has(&DataKey::BackfillFundedAmount) {
@@ -2084,10 +2837,19 @@ impl BackstopContract {
         scheduled
     }
 
-    /// Claim one position's immutable, time-weighted BLND backfill allocation.
-    ///
-    /// The position owner authorizes the destination. Each surviving position
-    /// can claim once; floor-rounding dust remains in the backfill reserve.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Claim one position's immutable, time-weighted BLND backfill allocation."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The position owner authorizes the destination. Each surviving position"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" can claim once; floor-rounding dust remains in the backfill reserve."#
+    )]
     pub fn claim_backfill(env: Env, user: Address, pool: Address, recipient: Address) -> i128 {
         extend_instance_ttl(&env);
         user.require_auth();
@@ -2154,10 +2916,19 @@ impl BackstopContract {
         amount
     }
 
-    /// Quote a position's proportional share of scheduled BLND backpay.
-    ///
-    /// This reports the immutable entitlement and does not transfer BLND or
-    /// subtract an amount that the position has already claimed.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Quote a position's proportional share of scheduled BLND backpay."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" This reports the immutable entitlement and does not transfer BLND or"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" subtract an amount that the position has already claimed."#
+    )]
     pub fn quote_backfill(env: Env, user: Address, pool: Address) -> i128 {
         extend_instance_ttl(&env);
         let total_weight: i128 = env
@@ -2177,13 +2948,19 @@ impl BackstopContract {
         proportional_floor(&env, total_backfill, position_weight, total_weight)
     }
 
-    /// Return when this contract first synchronized its active lifecycle state.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return when this contract first synchronized its active lifecycle state."#
+    )]
     pub fn activated_at(env: Env) -> Option<u64> {
         extend_instance_ttl(&env);
         env.storage().instance().get(&DataKey::ActivatedAt)
     }
 
-    /// Return the final timestamp at which a bypassed direct swap may synchronize.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Return the final timestamp at which a bypassed direct swap may synchronize."#
+    )]
     pub fn sync_deadline(env: Env) -> Option<u64> {
         extend_instance_ttl(&env);
         env.storage()
@@ -2192,10 +2969,16 @@ impl BackstopContract {
             .map(|cutoff| checked_sync_deadline(&env, cutoff))
     }
 
-    /// Open the public accounting epoch from the original emitter queue.
-    ///
-    /// This does not verify the queue for finalization; that remains restricted
-    /// to the final seven days.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Open the public accounting epoch from the original emitter queue."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" This does not verify the queue for finalization; that remains restricted"#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#" to the final seven days."#)]
     pub fn open_migration_epoch(env: Env) -> u64 {
         extend_instance_ttl(&env);
         require_not_active(&env);
@@ -2214,7 +2997,10 @@ impl BackstopContract {
         open_epoch(&env, queued_swap.unlock_time)
     }
 
-    /// Atomically create the canonical legacy-emitter queue and open its epoch.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Atomically create the canonical legacy-emitter queue and open its epoch."#
+    )]
     pub fn begin_migration(env: Env) -> u64 {
         extend_instance_ttl(&env);
         require_not_active(&env);
@@ -2237,10 +3023,19 @@ impl BackstopContract {
         open_epoch(&env, queued_swap.unlock_time)
     }
 
-    /// Verify an emitter queue and commit its unlock as the active queue anchor.
-    ///
-    /// The first unlock and absolute recovery horizon are immutable. Up to two
-    /// replacement queues may be verified within that horizon.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Verify an emitter queue and commit its unlock as the active queue anchor."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" The first unlock and absolute recovery horizon are immutable. Up to two"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" replacement queues may be verified within that horizon."#
+    )]
     pub fn prepare_migration(env: Env) -> u64 {
         extend_instance_ttl(&env);
         require_not_active(&env);
@@ -2330,10 +3125,19 @@ impl BackstopContract {
         original_unlock
     }
 
-    /// Finalize the queued legacy-emitter swap and activate this candidate.
-    ///
-    /// This operation is permissionless. The emitter enforces its queue delay
-    /// and strictly-greater legacy-token balance requirement.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Finalize the queued legacy-emitter swap and activate this candidate."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" This operation is permissionless. The emitter enforces its queue delay"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" and strictly-greater legacy-token balance requirement."#
+    )]
     pub fn finalize_migration(env: Env) -> u64 {
         extend_instance_ttl(&env);
         require_not_active(&env);
@@ -2362,10 +3166,19 @@ impl BackstopContract {
         activate(&env, env.ledger().timestamp())
     }
 
-    /// Synchronize lifecycle state after the emitter was finalized directly.
-    ///
-    /// Backfill remains bounded by the immutable recovery horizon recorded
-    /// during initial preparation, regardless of when synchronization occurs.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Synchronize lifecycle state after the emitter was finalized directly."#
+    )]
+    #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" Backfill remains bounded by the immutable recovery horizon recorded"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" during initial preparation, regardless of when synchronization occurs."#
+    )]
     pub fn sync_migration(env: Env) -> u64 {
         extend_instance_ttl(&env);
         require_not_active(&env);

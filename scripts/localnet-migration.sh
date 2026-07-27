@@ -698,6 +698,8 @@ command_deploy() {
     # boundary locally. It is deliberately not a production pricing source.
     valuation_adapter_id="$(deploy_wasm \
         "deploy-test-valuation-adapter" "${V3_TEST_VALUATION_ADAPTER_WASM}" "" \
+        --blnd "${blnd_id}" \
+        --usdc "${prefund_token_id}" \
         --blnd_usdc "${legacy_token_id}" \
         --blnd_xlm "${next_token_id}")"
     state_set "valuation_adapter" "${valuation_adapter_id}"

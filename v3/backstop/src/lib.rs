@@ -406,6 +406,19 @@ pub struct AssetValuation {
 
 #[cfg_attr(
     not(target_family = "wasm"),
+    doc = r#" Immutable assets a valuation adapter is authorized to price."#
+)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct AdapterBinding {
+    pub blnd: Address,
+    pub blnd_usdc: Address,
+    pub blnd_xlm: Address,
+    pub usdc: Address,
+}
+
+#[cfg_attr(
+    not(target_family = "wasm"),
     doc = r#" Canonical value of one pool's active and queued backstop positions."#
 )]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -664,6 +677,7 @@ pub trait PoolFactory {
 #[contractclient(name = "ValuationAdapterClient")]
 pub trait ValuationAdapter {
     fn version(env: Env) -> u32;
+    fn binding(env: Env) -> AdapterBinding;
     fn quote(env: Env, token: Address, amount: i128) -> AssetValuation;
 }
 
@@ -911,9 +925,14 @@ impl BackstopContract {
             panic_with_error!(&env, BackstopError::InvalidPoolFactoryBinding);
         }
         let _ = pool_factory_client.is_pool(&candidate);
-        if ValuationAdapterClient::new(&env, &valuation_adapter).version()
-            != VALUATION_ADAPTER_VERSION
-        {
+        let adapter = ValuationAdapterClient::new(&env, &valuation_adapter);
+        let expected_binding = AdapterBinding {
+            blnd: blnd_token.clone(),
+            blnd_usdc: legacy_backstop_token.clone(),
+            blnd_xlm: next_backstop_token.clone(),
+            usdc: prefund_token.clone(),
+        };
+        if adapter.version() != VALUATION_ADAPTER_VERSION || adapter.binding() != expected_binding {
             panic_with_error!(&env, BackstopError::InvalidValuationAdapter);
         }
         extend_instance_ttl(&env);
@@ -6001,6 +6020,7 @@ mod tests {
     #[derive(Clone)]
     #[contracttype]
     enum MockValuationAdapterKey {
+        Binding,
         Invalid,
         ValidUntil,
         Version,
@@ -6008,7 +6028,10 @@ mod tests {
 
     #[contractimpl]
     impl MockValuationAdapter {
-        pub fn __constructor(env: Env) {
+        pub fn __constructor(env: Env, binding: AdapterBinding) {
+            env.storage()
+                .instance()
+                .set(&MockValuationAdapterKey::Binding, &binding);
             env.storage()
                 .instance()
                 .set(&MockValuationAdapterKey::Invalid, &false);
@@ -6025,6 +6048,13 @@ mod tests {
             env.storage()
                 .instance()
                 .get(&MockValuationAdapterKey::Version)
+                .unwrap()
+        }
+
+        pub fn binding(env: Env) -> AdapterBinding {
+            env.storage()
+                .instance()
+                .get(&MockValuationAdapterKey::Binding)
                 .unwrap()
         }
 
@@ -6064,8 +6094,22 @@ mod tests {
         }
     }
 
-    fn register_valuation_adapter(env: &Env) -> Address {
-        env.register(MockValuationAdapter, ())
+    fn register_valuation_adapter(
+        env: &Env,
+        blnd: &Address,
+        blnd_usdc: &Address,
+        blnd_xlm: &Address,
+        usdc: &Address,
+    ) -> Address {
+        env.register(
+            MockValuationAdapter,
+            (&AdapterBinding {
+                blnd: blnd.clone(),
+                blnd_usdc: blnd_usdc.clone(),
+                blnd_xlm: blnd_xlm.clone(),
+                usdc: usdc.clone(),
+            },),
+        )
     }
 
     #[contract]
@@ -6317,7 +6361,8 @@ mod tests {
             let candidate = Address::generate(&env);
             let pool_factory = env.register(MockPoolFactory, (&candidate,));
             let emitter = env.register(MockEmitter, (&incumbent, &candidate, &blnd_xlm));
-            let valuation_adapter = register_valuation_adapter(&env);
+            let valuation_adapter =
+                register_valuation_adapter(&env, &blnd, &blnd_usdc, &blnd_xlm, &usdc);
             env.register_at(
                 &candidate,
                 BackstopContract,
@@ -6486,7 +6531,8 @@ mod tests {
             );
             let usdc = Address::generate(&env);
             let pool_factory = env.register(MockPoolFactory, (&candidate,));
-            let valuation_adapter = register_valuation_adapter(&env);
+            let valuation_adapter =
+                register_valuation_adapter(&env, &candidate_blnd, &blnd_usdc, &blnd_xlm, &usdc);
             env.register_at(
                 &candidate,
                 BackstopContract,
@@ -7529,7 +7575,8 @@ mod tests {
         pool_factory.set_pool(&other_pool);
         pool_factory.set_pool(&below_minimum_pool);
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
-        let valuation_adapter = register_valuation_adapter(&env);
+        let valuation_adapter =
+            register_valuation_adapter(&env, &blnd_token, &legacy_token, &next_token, &usdc_token);
         env.register_at(
             &candidate_id,
             BackstopContract,
@@ -7893,7 +7940,8 @@ mod tests {
         let pool = env.register(MockLossAwarePool, (&candidate_id,));
         MockPoolFactoryClient::new(&env, &pool_factory_id).set_pool(&pool);
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
-        let valuation_adapter = register_valuation_adapter(&env);
+        let valuation_adapter =
+            register_valuation_adapter(&env, &blnd_token, &legacy_token, &next_token, &usdc_token);
         env.register_at(
             &candidate_id,
             BackstopContract,
@@ -8016,7 +8064,13 @@ mod tests {
         let candidate_id = Address::generate(&env);
         let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
-        let valuation_adapter = register_valuation_adapter(&env);
+        let valuation_adapter = register_valuation_adapter(
+            &env,
+            &blnd_token,
+            &legacy_token,
+            &next_token,
+            &prefund_token,
+        );
         env.register_at(
             &candidate_id,
             BackstopContract,
@@ -8098,7 +8152,13 @@ mod tests {
         let candidate_id = Address::generate(&env);
         let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
-        let valuation_adapter = register_valuation_adapter(&env);
+        let valuation_adapter = register_valuation_adapter(
+            &env,
+            &blnd_token,
+            &legacy_token,
+            &next_token,
+            &prefund_token,
+        );
         env.register_at(
             &candidate_id,
             BackstopContract,
@@ -8139,7 +8199,13 @@ mod tests {
         let candidate_id = Address::generate(&env);
         let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
-        let valuation_adapter = register_valuation_adapter(&env);
+        let valuation_adapter = register_valuation_adapter(
+            &env,
+            &blnd_token,
+            &legacy_token,
+            &next_token,
+            &prefund_token,
+        );
         env.register_at(
             &candidate_id,
             BackstopContract,
@@ -8172,7 +8238,13 @@ mod tests {
         let candidate_id = Address::generate(&env);
         let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
-        let valuation_adapter = register_valuation_adapter(&env);
+        let valuation_adapter = register_valuation_adapter(
+            &env,
+            &blnd_token,
+            &legacy_token,
+            &next_token,
+            &prefund_token,
+        );
         env.register_at(
             &candidate_id,
             BackstopContract,
@@ -8216,7 +8288,13 @@ mod tests {
         let candidate_id = Address::generate(&env);
         let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
-        let valuation_adapter = register_valuation_adapter(&env);
+        let valuation_adapter = register_valuation_adapter(
+            &env,
+            &blnd_token,
+            &legacy_token,
+            &next_token,
+            &prefund_token,
+        );
         env.register_at(
             &candidate_id,
             BackstopContract,
@@ -8311,7 +8389,13 @@ mod tests {
         let candidate_id = Address::generate(&env);
         let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
-        let valuation_adapter = register_valuation_adapter(&env);
+        let valuation_adapter = register_valuation_adapter(
+            &env,
+            &blnd_token,
+            &legacy_token,
+            &next_token,
+            &prefund_token,
+        );
         env.register_at(
             &candidate_id,
             BackstopContract,
@@ -8580,9 +8664,49 @@ mod tests {
         let prefund_token = Address::generate(&env);
         let candidate = Address::generate(&env);
         let pool_factory = env.register(MockPoolFactory, (&candidate,));
-        let valuation_adapter = register_valuation_adapter(&env);
+        let valuation_adapter = register_valuation_adapter(
+            &env,
+            &blnd_token,
+            &legacy_token,
+            &next_token,
+            &prefund_token,
+        );
         MockValuationAdapterClient::new(&env, &valuation_adapter)
             .set_version(&(VALUATION_ADAPTER_VERSION + 1));
+
+        env.register_at(
+            &candidate,
+            BackstopContract,
+            (
+                &emitter,
+                &blnd_token,
+                &pool_factory,
+                &legacy_token,
+                &next_token,
+                &prefund_token,
+                &valuation_adapter,
+            ),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1236)")]
+    fn constructor_rejects_mismatched_valuation_adapter_binding() {
+        let env = Env::default();
+        let emitter = Address::generate(&env);
+        let blnd_token = Address::generate(&env);
+        let legacy_token = Address::generate(&env);
+        let next_token = Address::generate(&env);
+        let prefund_token = Address::generate(&env);
+        let candidate = Address::generate(&env);
+        let pool_factory = env.register(MockPoolFactory, (&candidate,));
+        let valuation_adapter = register_valuation_adapter(
+            &env,
+            &Address::generate(&env),
+            &legacy_token,
+            &next_token,
+            &prefund_token,
+        );
 
         env.register_at(
             &candidate,
@@ -8684,7 +8808,8 @@ mod tests {
         pool_factory.set_pool(&pool);
         pool_factory.set_pool(&other_pool);
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
-        let valuation_adapter = register_valuation_adapter(&env);
+        let valuation_adapter =
+            register_valuation_adapter(&env, &blnd_token, &legacy_token, &next_token, &usdc_token);
         env.register_at(
             &candidate_id,
             BackstopContract,
@@ -8960,7 +9085,8 @@ mod tests {
         let pool_id = env.register(MockLossAwarePool, (&candidate_id,));
         pool_factory.set_pool(&pool_id);
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
-        let valuation_adapter = register_valuation_adapter(&env);
+        let valuation_adapter =
+            register_valuation_adapter(&env, &blnd_token, &legacy_token, &next_token, &usdc_token);
         env.register_at(
             &candidate_id,
             BackstopContract,
@@ -9035,7 +9161,8 @@ mod tests {
         let pool_id = env.register(MockLossAwarePool, (&candidate_id,));
         pool_factory.set_pool(&pool_id);
         let emitter_id = env.register(MockEmitter, (&incumbent, &candidate_id, &next_token));
-        let valuation_adapter = register_valuation_adapter(&env);
+        let valuation_adapter =
+            register_valuation_adapter(&env, &blnd_token, &legacy_token, &next_token, &usdc_token);
         env.register_at(
             &candidate_id,
             BackstopContract,
@@ -9500,7 +9627,8 @@ mod tests {
         let candidate_id = Address::generate(&env);
         let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
         let emitter = env.register(MockEmitter, (&incumbent, &candidate_id, &blnd_xlm));
-        let valuation_adapter = register_valuation_adapter(&env);
+        let valuation_adapter =
+            register_valuation_adapter(&env, &blnd, &blnd_usdc, &blnd_xlm, &usdc);
         env.register_at(
             &candidate_id,
             BackstopContract,

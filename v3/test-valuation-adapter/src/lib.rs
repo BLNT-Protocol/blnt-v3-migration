@@ -16,6 +16,15 @@ pub struct AssetValuation {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
+pub struct AdapterBinding {
+    pub blnd: Address,
+    pub blnd_usdc: Address,
+    pub blnd_xlm: Address,
+    pub usdc: Address,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
 pub struct PriceQuote {
     pub decimals: u32,
     pub price: i128,
@@ -25,9 +34,11 @@ pub struct PriceQuote {
 #[derive(Clone)]
 #[contracttype]
 enum DataKey {
+    Blnd,
     BlndUsdc,
     BlndXlm,
     Price(Address),
+    Usdc,
     Valuation(Address),
 }
 
@@ -48,13 +59,30 @@ pub struct TestValuationAdapter;
 
 #[contractimpl]
 impl TestValuationAdapter {
-    pub fn __constructor(env: Env, blnd_usdc: Address, blnd_xlm: Address) {
+    pub fn __constructor(
+        env: Env,
+        blnd: Address,
+        usdc: Address,
+        blnd_usdc: Address,
+        blnd_xlm: Address,
+    ) {
+        env.storage().instance().set(&DataKey::Blnd, &blnd);
+        env.storage().instance().set(&DataKey::Usdc, &usdc);
         env.storage().instance().set(&DataKey::BlndUsdc, &blnd_usdc);
         env.storage().instance().set(&DataKey::BlndXlm, &blnd_xlm);
     }
 
     pub fn version(_env: Env) -> u32 {
         ADAPTER_VERSION
+    }
+
+    pub fn binding(env: Env) -> AdapterBinding {
+        AdapterBinding {
+            blnd: env.storage().instance().get(&DataKey::Blnd).unwrap(),
+            blnd_usdc: env.storage().instance().get(&DataKey::BlndUsdc).unwrap(),
+            blnd_xlm: env.storage().instance().get(&DataKey::BlndXlm).unwrap(),
+            usdc: env.storage().instance().get(&DataKey::Usdc).unwrap(),
+        }
     }
 
     /// Store a fixture price in its own persistent ledger entry.

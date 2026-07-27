@@ -655,8 +655,11 @@ Plain USDC is the unit of account and contributes one USDC of activation value
 per eligible token.
 
 The candidate binds one valuation-adapter address immutably at construction.
-The adapter interface version is fixed by the candidate. A production adapter
-MUST itself have immutable pricing dependencies and no privileged
+The adapter interface version is fixed by the candidate. The interface also
+returns an immutable binding containing BLND, plain USDC, BLND:USDC, and
+BLND:XLM addresses. Candidate construction MUST reject an adapter unless all
+four addresses exactly match the candidate constructor arguments. A production
+adapter MUST itself have immutable pricing dependencies and no privileged
 configuration or WASM-upgrade path. For a positive LP-token amount it returns:
 
 - underlying BLND in seven-decimal base units;
@@ -676,10 +679,88 @@ their common pool-tier exchange rate before quoting LP token amounts or
 plain-USDC value. Conservative rounding can leave conversion dust unallocated;
 the final share redemption sweeps the remaining accounted assets.
 
-A production adapter MUST still define manipulation-resistant BLND:USDC and
-BLND:XLM LP valuation and its concrete oracle freshness policy before these
-values can drive stored pool status. Instantaneous Comet reserve ratios and
-caller-supplied values MUST NOT directly determine pool activation.
+The production adapter uses one immutable SEP-40 feed whose base asset is the
+configured Stellar USDC asset. The feed MUST publish BLND and XLM prices in
+that base. BLND, USDC, XLM, both Comet LP tokens, the feed, and every averaging
+parameter are fixed at adapter construction. The adapter exposes no
+administrator, setter, alternate price path, or WASM-upgrade function.
+
+Let \(D_o\) be the oracle's immutable precision, \(P_b\) and \(P_q\) the
+validated arithmetic-mean prices of BLND and the paired asset, and
+\(R_b\), \(R_q\), and \(S\) the Comet's current BLND reserve, paired reserve,
+and LP-token supply. All token quantities use seven decimals. Reserve values
+are:
+
+\[
+U_b = \left\lfloor \frac{R_bP_b}{10^{D_o}} \right\rfloor
+\]
+
+\[
+U_q =
+\begin{cases}
+R_q & \text{for BLND:USDC}\\
+\left\lfloor \frac{R_qP_q}{10^{D_o}} \right\rfloor
+& \text{for BLND:XLM}
+\end{cases}
+\]
+
+Because the accepted Comets have immutable 80% BLND and 20% paired-asset
+weights, each side independently implies a total LP value:
+
+\[
+T_b = \left\lfloor U_b\frac{10^7}{8{,}000{,}000}\right\rfloor,
+\qquad
+T_q = \left\lfloor U_q\frac{10^7}{2{,}000{,}000}\right\rfloor
+\]
+
+For LP amount \(A\), the adapter returns:
+
+\[
+V(A) =
+\left\lfloor
+A\frac{\min(T_b,T_q)}{S}
+\right\rfloor
+\]
+
+and:
+
+\[
+B(A) = \left\lfloor A\frac{R_b}{S}\right\rfloor
+\]
+
+as `usdc_value` and `underlying_blnd`, respectively. Taking the lesser
+reserve-implied total makes a one-sided donation or swap imbalance unable to
+increase the verified LP value. A manipulation can reduce the quote, which is
+the conservative failure direction. A proportionate liquidity contribution
+increases reserve value together with LP supply and therefore does not inflate
+the value per LP share.
+
+The production TWAP accepts 2 through 25 uniform SEP-40 records. The immutable
+record count and oracle resolution MUST define a window from 30 minutes
+through 24 hours. Maximum price age MUST be at least one oracle resolution and
+no more than one hour. Every returned record MUST have a positive price, a
+nonfuture timestamp aligned to the immutable resolution, and a unique tick;
+the records, in any order, MUST span exactly
+`resolution * (record_count - 1)`. The arithmetic mean rounds down. A quote is
+valid inclusively through the latest accepted tick plus the configured maximum
+age. BLND:XLM uses the earlier expiry of the BLND and XLM averages.
+
+Construction MUST verify the USDC oracle base, BLND and XLM feed membership,
+seven-decimal token interfaces, exact two-token Comet membership, and exact
+80:20 normalized weights. Every quote rechecks the oracle base, precision, and
+resolution and the applicable Comet weights. A nonpositive or excessive LP
+amount, missing or malformed history, future or stale tick, changed oracle
+identity, nonpositive supply or reserve, unsupported token, or arithmetic
+failure MUST fail closed. A positive LP amount whose conservative value or
+underlying BLND rounds below one seven-decimal base unit returns zero for that
+field; valuation dust MUST NOT make the entire pool unavailable.
+
+Instantaneous Comet composition remains canonical only for
+`underlying_blnd`. It does not by itself set activation value. This preserves
+the separately approved spot-composition emission policy while activation,
+take-rate, auction, and supplier-loss accounting use the conservative
+externally priced value. See `docs/VALUATION_ADAPTER.md` for deployment and
+security constraints.
 
 The implemented activation policy MUST:
 
@@ -1945,8 +2026,12 @@ the WASM target while retaining it in native Rust documentation, and the build
 enforces a conservative 120,000-byte optimized-WASM ceiling after deployment
 testing found that the earlier 126,044-byte artifact exceeded Protocol-27
 testnet CPU limits during upload. A completed wall-clock local run, a completed
-public-testnet exercise, and a production LP valuation source for non-emission
-policy remain intentionally unimplemented. Milestone 10's policy
+public-testnet exercise, selection and due diligence of the concrete SEP-40
+deployment address, and resource simulation against that provider's exact WASM
+and initialized storage remain intentionally unimplemented. The production LP
+valuation contract, immutable TWAP policy, conservative Comet formula, and a
+generic optimized-WASM regression with 25 independently stored ticks per asset
+are implemented. Milestone 10's policy
 arithmetic, admin and pending-loss policies, canonical spot-composition read
 boundary,
 permissionless maximum-30 reward-zone membership, emitter reconciliation,

@@ -29,7 +29,9 @@ See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the candidate requirements,
 [docs/V2_PARITY.md](docs/V2_PARITY.md) for the v2 parity matrix,
 [docs/BASELINE.md](docs/BASELINE.md) for the baseline policy, and
 [docs/MIGRATION_TEST_PLAN.md](docs/MIGRATION_TEST_PLAN.md) for the migration
-test requirements. Operational instructions live in
+test requirements. The production LP-pricing design is documented in
+[docs/VALUATION_ADAPTER.md](docs/VALUATION_ADAPTER.md). Operational
+instructions live in
 [docs/LOCALNET_MIGRATION.md](docs/LOCALNET_MIGRATION.md) and
 [docs/TESTNET_MIGRATION.md](docs/TESTNET_MIGRATION.md).
 
@@ -72,11 +74,13 @@ make check-v3
 ```
 
 This builds the historical v2 WASM, the SDK-27 compatibility probe, and the
-SDK-27 candidate contracts and test-only valuation adapter. The compatibility
+SDK-27 candidate contracts, production valuation adapter, and deterministic
+test adapter. The compatibility
 harness verifies both a cross-contract call into the SDK-22 backstop and a
 complete legacy-emitter migration into the v3 candidate on a Protocol-27
-host. The deterministic adapter exercises the immutable valuation boundary;
-it is not a production oracle. The candidate pool persists v2-compatible
+host. The production adapter uses immutable SEP-40 BLND/USDC and XLM/USDC
+TWAPs plus conservative 80:20 Comet reserve valuation. The deterministic
+adapter remains a fixture only. The candidate pool persists v2-compatible
 status transitions using that canonical boundary and a transferable v2-style
 pool admin. Its SDK-27 lending core executes the six non-auction v2 request
 types with v2-compatible mutable pool parameters and timelocked reserve

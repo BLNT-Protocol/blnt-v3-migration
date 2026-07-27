@@ -116,6 +116,15 @@ side effect of work in this repository.
 - Pool-status and reward-zone threshold decisions must use the same canonical
   activation valuation. Stored pool status is not an additional reward-zone
   eligibility gate.
+- Production LP value uses the immutable SEP-40 USDC-base TWAP adapter and the
+  lower of the 80%-BLND and 20%-paired-reserve implied Comet totals. Spot Comet
+  BLND composition remains canonical only for ongoing-emission weight. Do not
+  replace the production adapter with caller-supplied values or the
+  deterministic test fixture.
+- Candidate construction must match the valuation adapter's immutable BLND,
+  plain-USDC, BLND:USDC, and BLND:XLM binding exactly. Generic resource tests
+  must model independent oracle tick storage; the selected provider's exact
+  WASM and initialized layout still require predeployment simulation.
 - Pool status preserves v2 codes and hard Q4W thresholds: normal On-Ice at
   30%, Admin Active On-Ice at 50%, normal Frozen at 60%, and Admin On-Ice
   Frozen at 75%. The transferable pool admin may select statuses 0, 2, and 4

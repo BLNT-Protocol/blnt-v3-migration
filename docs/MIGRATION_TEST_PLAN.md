@@ -238,6 +238,8 @@ For a multi-asset activation formula, test:
   asset-specific haircuts, concentration caps, or minimum BLND allocation.
 - Negative values and checked-arithmetic overflow.
 - Immutable adapter binding and rejection of an incompatible adapter version.
+- Candidate construction rejects a version-compatible adapter whose immutable
+  BLND, plain-USDC, BLND:USDC, or BLND:XLM binding differs from the candidate.
 - Canonical derivation from pool-attributed active and queued shares, including
   exclusion of unattributed direct transfers.
 - Separate LP quotes for active and queued BLND:USDC and BLND:XLM amounts;
@@ -249,6 +251,26 @@ For a multi-asset activation formula, test:
   adapter.
 - Price, reserve, and LP-supply manipulation.
 - Oracle staleness and unavailable-market behavior.
+- Production SEP-40 construction rejects a non-USDC base, missing BLND or XLM
+  feed membership, incompatible precision or resolution, a TWAP outside its
+  immutable bounds, incorrect Comet tokens or weights, and non-seven-decimal
+  tokens.
+- Production TWAP validation accepts unordered uniform ticks, rounds the
+  arithmetic mean down, and rejects missing, duplicate, gapped, nonpositive,
+  future, misaligned, and expired ticks or a changed feed identity.
+- Production Comet valuation uses the lower 80%-BLND and 20%-paired-reserve
+  implied total. Increasing either reserve alone cannot increase the quote,
+  while reducing either side conservatively reduces it.
+- The optimized production adapter quotes both accepted Comets within
+  Protocol-27 mainnet invocation limits while each of 25 oracle ticks per
+  asset occupies an independent persistent ledger entry.
+- The optimized candidate canonical valuation exercises four production
+  adapter calls—active and queued BLND:USDC plus active and queued BLND:XLM—
+  against that independent-tick footprint within Protocol-27 mainnet
+  invocation limits.
+- Before public deployment, repeat the resource regression against the exact
+  selected oracle WASM and initialized storage layout. The conservative generic
+  fixture does not replace provider-specific simulation.
 - Queued withdrawals and assets already committed to covering losses.
 - Consistent activation valuation for pool-status and reward-zone threshold
   decisions.

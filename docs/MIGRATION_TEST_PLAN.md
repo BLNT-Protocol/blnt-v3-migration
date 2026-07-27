@@ -711,6 +711,24 @@ The v3 tests must verify:
   remaining weights renormalize as in v2.
 - Supply and borrow emissions remain separate from the backstop-depositor
   tranche and are claimable to an authorized user's chosen destination.
+- A positive pool gulp is limited to once per 24 hours, rejects less than one
+  BLND atomically as in v2, and moves the accrued 30% tranche into a
+  pool-specific reservation without transferring BLND or creating an
+  allowance.
+- Reserve-token allocations stream for seven days. A later gulp checkpoints
+  the existing index, carries the exact unvested amount, and restarts the
+  seven-day horizon; pool, reserve-token, and user rounding carry remain
+  isolated. The v2 reserve-decimal-derived index scale remains precise for
+  large positions in every supported token precision.
+- Supply, collateral, borrow, repay, liquidation, bad-debt handoff, supplier
+  default, and reserve-configuration mutations checkpoint affected streams
+  before changing balances or token supply. A halfway entrant cannot claim
+  the first half of an existing stream.
+- A reserve-token claim requires position-owner authorization, rejects
+  duplicate or invalid identifiers, clears only the selected user accruals,
+  and atomically consumes the registered pool's candidate reservation. The
+  optimized maximum 60-identifier pool-to-candidate claim path remains within
+  Protocol-27 mainnet invocation limits.
 - A backstop claim equals the existing pool/user underlying-BLND formula and is
   not redirected or reweighted into one preferred tier.
 - An optimized-WASM distribution over the maximum 30-pool reward zone remains

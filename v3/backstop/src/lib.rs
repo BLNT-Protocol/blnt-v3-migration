@@ -53,6 +53,7 @@ const POOL_EMISSION_NUMERATOR: i128 = 3;
 const EMISSION_SPLIT_DENOMINATOR: i128 = 10;
 const EMISSION_INDEX_SCALE: i128 = 100_000_000_000_000;
 const MAX_REWARD_ZONE_SIZE: u32 = 30;
+const POOL_EMISSION_GULP_INTERVAL_SECONDS: u64 = 24 * 60 * 60;
 const MIN_DISTRIBUTION_INTERVAL_SECONDS: u64 = 5;
 const WEIGHT_CHANGE_CHECKPOINT_MAX_AGE_SECONDS: u64 = MIN_DISTRIBUTION_INTERVAL_SECONDS;
 const REWARD_ZONE_CHECKPOINT_MAX_AGE_SECONDS: u64 = 60 * 60;
@@ -122,6 +123,7 @@ enum PersistentKey {
     PoolTierQueuedShares(BackstopTier, Address),
     PoolTierAssets(BackstopTier, Address),
     PoolOngoingEmissions(Address),
+    PoolEmissionReservation(Address),
     UserOngoingEmissions(BackstopTier, Address, Address),
 }
 
@@ -197,6 +199,7 @@ pub enum BackstopError {
     DistributionTooSoon = 1249,
     InvalidOngoingBalance = 1250,
     NoOngoingEmissions = 1251,
+    PoolEmissionGulpTooSoon = 1252,
 }
 
 #[derive(Clone)]
@@ -417,6 +420,18 @@ pub struct PoolOngoingEmissions {
     pub blnd_usdc_index_carry: i128,
     pub blnd_xlm_index: i128,
     pub blnd_xlm_index_carry: i128,
+}
+
+/// Pool-owned reservation of the 30% supply/borrow tranche.
+///
+/// A permissionless pool gulp moves accrued pool emissions into this
+/// reservation no more than once per day. The registered pool then consumes
+/// the reservation atomically as its users claim reserve-token emissions.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PoolEmissionReservation {
+    pub available: i128,
+    pub last_gulp: Option<u64>,
 }
 
 /// One user's bounded ongoing-BLND checkpoint in one BLND-bearing tier.
@@ -682,6 +697,21 @@ pub struct OngoingBlndClaimed {
     pub user: Address,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PoolEmissionsGulped {
+    pub amount: i128,
+    pub pool: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PoolEmissionsClaimed {
+    pub amount: i128,
+    pub pool: Address,
+    pub recipient: Address,
+}
+
 #[contract]
 pub struct BackstopContract;
 
@@ -891,6 +921,40 @@ impl BackstopContract {
         extend_instance_ttl(&env);
         require_registered_pool(&env, &pool);
         get_pool_ongoing_emissions(&env, &pool)
+    }
+
+    /// Return one registered pool's reserved, unclaimed 30% tranche.
+    pub fn pool_emission_reservation(env: Env, pool: Address) -> PoolEmissionReservation {
+        extend_instance_ttl(&env);
+        require_registered_pool(&env, &pool);
+        get_pool_emission_reservation(&env, &pool)
+    }
+
+    /// Move one pool's accrued 30% tranche into its claim reservation.
+    ///
+    /// The registered pool contract authorizes the call. A positive gulp is
+    /// available at most once per 24 hours, matching v2's pool cadence.
+    pub fn gulp_pool_emissions(env: Env, pool: Address) -> i128 {
+        extend_instance_ttl(&env);
+        let amount = gulp_pool_ongoing_emissions(&env, &pool);
+        PoolEmissionsGulped { amount, pool }.publish(&env);
+        amount
+    }
+
+    /// Pay an authorized reserve-token emission claim from a pool reservation.
+    ///
+    /// Only the registered pool contract can consume its reservation. The
+    /// candidate remains the BLND custodian until this atomic payout so its
+    /// exact balance-reconciliation invariant remains intact.
+    pub fn claim_pool_emissions(env: Env, pool: Address, recipient: Address, amount: i128) {
+        extend_instance_ttl(&env);
+        claim_reserved_pool_emissions(&env, &pool, &recipient, amount);
+        PoolEmissionsClaimed {
+            amount,
+            pool,
+            recipient,
+        }
+        .publish(&env);
     }
 
     /// Return one user's current checkpointed and pending ongoing BLND for an
@@ -3110,6 +3174,86 @@ fn set_pool_ongoing_emissions(env: &Env, pool: &Address, state: &PoolOngoingEmis
     env.storage()
         .persistent()
         .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
+}
+
+fn get_pool_emission_reservation(env: &Env, pool: &Address) -> PoolEmissionReservation {
+    let key = PersistentKey::PoolEmissionReservation(pool.clone());
+    let reservation = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(PoolEmissionReservation {
+            available: 0,
+            last_gulp: None,
+        });
+    extend_persistent_ttl_if_present(env, &key);
+    if reservation.available < 0
+        || reservation
+            .last_gulp
+            .is_some_and(|last_gulp| last_gulp > env.ledger().timestamp())
+    {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    reservation
+}
+
+fn set_pool_emission_reservation(env: &Env, pool: &Address, reservation: &PoolEmissionReservation) {
+    if reservation.available < 0
+        || reservation
+            .last_gulp
+            .is_some_and(|last_gulp| last_gulp > env.ledger().timestamp())
+    {
+        panic_with_error!(env, BackstopError::InvalidEmissionValue);
+    }
+    let key = PersistentKey::PoolEmissionReservation(pool.clone());
+    env.storage().persistent().set(&key, reservation);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, POSITION_TTL_THRESHOLD, POSITION_TTL_BUMP);
+}
+
+fn gulp_pool_ongoing_emissions(env: &Env, pool: &Address) -> i128 {
+    pool.require_auth();
+    require_registered_pool(env, pool);
+
+    let mut reservation = get_pool_emission_reservation(env, pool);
+    let now = env.ledger().timestamp();
+    if reservation.last_gulp.is_some_and(|last_gulp| {
+        last_gulp
+            .checked_add(POOL_EMISSION_GULP_INTERVAL_SECONDS)
+            .is_none_or(|next_gulp| next_gulp > now)
+    }) {
+        panic_with_error!(env, BackstopError::PoolEmissionGulpTooSoon);
+    }
+
+    let mut pool_state = get_pool_ongoing_emissions(env, pool);
+    let amount = pool_state.accrued_pool;
+    if amount == 0 {
+        return 0;
+    }
+    pool_state.accrued_pool = 0;
+    reservation.available = checked_add_i128(env, reservation.available, amount);
+    reservation.last_gulp = Some(now);
+    set_pool_ongoing_emissions(env, pool, &pool_state);
+    set_pool_emission_reservation(env, pool, &reservation);
+    amount
+}
+
+fn claim_reserved_pool_emissions(env: &Env, pool: &Address, recipient: &Address, amount: i128) {
+    require_positive(env, amount);
+    pool.require_auth();
+    require_registered_pool(env, pool);
+
+    let mut reservation = get_pool_emission_reservation(env, pool);
+    reservation.available = checked_nonnegative_sub_i128(env, reservation.available, amount);
+    set_pool_emission_reservation(env, pool, &reservation);
+
+    let mut ongoing = get_ongoing_emission_state(env);
+    ongoing.total_claimed = checked_add_i128(env, ongoing.total_claimed, amount);
+    set_ongoing_emission_state(env, &ongoing);
+
+    let blnd: Address = env.storage().instance().get(&DataKey::BlndToken).unwrap();
+    TokenClient::new(env, &blnd).transfer(&env.current_contract_address(), recipient, &amount);
 }
 
 fn refresh_pool_ongoing_assets(env: &Env, pool: &Address) {
@@ -5816,6 +5960,52 @@ mod tests {
         assert!(candidate
             .try_claim_ongoing_blnd(&blnd_usdc_user, &pool, &blnd_usdc_recipient)
             .is_err());
+    }
+
+    #[test]
+    fn pool_tranche_is_reserved_daily_and_paid_only_by_the_registered_pool() {
+        let fixture = OngoingFixture::create();
+        let candidate = fixture.client();
+        let pool = fixture.pool(100 * SCALAR_7, 0);
+        let recipient = Address::generate(&fixture.env);
+        fixture.set_reward_zone(&soroban_sdk::vec![&fixture.env, pool.clone()]);
+
+        fixture.env.ledger().set_timestamp(1_010);
+        assert_eq!(candidate.distribute().received, 10 * SCALAR_7);
+        assert_eq!(
+            candidate.pool_ongoing_emissions(&pool).accrued_pool,
+            3 * SCALAR_7
+        );
+        assert_eq!(candidate.gulp_pool_emissions(&pool), 3 * SCALAR_7);
+        assert_eq!(
+            candidate.pool_emission_reservation(&pool),
+            PoolEmissionReservation {
+                available: 3 * SCALAR_7,
+                last_gulp: Some(1_010),
+            }
+        );
+        assert_eq!(candidate.pool_ongoing_emissions(&pool).accrued_pool, 0);
+        assert!(candidate.try_gulp_pool_emissions(&pool).is_err());
+
+        candidate.claim_pool_emissions(&pool, &recipient, &SCALAR_7);
+        assert_eq!(
+            candidate.pool_emission_reservation(&pool).available,
+            2 * SCALAR_7
+        );
+        assert_eq!(
+            TokenClient::new(&fixture.env, &fixture.blnd).balance(&recipient),
+            SCALAR_7
+        );
+        let ongoing = candidate.ongoing_emission_state();
+        assert_eq!(ongoing.total_claimed, SCALAR_7);
+        assert_eq!(ongoing.backstop_claimed, 0);
+        assert!(candidate
+            .try_claim_pool_emissions(&pool, &recipient, &(3 * SCALAR_7))
+            .is_err());
+        assert_eq!(
+            candidate.pool_emission_reservation(&pool).available,
+            2 * SCALAR_7
+        );
     }
 
     #[test]

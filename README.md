@@ -124,8 +124,13 @@ unresolved allocation window to one ledger. The 70% pool allocation is frozen
 into scaled BLND:USDC and BLND:XLM per-share indexes in that same distribution;
 user checkpoints exclude late deposits and queued shares, preserve scoped
 rounding carry, and support owner-authorized BLND claims to a selected
-recipient. The 30% supply/borrow configuration, reserve-token accumulators, and
-their claims remain unimplemented.
+recipient. For the 30% tranche, the pool admin configures v2-compatible
+supply/debt-token weights. A pool-authorized once-daily gulp reserves the
+allocation without moving BLND out of candidate custody, then seven-day
+reserve-token streams checkpoint every balance mutation and carry integer dust
+at pool, reserve, and user scope. Owner-authorized claims over selected
+reserve-token identifiers are paid directly by the candidate to the chosen
+recipient.
 
 Run both lanes:
 

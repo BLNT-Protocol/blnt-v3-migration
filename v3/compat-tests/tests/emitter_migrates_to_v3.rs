@@ -639,14 +639,75 @@ fn optimized_v3_distributes_ongoing_blnd_across_maximum_reward_zone() {
     blnd_usdc_token.mint(&incumbent, &per_pool);
     blnd_usdc_token.mint(&depositor, &(30 * per_pool));
 
+    let pool_admin = Address::generate(&env);
+    let emission_asset_admin = Address::generate(&env);
+    let mut emission_assets = soroban_sdk::Vec::new(&env);
+    let mut emission_reserves = soroban_sdk::Vec::new(&env);
+    let mut emission_metadata = soroban_sdk::Vec::new(&env);
+    let mut emission_claim_ids = soroban_sdk::Vec::new(&env);
+    for index in 0..30_u32 {
+        let asset = if index == 0 {
+            usdc.clone()
+        } else {
+            env.register_stellar_asset_contract_v2(emission_asset_admin.clone())
+                .address()
+        };
+        emission_reserves.push_back(direct_lending_reserve_config(&asset, index));
+        for res_type in 0..=1_u32 {
+            emission_metadata.push_back(v3_pool::ReserveEmissionMetadata {
+                res_index: index,
+                res_type,
+                share: 1,
+            });
+            emission_claim_ids.push_back(index * 2 + res_type);
+        }
+        emission_assets.push_back(asset);
+    }
+    assert_eq!(emission_metadata.len(), 60);
+    assert_eq!(emission_claim_ids.len(), 60);
+    let mut emission_lending_config = direct_lending_config(&valuation_adapter);
+    emission_lending_config.max_positions = 60;
+    let emission_pool_id = env.register(
+        v3_pool::WASM,
+        (
+            &candidate_id,
+            &pool_admin,
+            &emission_lending_config,
+            &emission_reserves,
+        ),
+    );
     let mut pools = soroban_sdk::Vec::new(&env);
-    for _ in 0..30 {
-        let pool = env.register(MockLossAwarePool, (&candidate_id, false));
+    for index in 0..30 {
+        let pool = if index == 0 {
+            emission_pool_id.clone()
+        } else {
+            env.register(MockLossAwarePool, (&candidate_id, false))
+        };
         pool_factory.set_pool(&pool);
         candidate.deposit_blnd_usdc(&depositor, &pool, &per_pool);
         pools.push_back(pool);
     }
     let first = pools.get(0).unwrap();
+    let emission_pool = v3_pool::Client::new(&env, &emission_pool_id);
+    assert_eq!(emission_pool.set_pool_status(&0), 0);
+    let supplier = Address::generate(&env);
+    for asset in emission_assets.iter() {
+        StellarAssetClient::new(&env, &asset).mint(&supplier, &(1_000 * SCALAR_7));
+        emission_pool.submit(
+            &supplier,
+            &supplier,
+            &supplier,
+            &soroban_sdk::vec![
+                &env,
+                v3_pool::Request {
+                    address: asset,
+                    amount: 1_000 * SCALAR_7,
+                    request_type: 0,
+                },
+            ],
+        );
+    }
+    emission_pool.set_emissions_config(&emission_metadata);
     candidate.add_reward(&first, &None);
 
     candidate.begin_migration();
@@ -750,6 +811,36 @@ fn optimized_v3_distributes_ongoing_blnd_across_maximum_reward_zone() {
     let ongoing = candidate.ongoing_emission_state();
     assert_eq!(ongoing.backstop_claimed, claimable);
     assert_eq!(ongoing.total_claimed, claimable);
+
+    // The optimized pool reserves its 30% tranche through contract
+    // authorization, streams it for seven days, and has the candidate pay the
+    // eventual user claim directly without an allowance.
+    env.cost_estimate().budget().reset_unlimited();
+    let pool_tranche = emission_pool.gulp_emissions();
+    assert_mainnet_invocation_limits!(env.cost_estimate().resources());
+    assert!(pool_tranche >= SCALAR_7);
+    assert_eq!(
+        candidate
+            .pool_emission_reservation(&emission_pool_id)
+            .available,
+        pool_tranche
+    );
+    env.ledger().set_timestamp(unlock + 30 + 7 * 24 * 60 * 60);
+    let supply_recipient = Address::generate(&env);
+    env.cost_estimate().budget().reset_unlimited();
+    let supply_claim = emission_pool.claim(&supplier, &emission_claim_ids, &supply_recipient);
+    assert_mainnet_invocation_limits!(env.cost_estimate().resources());
+    assert!(supply_claim > 0);
+    assert_eq!(
+        TokenClient::new(&env, &blnd).balance(&supply_recipient),
+        supply_claim
+    );
+    assert_eq!(
+        candidate
+            .pool_emission_reservation(&emission_pool_id)
+            .available,
+        pool_tranche - supply_claim
+    );
 }
 
 #[test]

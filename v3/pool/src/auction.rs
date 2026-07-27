@@ -3,7 +3,8 @@ use soroban_sdk::{
 };
 
 use crate::{
-    clear_backstop_liabilities, get_backstop, get_backstop_liabilities, get_backstop_liability,
+    clear_backstop_liabilities, emissions, get_backstop, get_backstop_liabilities,
+    get_backstop_liability,
     lending::{
         checked_add, checked_sub_nonnegative, checkpoint_reserve, config, consume_backstop_credit,
         default_liability_to_suppliers, mul_div_ceil, mul_div_floor, position_data_with_prices,
@@ -481,7 +482,7 @@ fn default_all_backstop_liabilities(env: &Env) -> Map<Address, i128> {
             continue;
         }
         let (underlying, previous_b_rate, b_rate) =
-            default_liability_to_suppliers(env, &mut backstop_positions, &asset, amount);
+            default_liability_to_suppliers(env, &backstop, &mut backstop_positions, &asset, amount);
         defaulted.set(asset.clone(), amount);
         SupplierDebtDefaulted {
             asset,
@@ -1204,6 +1205,7 @@ pub(crate) fn fill_user_liquidation(
         .unwrap_or_else(|_| panic_with_error!(env, PoolError::InvalidLiquidation));
     let auction = get_user_liquidation(env, user);
     let (filled, remaining) = scale_auction(env, &auction, percent_u32);
+    let filler_before = filler_positions.clone();
     let mut liquidatee_positions = positions(env, user);
     let liquidatee_before = position_data_with_prices(env, &liquidatee_positions, prices);
     remove_positions(env, &mut liquidatee_positions, &filled.lot, &filled.bid);
@@ -1228,6 +1230,7 @@ pub(crate) fn fill_user_liquidation(
         }
     }
 
+    emissions::checkpoint_position_changes(env, filler, &filler_before, filler_positions);
     set_positions(env, user, &liquidatee_positions);
     if let Some(remaining) = remaining {
         set_user_liquidation(env, user, &remaining);

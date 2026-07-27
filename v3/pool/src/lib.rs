@@ -1,6 +1,7 @@
 #![no_std]
 
 mod auction;
+mod emissions;
 mod lending;
 
 pub use auction::{
@@ -10,6 +11,10 @@ pub use auction::{
     InterestAuctionData, InterestAuctionDeleted, InterestAuctionFill, InterestAuctionFilled,
     InterestLotQuote, InterestReserveState, SupplierDebtDefaulted, TakeRateQuote,
     UserBadDebtTransferred, ACTION_DELETE_LIQUIDATION, ACTION_FILL_USER_LIQUIDATION,
+};
+pub use emissions::{
+    EmissionsConfigured, PoolEmissionsClaimed, PoolEmissionsGulped, ReserveEmissionData,
+    ReserveEmissionMetadata, ReserveEmissionUpdated, UserEmissionData,
 };
 pub use lending::{
     LendingAction, LendingConfig, PositionHealth, Positions, PriceQuote, Request, Reserve,
@@ -74,6 +79,9 @@ pub enum PoolError {
     BadDebtUnsupported = 1327,
     InvalidInterestAuction = 1328,
     NoInterestAuctionCapacity = 1329,
+    InvalidEmissionConfig = 1330,
+    InvalidEmissionAmount = 1331,
+    InvalidEmissionValue = 1332,
 }
 
 /// Canonical status result returned by the configured backstop.
@@ -134,6 +142,8 @@ pub trait Backstop {
         bid_amount: i128,
         from: Address,
     ) -> Option<InterestLotQuote>;
+    fn gulp_pool_emissions(env: Env, pool: Address) -> i128;
+    fn claim_pool_emissions(env: Env, pool: Address, recipient: Address, amount: i128);
 }
 
 #[contractevent]
@@ -393,6 +403,52 @@ impl PoolContract {
         let index = lending::set_reserve(&env, &asset);
         ReserveConfigured { asset, index }.publish(&env);
         index
+    }
+
+    /// Configure positive relative weights for the 30% supply/borrow tranche.
+    ///
+    /// Reserve token identifiers match v2: even identifiers are debt/dTokens
+    /// and odd identifiers are supply/bTokens.
+    pub fn set_emissions_config(env: Env, metadata: Vec<ReserveEmissionMetadata>) {
+        extend_instance_ttl(&env);
+        get_admin(&env).require_auth();
+        emissions::set_config(&env, metadata);
+    }
+
+    /// Return the current reserve-token relative weights.
+    pub fn emissions_config(env: Env) -> Map<u32, u64> {
+        extend_instance_ttl(&env);
+        emissions::config(&env)
+    }
+
+    /// Return integer BLND base-unit carry retained at the pool split.
+    pub fn emission_pool_carry(env: Env) -> i128 {
+        extend_instance_ttl(&env);
+        emissions::pool_carry(&env)
+    }
+
+    /// Permissionlessly reserve and stream this pool's accrued 30% tranche.
+    pub fn gulp_emissions(env: Env) -> i128 {
+        extend_instance_ttl(&env);
+        emissions::gulp(&env)
+    }
+
+    /// Claim selected supply/debt-token emissions to a chosen recipient.
+    pub fn claim(env: Env, user: Address, reserve_token_ids: Vec<u32>, recipient: Address) -> i128 {
+        extend_instance_ttl(&env);
+        emissions::claim(&env, &user, &reserve_token_ids, &recipient)
+    }
+
+    /// Preview one reserve-token stream through the current timestamp.
+    pub fn reserve_emission(env: Env, reserve_token_id: u32) -> Option<ReserveEmissionData> {
+        extend_instance_ttl(&env);
+        emissions::reserve_emission(&env, reserve_token_id)
+    }
+
+    /// Preview one user's checkpointed and pending reserve-token emissions.
+    pub fn user_emission(env: Env, user: Address, reserve_token_id: u32) -> UserEmissionData {
+        extend_instance_ttl(&env);
+        emissions::user_emission(&env, &user, reserve_token_id)
     }
 
     /// Return the reserve list in reserve-index order.
@@ -786,6 +842,9 @@ mod tests {
         InterestTarget,
         InterestTier,
         InterestWeighted,
+        PoolEmissionAmount,
+        PoolEmissionClaimed,
+        PoolEmissionRecipient,
         ReleasedAuction,
         SettledBaseLot,
         SettledCount,
@@ -1165,6 +1224,53 @@ mod tests {
             env.storage()
                 .instance()
                 .get(&MockBackstopKey::InterestReleased)
+        }
+
+        pub fn set_pool_emission_amount(env: Env, amount: i128) {
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::PoolEmissionAmount, &amount);
+        }
+
+        pub fn gulp_pool_emissions(env: Env, pool: Address) -> i128 {
+            pool.require_auth();
+            let amount = env
+                .storage()
+                .instance()
+                .get(&MockBackstopKey::PoolEmissionAmount)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::PoolEmissionAmount, &0_i128);
+            amount
+        }
+
+        pub fn claim_pool_emissions(env: Env, pool: Address, recipient: Address, amount: i128) {
+            pool.require_auth();
+            let claimed = env
+                .storage()
+                .instance()
+                .get::<_, i128>(&MockBackstopKey::PoolEmissionClaimed)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::PoolEmissionClaimed, &(claimed + amount));
+            env.storage()
+                .instance()
+                .set(&MockBackstopKey::PoolEmissionRecipient, &recipient);
+        }
+
+        pub fn pool_emission_claimed(env: Env) -> i128 {
+            env.storage()
+                .instance()
+                .get(&MockBackstopKey::PoolEmissionClaimed)
+                .unwrap_or(0)
+        }
+
+        pub fn pool_emission_recipient(env: Env) -> Option<Address> {
+            env.storage()
+                .instance()
+                .get(&MockBackstopKey::PoolEmissionRecipient)
         }
     }
 
@@ -3595,6 +3701,417 @@ mod tests {
         assert_eq!(borrowed_token.balance(&liquidity_provider), 500_000_000);
         assert_eq!(pool.reserve_list().len(), 2);
         assert_eq!(pool.lending_config().oracle, oracle_id);
+    }
+
+    #[test]
+    fn supply_and_debt_emissions_stream_for_seven_days_and_checkpoint_late_supply() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        env.ledger().set_timestamp(1_000);
+        let token_admin = Address::generate(&env);
+        let collateral_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let borrowed_asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let collateral_admin = StellarAssetClient::new(&env, &collateral_asset);
+        let borrowed_admin = StellarAssetClient::new(&env, &borrowed_asset);
+        let backstop_id = env.register(MockBackstop, ());
+        let backstop = MockBackstopClient::new(&env, &backstop_id);
+        let oracle_id = env.register(MockPriceOracle, ());
+        let oracle = MockPriceOracleClient::new(&env, &oracle_id);
+        for asset in [collateral_asset.clone(), borrowed_asset.clone()] {
+            oracle.set_price(
+                &asset,
+                &PriceQuote {
+                    decimals: 7,
+                    price: lending::SCALAR_7,
+                    valid_until: u64::MAX,
+                },
+            );
+        }
+
+        let admin = Address::generate(&env);
+        let supplier = Address::generate(&env);
+        let late_supplier = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let pool_id = register_lending_pool(
+            &env,
+            &backstop_id,
+            &admin,
+            &oracle_id,
+            &vec![&env, collateral_asset.clone(), borrowed_asset.clone()],
+        );
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        let pool = PoolContractClient::new(&env, &pool_id);
+
+        borrowed_admin.mint(&supplier, &(1_000 * lending::SCALAR_7));
+        collateral_admin.mint(&borrower, &(100 * lending::SCALAR_7));
+        pool.submit(
+            &supplier,
+            &supplier,
+            &supplier,
+            &vec![
+                &env,
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 1_000 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY,
+                },
+            ],
+        );
+        pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &vec![
+                &env,
+                Request {
+                    address: collateral_asset,
+                    amount: 100 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY_COLLATERAL,
+                },
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 70 * lending::SCALAR_7,
+                    request_type: ACTION_BORROW,
+                },
+            ],
+        );
+
+        pool.set_emissions_config(&vec![
+            &env,
+            ReserveEmissionMetadata {
+                res_index: 1,
+                res_type: 0,
+                share: 1,
+            },
+            ReserveEmissionMetadata {
+                res_index: 1,
+                res_type: 1,
+                share: 1,
+            },
+        ]);
+        assert_eq!(pool.emissions_config().get(2), Some(1));
+        assert_eq!(pool.emissions_config().get(3), Some(1));
+        backstop.set_pool_emission_amount(&(14 * lending::SCALAR_7 + 1));
+        assert_eq!(pool.gulp_emissions(), 14 * lending::SCALAR_7 + 1);
+        assert_eq!(pool.emission_pool_carry(), 1);
+        assert_eq!(
+            pool.reserve_emission(&2).unwrap().remaining,
+            7 * lending::SCALAR_7
+        );
+        assert_eq!(
+            pool.reserve_emission(&3).unwrap().remaining,
+            7 * lending::SCALAR_7
+        );
+
+        // A supplier entering halfway through the stream starts at the
+        // current bToken index and cannot capture the first half.
+        env.ledger()
+            .set_timestamp(1_000 + lending::SECONDS_PER_WEEK / 2);
+        borrowed_admin.mint(&late_supplier, &(1_000 * lending::SCALAR_7));
+        pool.submit(
+            &late_supplier,
+            &late_supplier,
+            &late_supplier,
+            &vec![
+                &env,
+                Request {
+                    address: borrowed_asset,
+                    amount: 1_000 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY,
+                },
+            ],
+        );
+
+        env.ledger()
+            .set_timestamp(1_000 + lending::SECONDS_PER_WEEK);
+        let supplier_claim = pool.claim(&supplier, &vec![&env, 3], &recipient);
+        let late_supplier_claim = pool.claim(&late_supplier, &vec![&env, 3], &recipient);
+        let borrower_claim = pool.claim(&borrower, &vec![&env, 2], &recipient);
+        // Interest accrued before the late deposit changes the bToken
+        // exchange rate and therefore its minted share count. The two supply
+        // claims still conserve the seven-BLND stream aside from scoped dust.
+        assert!(supplier_claim > 52_500_000);
+        assert!(late_supplier_claim < 17_500_000);
+        assert_eq!(borrower_claim, 7 * lending::SCALAR_7);
+        let supply_claims = supplier_claim + late_supplier_claim;
+        assert!(supply_claims <= 7 * lending::SCALAR_7);
+        assert!(7 * lending::SCALAR_7 - supply_claims <= 1);
+        let reserve_carry = pool.reserve_emission(&3).unwrap().carry;
+        assert_eq!(supply_claims + reserve_carry, 7 * lending::SCALAR_7);
+        assert_eq!(
+            backstop.pool_emission_claimed(),
+            borrower_claim + supply_claims
+        );
+        assert_eq!(backstop.pool_emission_recipient(), Some(recipient));
+    }
+
+    #[test]
+    fn emission_configuration_and_claims_require_v2_pool_admin_and_owner_auth() {
+        let env = Env::default();
+        let backstop_id = env.register(MockBackstop, ());
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let lending_config = LendingConfig {
+            backstop_take_rate: 0,
+            max_positions: 2,
+            min_collateral: 0,
+            oracle: Address::generate(&env),
+            price_decimals: 7,
+        };
+        let pool_id = register_custom_lending_pool(
+            &env,
+            &backstop_id,
+            &admin,
+            &lending_config,
+            &vec![&env, reserve_config(&asset, 0)],
+        );
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let metadata = vec![
+            &env,
+            ReserveEmissionMetadata {
+                res_index: 0,
+                res_type: 1,
+                share: 1,
+            },
+        ];
+
+        assert!(pool.try_set_emissions_config(&metadata).is_err());
+        pool.mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &pool_id,
+                fn_name: "set_emissions_config",
+                args: (metadata.clone(),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .set_emissions_config(&metadata);
+
+        let reserve_token_ids = vec![&env, 1_u32];
+        assert!(pool
+            .try_claim(&user, &reserve_token_ids, &recipient)
+            .is_err());
+        assert_eq!(
+            pool.mock_auths(&[MockAuth {
+                address: &user,
+                invoke: &MockAuthInvoke {
+                    contract: &pool_id,
+                    fn_name: "claim",
+                    args: (user.clone(), reserve_token_ids.clone(), recipient.clone())
+                        .into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .claim(&user, &reserve_token_ids, &recipient),
+            0
+        );
+    }
+
+    #[test]
+    fn first_supply_after_zero_supply_keeps_v2_stream_behavior() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        env.ledger().set_timestamp(1_000);
+        let token_admin = Address::generate(&env);
+        let asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let asset_admin = StellarAssetClient::new(&env, &asset);
+        let backstop_id = env.register(MockBackstop, ());
+        let backstop = MockBackstopClient::new(&env, &backstop_id);
+        let oracle_id = env.register(MockPriceOracle, ());
+        MockPriceOracleClient::new(&env, &oracle_id).set_price(
+            &asset,
+            &PriceQuote {
+                decimals: 7,
+                price: lending::SCALAR_7,
+                valid_until: u64::MAX,
+            },
+        );
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let pool_id = register_lending_pool(
+            &env,
+            &backstop_id,
+            &admin,
+            &oracle_id,
+            &vec![&env, asset.clone()],
+        );
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        let pool = PoolContractClient::new(&env, &pool_id);
+        pool.set_emissions_config(&vec![
+            &env,
+            ReserveEmissionMetadata {
+                res_index: 0,
+                res_type: 1,
+                share: 1,
+            },
+        ]);
+        backstop.set_pool_emission_amount(&(7 * lending::SCALAR_7));
+        assert_eq!(pool.gulp_emissions(), 7 * lending::SCALAR_7);
+
+        env.ledger()
+            .set_timestamp(1_000 + lending::SECONDS_PER_WEEK / 2);
+        asset_admin.mint(&user, &(100 * lending::SCALAR_7));
+        pool.submit(
+            &user,
+            &user,
+            &user,
+            &vec![
+                &env,
+                Request {
+                    address: asset,
+                    amount: 100 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY,
+                },
+            ],
+        );
+        // V2 does not advance an emission index while token supply is zero.
+        // The first supplier therefore participates in the still-unresolved
+        // stream from its original start rather than burning that allocation.
+        env.ledger()
+            .set_timestamp(1_000 + lending::SECONDS_PER_WEEK);
+        assert_eq!(
+            pool.claim(&user, &vec![&env, 1], &recipient),
+            7 * lending::SCALAR_7
+        );
+    }
+
+    #[test]
+    fn emission_index_uses_each_reserve_token_decimal_scale() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        env.ledger().set_timestamp(1_000);
+        let token_admin = Address::generate(&env);
+        let asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let asset_admin = StellarAssetClient::new(&env, &asset);
+        let backstop_id = env.register(MockBackstop, ());
+        let backstop = MockBackstopClient::new(&env, &backstop_id);
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let supply = 100_000_000_000_000_000_000_000_000_i128;
+        let mut reserve = reserve_config(&asset, 0);
+        reserve.decimals = 18;
+        reserve.supply_cap = supply;
+        let pool_id = register_custom_lending_pool(
+            &env,
+            &backstop_id,
+            &admin,
+            &LendingConfig {
+                backstop_take_rate: 0,
+                max_positions: 2,
+                min_collateral: 0,
+                oracle: Address::generate(&env),
+                price_decimals: 7,
+            },
+            &vec![&env, reserve],
+        );
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        let pool = PoolContractClient::new(&env, &pool_id);
+        asset_admin.mint(&user, &supply);
+        pool.submit(
+            &user,
+            &user,
+            &user,
+            &vec![
+                &env,
+                Request {
+                    address: asset,
+                    amount: supply,
+                    request_type: ACTION_SUPPLY,
+                },
+            ],
+        );
+        pool.set_emissions_config(&vec![
+            &env,
+            ReserveEmissionMetadata {
+                res_index: 0,
+                res_type: 1,
+                share: 1,
+            },
+        ]);
+        backstop.set_pool_emission_amount(&(7 * lending::SCALAR_7));
+        assert_eq!(pool.gulp_emissions(), 7 * lending::SCALAR_7);
+
+        env.ledger()
+            .set_timestamp(1_000 + lending::SECONDS_PER_WEEK);
+        assert_eq!(
+            pool.claim(&user, &vec![&env, 1], &recipient),
+            7 * lending::SCALAR_7
+        );
+    }
+
+    #[test]
+    fn emission_configuration_rejects_empty_duplicate_and_invalid_token_ids() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let asset = Address::generate(&env);
+        let pool_id = register_custom_lending_pool(
+            &env,
+            &Address::generate(&env),
+            &Address::generate(&env),
+            &LendingConfig {
+                backstop_take_rate: 0,
+                max_positions: 2,
+                min_collateral: 0,
+                oracle: Address::generate(&env),
+                price_decimals: 7,
+            },
+            &vec![&env, reserve_config(&asset, 0)],
+        );
+        let pool = PoolContractClient::new(&env, &pool_id);
+        assert!(pool.try_set_emissions_config(&Vec::new(&env)).is_err());
+        assert!(pool
+            .try_set_emissions_config(&vec![
+                &env,
+                ReserveEmissionMetadata {
+                    res_index: 0,
+                    res_type: 1,
+                    share: 1,
+                },
+                ReserveEmissionMetadata {
+                    res_index: 0,
+                    res_type: 1,
+                    share: 2,
+                },
+            ])
+            .is_err());
+        for invalid in [
+            ReserveEmissionMetadata {
+                res_index: 0,
+                res_type: 1,
+                share: 0,
+            },
+            ReserveEmissionMetadata {
+                res_index: 0,
+                res_type: 2,
+                share: 1,
+            },
+            ReserveEmissionMetadata {
+                res_index: 1,
+                res_type: 0,
+                share: 1,
+            },
+        ] {
+            assert!(pool.try_set_emissions_config(&vec![&env, invalid]).is_err());
+        }
     }
 
     #[test]

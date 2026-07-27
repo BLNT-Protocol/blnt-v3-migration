@@ -1697,6 +1697,53 @@ Changing configuration MUST checkpoint affected emission indexes first and
 MUST NOT alter past accrual. Integer remainder at the pool, reserve-token, or
 user scope MUST be carried forward only at that same scope.
 
+The reserve-token identifier follows v2 exactly:
+
+\[
+I = 2r + t
+\]
+
+where \(r\) is the immutable reserve index, \(t=0\) selects debt/dTokens, and
+\(t=1\) selects supply/bTokens. A supply balance includes both ordinary supply
+and collateral bTokens. Configuration is nonempty, contains no duplicate
+identifier, is bounded by the 30-reserve / 60-token pool limits, and accepts
+only positive relative weights.
+
+A registered pool MUST authorize its call that moves accrued
+\(E_{\mathrm{pool},p}\) into a pool-specific candidate reservation. A positive
+reservation is permitted at most once per 24 hours. The pool MUST reject a
+gulp below one BLND, preserving v2's minimum; because the candidate call and
+pool call are atomic, rejection leaves the candidate's accrued tranche
+available for a later gulp. The candidate MUST retain custody of the reserved
+BLND. It MUST NOT grant a token allowance or count reservation as a claim.
+
+Each enabled configured identifier receives its floor-rounded proportional
+allocation and the pool-local remainder carries into the next gulp. A
+reserve-token allocation is streamed over seven days. A later gulp first
+checkpoints the existing stream, combines its exact unvested amount with the
+new allocation, and restarts the seven-day horizon as in v2. Whole BLND base
+units that cannot yet be represented by the scaled reserve-token index remain
+reserve-token-local carry. The index scale is \(10^{d_r}\times10^7\), where
+\(d_r\) is that reserve's immutable token-decimal count, matching v2 for every
+supported reserve precision. Each user checkpoint separately retains its
+sub-base-unit scaled carry.
+
+Every supply, collateral, borrow, repay, liquidation transfer, bad-debt
+handoff, supplier default, and applicable reserve-configuration mutation MUST
+checkpoint the affected reserve-token stream and user balance before changing
+that balance or its total supply. A late entrant therefore starts at the
+current index and cannot receive earlier streamed BLND. Existing streams
+continue after an identifier is removed from future configuration.
+
+The position owner MUST authorize a claim over a nonempty bounded list of
+unique valid identifiers and MAY select the recipient. The pool checkpoints
+the selected streams, clears only those user accruals, and, when the sum is
+positive, authorizes the candidate to consume exactly that amount from the
+pool reservation and transfer BLND directly to the recipient. Pool state,
+candidate reservation, aggregate claimed accounting, and token transfer MUST
+commit or roll back atomically. This payout increases total ongoing claimed
+BLND but not the backstop-depositor claimed counter.
+
 ## 11. Protocol fees and interest accounting
 
 No ongoing protocol fee is approved by this specification.
@@ -1894,14 +1941,16 @@ coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording transaction and cost evidence. A completed wall-clock
 local run, the public-testnet exercise, a production LP valuation source for
-non-emission policy, and the 30% supply/borrow emission path remain
-intentionally unimplemented. Milestone 10's policy arithmetic, admin and
-pending-loss policies, canonical spot-composition read boundary,
+non-emission policy remain intentionally unimplemented. Milestone 10's policy
+arithmetic, admin and pending-loss policies, canonical spot-composition read
+boundary,
 permissionless maximum-30 reward-zone membership, emitter reconciliation,
 pool-level accrual and carry, production distribution checkpoint writer,
 two-tier per-share indexes, per-user backstop checkpoints, and owner-authorized
-backstop claims are implemented. Supply/borrow emission configuration,
-reserve-token accumulators, and their claims remain unimplemented.
+backstop claims are implemented. The 30% path now includes v2-compatible
+admin-selected reserve-token weights, once-daily pool reservation, seven-day
+supply/debt streams, mutation-time checkpoints, scoped carry, and
+owner-authorized claims paid directly from candidate custody.
 
 New economic features should be introduced only after the corresponding open
 decision is resolved in this specification.

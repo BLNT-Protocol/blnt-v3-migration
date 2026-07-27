@@ -5,7 +5,7 @@ use soroban_sdk::{
 
 use crate::{
     auction::{self, ACTION_DELETE_LIQUIDATION, ACTION_FILL_USER_LIQUIDATION},
-    get_backstop, get_status, require_action_allowed, set_backstop_liability, PoolError,
+    emissions, get_backstop, get_status, require_action_allowed, set_backstop_liability, PoolError,
 };
 
 pub const SCALAR_7: i128 = 10_000_000;
@@ -386,6 +386,7 @@ pub(crate) fn set_reserve(env: &Env, asset: &Address) -> u32 {
     let index = if assets.contains(asset.clone()) {
         let current = reserve_config(env, asset);
         validate_reserve_config_change(env, &current, &queued.update);
+        emissions::checkpoint_reserve(env, current.index);
         let mut reserve = accrue_reserve(env, asset);
         if current.r_base != queued.update.r_base
             || current.r_one != queued.update.r_one
@@ -539,6 +540,22 @@ pub(crate) fn submit(
         {
             panic_with_error!(env, PoolError::ReserveDisabled);
         }
+        let reserve_token_id = reserve
+            .config
+            .index
+            .checked_mul(2)
+            .and_then(|value| {
+                value.checked_add(
+                    if request.request_type == ACTION_BORROW || request.request_type == ACTION_REPAY
+                    {
+                        0
+                    } else {
+                        1
+                    },
+                )
+            })
+            .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError));
+        emissions::checkpoint_before_lending_change(env, from, &user, &reserve, reserve_token_id);
 
         let (event_amount, position_delta) = match request.request_type {
             ACTION_SUPPLY => {
@@ -707,7 +724,7 @@ pub(crate) fn submit(
             panic_with_error!(env, PoolError::InvalidTokenBalance);
         }
     }
-    set_positions(env, from, &user);
+    set_positions_after_emission_checkpoint(env, from, &user);
     user
 }
 
@@ -833,6 +850,16 @@ fn reserve_config_from_update(
 }
 
 pub(crate) fn set_positions(env: &Env, user: &Address, positions: &Positions) {
+    let previous = self::positions(env, user);
+    emissions::checkpoint_position_changes(env, user, &previous, positions);
+    set_positions_after_emission_checkpoint(env, user, positions);
+}
+
+pub(crate) fn set_positions_after_emission_checkpoint(
+    env: &Env,
+    user: &Address,
+    positions: &Positions,
+) {
     let key = LendingPersistentKey::Positions(user.clone());
     env.storage().persistent().set(&key, positions);
     env.storage()
@@ -848,6 +875,7 @@ pub(crate) fn set_positions(env: &Env, user: &Address, positions: &Positions) {
 /// `positions` after all atomic defaults have been applied.
 pub(crate) fn default_liability_to_suppliers(
     env: &Env,
+    owner: &Address,
     positions: &mut Positions,
     asset: &Address,
     amount: i128,
@@ -862,6 +890,12 @@ pub(crate) fn default_liability_to_suppliers(
     {
         panic_with_error!(env, PoolError::InvalidAuctionBid);
     }
+    let reserve_token_id = reserve
+        .config
+        .index
+        .checked_mul(2)
+        .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError));
+    emissions::checkpoint_before_lending_change(env, owner, positions, &reserve, reserve_token_id);
 
     let default_amount = to_asset_from_d_tokens(env, &reserve, amount);
     let previous_b_rate = reserve.data.b_rate;
@@ -1271,7 +1305,7 @@ fn require_positive(env: &Env, amount: i128) {
     }
 }
 
-fn pow10(env: &Env, decimals: u32) -> i128 {
+pub(crate) fn pow10(env: &Env, decimals: u32) -> i128 {
     10_i128
         .checked_pow(decimals)
         .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError))
@@ -1389,7 +1423,6 @@ mod tests {
                 &soroban_sdk::vec![&env, initial_config.clone()],
             ),
         );
-
         env.as_contract(&contract, || {
             let modified_ir_mod = SCALAR_7 + 123;
             let mut data = reserve_data(&env, &initial_config.asset);
@@ -1510,6 +1543,7 @@ mod tests {
     fn supplier_default_matches_v2_ceiling_rounding_and_zero_saturation() {
         let env = Env::default();
         let reserve = interest_config(&env);
+        let owner = Address::generate(&env);
         let lending_config = LendingConfig {
             backstop_take_rate: 0,
             max_positions: 2,
@@ -1544,7 +1578,8 @@ mod tests {
             let mut positions = Positions::empty(&env);
             positions.liabilities.set(0, 2);
 
-            let result = default_liability_to_suppliers(&env, &mut positions, &reserve.asset, 2);
+            let result =
+                default_liability_to_suppliers(&env, &owner, &mut positions, &reserve.asset, 2);
 
             assert_eq!(result, (4, 2 * SCALAR_12, 666_666_666_666));
             assert!(positions.liabilities.is_empty());
@@ -1568,7 +1603,8 @@ mod tests {
             );
             positions.liabilities.set(0, 4);
 
-            let saturated = default_liability_to_suppliers(&env, &mut positions, &reserve.asset, 4);
+            let saturated =
+                default_liability_to_suppliers(&env, &owner, &mut positions, &reserve.asset, 4);
 
             assert_eq!(saturated, (8, SCALAR_12, 0));
             assert!(positions.liabilities.is_empty());

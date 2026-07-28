@@ -1554,11 +1554,17 @@ The candidate MUST preserve v2's bounded reward-zone shape:
   the entrant must have strictly greater eligible underlying-BLND weight than
   that member.
 - A pool cannot appear twice.
-- Reward-zone edits after the first entry require a distribution checkpoint
-  within the preceding hour, matching v2's protection against retroactive
-  disruption, except for the allocation-neutral removal of a zero-weight
-  member. This separately inherited rule means any weight-bearing membership
-  edit can affect an unresolved interval of up to one hour.
+- Before migration activation, any number of qualified pools up to the
+  30-member bound may enter, and a positive-weight member below maintenance may
+  be removed, without a distribution checkpoint. No ongoing candidate
+  emissions can accrue during that phase, so these edits cannot reassign an
+  unresolved interval.
+- After migration activation, reward-zone edits after the first entry require
+  a distribution checkpoint within the preceding hour, matching v2's
+  protection against retroactive disruption, except for the
+  allocation-neutral removal of a zero-weight member. This separately
+  inherited rule means any post-activation weight-bearing membership edit can
+  affect an unresolved interval of up to one hour.
 
 Pool activation remains independent of reward-zone admission. A pool backed
 only by at least 12,500 USDC can activate, but it earns no BLND and cannot enter
@@ -2017,7 +2023,7 @@ pool-and-reserve-isolated pending interest credit and carry, canonical
 `5:5:4` credit allocation, cyclic single-tier interest-auction selection,
 120%-value tier-token bids, v2-curve partial fills, share-free bid donation,
 and permissionless stale-lot recovery.
-The local runner and isolated public-testnet wrapper deploy independently
+The local runner and isolated public-testnet wrappers deploy independently
 issued assets, a coherent
 SDK-22 incumbent stack, and the SDK-27 candidate stack under testnet resource
 limits while recording source commits, artifact digests, transaction results,
@@ -2025,10 +2031,25 @@ and cost evidence. The deployable backstop spec omits prose documentation from
 the WASM target while retaining it in native Rust documentation, and the build
 enforces a conservative 120,000-byte optimized-WASM ceiling after deployment
 testing found that the earlier 126,044-byte artifact exceeded Protocol-27
-testnet CPU limits during upload. A completed wall-clock local run, a completed
-public-testnet exercise, selection and due diligence of the concrete SEP-40
-deployment address, and resource simulation against that provider's exact WASM
-and initialized storage remain intentionally unimplemented. The production LP
+testnet CPU limits during upload. A completed wall-clock local run and the
+time-gated completion of both public-testnet exercises remain in progress.
+The second public-testnet lane has completed its queue-open deployment using
+native XLM, synthetic BLND and USDC, fresh real 80:20 BLND:USDC and BLND:XLM
+Comets, a bounded test-only SEP-40 oracle, and the optimized production
+valuation adapter. Its two live adapter quotes and exact Comet bindings passed,
+and its unshortened legacy-emitter queue unlocks on 2026-08-27. This controlled
+fixture is deployment evidence, not provider qualification. The current
+production fixture was freshly redeployed with Fixed v3 as its primary
+migration-verification and post-migration emission pool from construction,
+with YieldBlox v3 registered alongside it. A fail-closed, evidence-producing
+provider qualification, deployment, and four-quote simulation lane is
+implemented, but no concrete production-provider SEP-40 deployment has passed
+it: the official Reflector public Stellar-DEX feeds
+checked on 2026-07-27 lack
+the exact BLND asset, and the testnet mirror also lacks the expected
+native-XLM asset. Concrete-provider approval and the final atomic candidate
+resource simulation against that provider's exact WASM and initialized storage
+therefore remain intentionally incomplete. The production LP
 valuation contract, immutable TWAP policy, conservative Comet formula, and a
 generic optimized-WASM regression with 25 independently stored ticks per asset
 are implemented. Milestone 10's policy

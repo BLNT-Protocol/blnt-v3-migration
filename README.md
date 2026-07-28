@@ -30,10 +30,14 @@ See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the candidate requirements,
 [docs/BASELINE.md](docs/BASELINE.md) for the baseline policy, and
 [docs/MIGRATION_TEST_PLAN.md](docs/MIGRATION_TEST_PLAN.md) for the migration
 test requirements. The production LP-pricing design is documented in
-[docs/VALUATION_ADAPTER.md](docs/VALUATION_ADAPTER.md). Operational
-instructions live in
+[docs/VALUATION_ADAPTER.md](docs/VALUATION_ADAPTER.md), with the fail-closed
+provider qualification and deployment process in
+[docs/ORACLE_DEPLOYMENT.md](docs/ORACLE_DEPLOYMENT.md). Operational instructions
+live in
 [docs/LOCALNET_MIGRATION.md](docs/LOCALNET_MIGRATION.md) and
-[docs/TESTNET_MIGRATION.md](docs/TESTNET_MIGRATION.md).
+[docs/TESTNET_MIGRATION.md](docs/TESTNET_MIGRATION.md). The isolated
+production-adapter testnet lane is documented in
+[docs/TESTNET_PRODUCTION_MIGRATION.md](docs/TESTNET_PRODUCTION_MIGRATION.md).
 
 ## Toolchain lanes
 

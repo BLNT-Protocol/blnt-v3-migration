@@ -11,6 +11,8 @@ local.*
 
 /js
 
-# Isolated migration-runner keys, deployment state, and cost logs.
+# Isolated runner keys, deployment state, evidence, and cost logs.
 /.localnet*/
 /.testnet/
+/.testnet-production/
+/.oracle-validation/

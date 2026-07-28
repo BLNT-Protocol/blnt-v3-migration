@@ -7,7 +7,10 @@ and verified backstop exhaustion. It also returns current underlying BLND for
 the candidate's reward-zone eligibility boundary.
 
 The deterministic adapter in `v3/test-valuation-adapter` is a localnet and test
-fixture. It MUST NOT be deployed as the production candidate's adapter.
+fixture. Its asset bindings are immutable, while its test-only price and
+valuation setters require authorization from the fixture administrator bound
+at construction. It MUST NOT be deployed as the production candidate's
+adapter.
 
 ## Immutable deployment configuration
 
@@ -133,3 +136,12 @@ Before a public deployment:
 An audited adapter cannot make an untrusted or compromised feed trustworthy.
 Feed selection remains a deployment security decision and must be disclosed to
 depositors.
+
+The automated qualification and deployment lane is documented in
+[`ORACLE_DEPLOYMENT.md`](ORACLE_DEPLOYMENT.md). As of 2026-07-27, both official
+Reflector Stellar-DEX public deployments fail the immutable compatibility
+gates: neither advertises the exact BLND asset, and the testnet mirror also
+lacks the expected native-XLM asset. No concrete provider has been approved and
+no production-provider-backed adapter has been deployed. The isolated public
+testnet exercise uses the production adapter code against an explicitly
+controlled test-only SEP-40 fixture; it is not a production price deployment.

@@ -6,6 +6,7 @@ members = [
     "compat-tests",
     "pool",
     "pool-factory",
+    "test-sep40-oracle",
     "test-valuation-adapter",
     "valuation-adapter",
 ]

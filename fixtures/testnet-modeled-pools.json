@@ -1,0 +1,200 @@
+{
+  "source": {
+    "captured_at": "2026-07-27",
+    "fixed_pool_v2": "CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD",
+    "yieldblox_pool_v2": "CCCCIQSDILITHMM7PBSLVDT5MISSY7R26MNZXCX4H7J5JQ5FPIYOGYFS"
+  },
+  "prices": {
+    "XLM": 2500000,
+    "USDC": 10000000,
+    "EURC": 10000000,
+    "AQUA": 10000,
+    "USDGLO": 10000000,
+    "USTRY": 10000000,
+    "CETES": 10000000,
+    "PYUSD": 10000000
+  },
+  "pools": {
+    "fixed": {
+      "name": "Fixed Pool v2 model",
+      "backstop_take_rate": 2000000,
+      "max_positions": 6,
+      "min_collateral": 50000000,
+      "reserves": [
+        {
+          "asset": "XLM",
+          "config": {
+            "c_factor": 7500000,
+            "l_factor": 7500000,
+            "max_util": 7000000,
+            "r_base": 100000,
+            "r_one": 300000,
+            "r_three": 50000000,
+            "r_two": 3000000,
+            "reactivity": 50,
+            "supply_cap": "100000000000000000",
+            "util": 4000000
+          }
+        },
+        {
+          "asset": "USDC",
+          "config": {
+            "c_factor": 9500000,
+            "l_factor": 9500000,
+            "max_util": 9000000,
+            "r_base": 300000,
+            "r_one": 400000,
+            "r_three": 50000000,
+            "r_two": 1200000,
+            "reactivity": 20,
+            "supply_cap": "10000000000000000",
+            "util": 8000000
+          }
+        },
+        {
+          "asset": "EURC",
+          "config": {
+            "c_factor": 9500000,
+            "l_factor": 9500000,
+            "max_util": 9000000,
+            "r_base": 300000,
+            "r_one": 400000,
+            "r_three": 50000000,
+            "r_two": 1200000,
+            "reactivity": 20,
+            "supply_cap": "10000000000000000",
+            "util": 8000000
+          }
+        }
+      ]
+    },
+    "yieldblox": {
+      "name": "YieldBlox Pool v2 model",
+      "backstop_take_rate": 2000000,
+      "max_positions": 6,
+      "min_collateral": 50000000,
+      "reserves": [
+        {
+          "asset": "XLM",
+          "config": {
+            "c_factor": 7500000,
+            "l_factor": 7500000,
+            "max_util": 7000000,
+            "r_base": 100000,
+            "r_one": 400000,
+            "r_three": 50000000,
+            "r_two": 3000000,
+            "reactivity": 20,
+            "supply_cap": "10000000000000000",
+            "util": 5000000
+          }
+        },
+        {
+          "asset": "USDC",
+          "config": {
+            "c_factor": 9500000,
+            "l_factor": 9500000,
+            "max_util": 9500000,
+            "r_base": 300000,
+            "r_one": 400000,
+            "r_three": 50000000,
+            "r_two": 1200000,
+            "reactivity": 20,
+            "supply_cap": "2000000000000000",
+            "util": 8000000
+          }
+        },
+        {
+          "asset": "EURC",
+          "config": {
+            "c_factor": 0,
+            "l_factor": 9000000,
+            "max_util": 9000000,
+            "r_base": 300000,
+            "r_one": 400000,
+            "r_three": 50000000,
+            "r_two": 1200000,
+            "reactivity": 20,
+            "supply_cap": "100000000000000",
+            "util": 7500000
+          }
+        },
+        {
+          "asset": "AQUA",
+          "config": {
+            "c_factor": 0,
+            "l_factor": 5000000,
+            "max_util": 7000000,
+            "r_base": 100000,
+            "r_one": 400000,
+            "r_three": 50000000,
+            "r_two": 3000000,
+            "reactivity": 20,
+            "supply_cap": "10000000000000000",
+            "util": 4000000
+          }
+        },
+        {
+          "asset": "USDGLO",
+          "config": {
+            "c_factor": 0,
+            "l_factor": 9000000,
+            "max_util": 9000000,
+            "r_base": 300000,
+            "r_one": 400000,
+            "r_three": 50000000,
+            "r_two": 1200000,
+            "reactivity": 20,
+            "supply_cap": "1000000000000",
+            "util": 7500000
+          }
+        },
+        {
+          "asset": "USTRY",
+          "config": {
+            "c_factor": 0,
+            "l_factor": 9000000,
+            "max_util": 8000000,
+            "r_base": 100000,
+            "r_one": 200000,
+            "r_three": 50000000,
+            "r_two": 1000000,
+            "reactivity": 20,
+            "supply_cap": "2500000000000",
+            "util": 5000000
+          }
+        },
+        {
+          "asset": "CETES",
+          "config": {
+            "c_factor": 0,
+            "l_factor": 8000000,
+            "max_util": 8000000,
+            "r_base": 100000,
+            "r_one": 300000,
+            "r_three": 50000000,
+            "r_two": 1200000,
+            "reactivity": 20,
+            "supply_cap": "200000000000000",
+            "util": 5000000
+          }
+        },
+        {
+          "asset": "PYUSD",
+          "config": {
+            "c_factor": 9000000,
+            "l_factor": 9000000,
+            "max_util": 9000000,
+            "r_base": 300000,
+            "r_one": 400000,
+            "r_three": 50000000,
+            "r_two": 1200000,
+            "reactivity": 20,
+            "supply_cap": "50000000000000",
+            "util": 7500000
+          }
+        }
+      ]
+    }
+  }
+}

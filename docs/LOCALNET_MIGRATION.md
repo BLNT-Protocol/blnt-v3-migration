@@ -24,25 +24,27 @@ composition to the candidate's emission calculation. Their isolated initial
 balances and the test valuation adapter remain deterministic fixtures; they do
 not represent production market pricing or liquidity.
 
-The runner also deploys a test-only immutable valuation adapter. It values
-each configured LP token one-for-one in both USDC and underlying BLND so the
-canonical valuation call path can be exercised deterministically, and exposes
-the same one-USDC fixture price through the lending-oracle interface. This
-fixture is not a production oracle and MUST NOT be used as a production pricing
-source.
+The runner also deploys a test-only valuation adapter with immutable asset
+bindings. It values each configured LP token one-for-one in both USDC and
+underlying BLND so the canonical valuation call path can be exercised
+deterministically, and exposes the same one-USDC fixture price through the
+lending-oracle interface. Its mutable fixture setters require authorization
+from the isolated runner operator bound at construction. This fixture is not a
+production oracle and MUST NOT be used as a production pricing source.
 
-The migration runner deploys its registered pool with one isolated
-`BLNDUSDC` reserve. It deposits enough plain USDC to cross the candidate's
-$12,500 activation threshold, retains positive BLND:USDC weight, moves the
-pool to Admin Active, adds it to the reward zone, configures the reserve's
-supply side for emissions, and seeds a depositor supply position. This makes
-the same wall-clock fixture capable of exercising ongoing BLND distribution
-after migration.
+The migration runner deploys matched Fixed-pool models against the incumbent
+and candidate, each with `XLM`, `USDC`, and `EURC` reserves. The candidate pool
+receives enough plain USDC to cross the $12,500 activation threshold, retains
+positive BLND:USDC weight, moves to Admin Active, enters the reward zone, and
+routes its pool emission tranche to EURC borrowing. The incumbent Fixed pool
+holds the comparison-side BLND:USDC backstop balance used by the emitter's
+migration qualification.
 
 The classic-asset issuer/operator and candidate depositor use separate local
-identities. The runner creates the depositor's `BLND`, `USDC`, and `XLM`
-trustlines explicitly, initializes both Comet pools, and mints the legacy LP
-position before funding the candidate backstop and lending supply position.
+identities. The runner creates the depositor's `BLND`, `USDC`, `XLM`, and
+`EURC` trustlines explicitly, initializes both Comet pools, and mints the
+BLND:USDC LP positions before funding the two backstops and candidate lending
+positions.
 
 The local operator pays for deployment and migration transactions but receives
 no continuing protocol authority. The exercise uses only the legacy emitter's
@@ -191,8 +193,9 @@ network.
 `.localnet/state.json` contains the source commit, dirty-source indicator,
 source-patch digest, artifact digests, public deployment identifiers, and
 lifecycle timestamps. A dirty deployment also retains the contract-source
-patch in its run directory. The runner rejects untracked files below `v3/`,
-because `git diff` cannot include their contents in that patch. Every upload,
+patch in its run directory. The runner rejects non-ignored untracked
+repository files, because `git diff` cannot include their contents in that
+patch. Every upload,
 deployment, invocation, and view stores its result and `--cost` diagnostics in
 the run directory recorded by that state file.
 When an operation label is reused, the runner adds a UTC timestamp and, if

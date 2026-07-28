@@ -270,7 +270,11 @@ For a multi-asset activation formula, test:
   invocation limits.
 - Before public deployment, repeat the resource regression against the exact
   selected oracle WASM and initialized storage layout. The conservative generic
-  fixture does not replace provider-specific simulation.
+  fixture does not replace provider-specific simulation. The isolated
+  `scripts/valuation-oracle.sh` lane MUST fail closed on provider identity,
+  asset membership, history shape, freshness, and exact-WASM collection before
+  it can deploy the adapter or record the four post-deployment quote
+  simulations.
 - Queued withdrawals and assets already committed to covering losses.
 - Consistent activation valuation for pool-status and reward-zone threshold
   decisions.
@@ -649,9 +653,12 @@ The v3 tests must verify:
   maintenance threshold and requires no distribution checkpoint.
 - Permissionless full-zone replacement requires the entrant to have strictly
   more eligible underlying BLND than the named member.
-- Every reward-zone edit after its first member requires a distribution
-  checkpoint within the preceding hour except allocation-neutral zero-weight
-  removal.
+- Multiple qualified pools can enter, and a positive-weight member below the
+  maintenance threshold can be removed, before migration activation without a
+  distribution checkpoint, when no ongoing candidate emissions can accrue.
+- Every post-activation reward-zone edit after its first member requires a
+  distribution checkpoint within the preceding hour except
+  allocation-neutral zero-weight removal.
 - The permissionless production distributor writes that checkpoint only after
   emitter reconciliation, every bounded pool allocation, carry update, and
   aggregate conservation check succeeds.
@@ -794,9 +801,12 @@ read-path TTL renewal MUST be extended explicitly rather than mutated through
 an economic contract entry point. Asset-contract instances whose supported
 read paths renew less than that cadence MUST also be extended explicitly.
 The keepalive MUST fail unless the live queue still matches the saved
-candidate, next designated token, and unlock time and the candidate retains a
-strict legacy-token balance majority. Repeated monitoring MUST retain earlier
-results and resource-cost evidence rather than overwrite them.
+candidate, next designated token, and unlock time, the candidate retains a
+strict legacy-token balance majority, and every deployed modeled pool and
+lending oracle is renewed successfully. It MUST record its last-success
+timestamp only after those mandatory renewals complete. Repeated monitoring
+MUST retain earlier results and resource-cost evidence rather than overwrite
+them.
 
 Native tests MUST advance ledger sequence through the 83 days from earliest
 preparation through the two-retry horizon and verify the candidate's 89/90-day
@@ -814,3 +824,24 @@ legacy-emitter swap into optimized SDK-27 candidate WASM.
 
 Public testnet should use independently issued test assets rather than relying
 on the supply of official test BLND or USDC.
+
+An additional isolated public-testnet lane MUST exercise the optimized
+production valuation adapter with synthetic BLND and USDC, native Friendbot-
+funded XLM, and freshly initialized real 80:20 BLND:USDC and BLND:XLM Comet
+contracts. A bounded authenticated test SEP-40 fixture MAY provide controlled
+BLND/USDC and XLM/USDC histories for this deployment-compatibility exercise,
+but MUST be identified as non-production and MUST NOT count as provider
+qualification. Its state directory and identities MUST remain independent of
+any exact-clock testnet migration already in progress. The modeled Fixed v3
+pool SHOULD serve as this lane's primary migration, verification, and
+post-migration emission pool.
+
+Every mutable test oracle deployed on public testnet MUST bind an immutable
+runner administrator at construction and require that address's authorization
+for fixture updates. Verification MUST compare each modeled v3 lending
+oracle's reported administrator with the recorded isolated operator.
+
+Modeled v2 reserve setup MUST be resumable across its non-atomic
+`queue_set_reserve` / `set_reserve` sequence. If interruption occurs after the
+queue transaction commits, the next run MUST finalize the existing unlocked
+queue instead of submitting a duplicate queue.

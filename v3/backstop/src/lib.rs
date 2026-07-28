@@ -1101,11 +1101,19 @@ impl BackstopContract {
     #[cfg_attr(not(target_family = "wasm"), doc = r#""#)]
     #[cfg_attr(
         not(target_family = "wasm"),
-        doc = r#" The first member needs no earlier distribution. Every later edit"#
+        doc = r#" Before migration activates, qualified members need no distribution"#
     )]
     #[cfg_attr(
         not(target_family = "wasm"),
-        doc = r#" requires a completed distribution checkpoint within the preceding hour."#
+        doc = r#" checkpoint because ongoing emissions cannot yet accrue. After activation,"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" every edit after the first member requires a completed distribution"#
+    )]
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        doc = r#" checkpoint within the preceding hour."#
     )]
     #[cfg_attr(
         not(target_family = "wasm"),
@@ -3883,7 +3891,7 @@ fn add_to_reward_zone(env: &Env, to_add: &Address, to_remove: Option<&Address>) 
     if entrant_weight <= 0 {
         panic_with_error!(env, BackstopError::InvalidRewardZoneEntry);
     }
-    if !reward_zone.is_empty() {
+    if !reward_zone.is_empty() && env.storage().instance().has(&DataKey::ActivatedAt) {
         require_recent_distribution_checkpoint(env);
     }
 
@@ -3921,7 +3929,9 @@ fn remove_from_reward_zone(env: &Env, to_remove: &Address) {
         if quote_activation_values(env, &valuation.active_values, true).meets_threshold {
             panic_with_error!(env, BackstopError::InvalidRewardZoneEntry);
         }
-        require_recent_distribution_checkpoint(env);
+        if env.storage().instance().has(&DataKey::ActivatedAt) {
+            require_recent_distribution_checkpoint(env);
+        }
     }
     reward_zone.remove(remove_index);
     set_reward_zone(env, &reward_zone);
@@ -7265,7 +7275,7 @@ mod tests {
     }
 
     #[test]
-    fn reward_zone_is_permissionless_bounded_and_checkpoint_gated() {
+    fn reward_zone_allows_prefunding_members_then_is_checkpoint_gated_after_activation() {
         let fixture = RewardZoneFixture::create();
         let candidate = fixture.client();
         let blnd_amount = SCALAR_7;
@@ -7324,12 +7334,15 @@ mod tests {
             qualifying_usdc,
             0,
         );
-        assert!(candidate.try_add_reward(&second, &None).is_err());
-
-        fixture.set_checkpoint(
-            fixture.env.ledger().timestamp() - REWARD_ZONE_CHECKPOINT_MAX_AGE_SECONDS,
-        );
         candidate.add_reward(&second, &None);
+        assert_eq!(candidate.reward_zone_checkpoint(), None);
+        fixture.env.as_contract(&fixture.candidate, || {
+            fixture
+                .env
+                .storage()
+                .instance()
+                .set(&DataKey::ActivatedAt, &fixture.env.ledger().timestamp());
+        });
         fixture.env.ledger().set_timestamp(
             fixture.env.ledger().timestamp() + REWARD_ZONE_CHECKPOINT_MAX_AGE_SECONDS + 1,
         );
@@ -7450,7 +7463,7 @@ mod tests {
     }
 
     #[test]
-    fn reward_zone_removal_uses_maintenance_hysteresis_without_pool_status() {
+    fn reward_zone_removal_uses_maintenance_hysteresis_and_activation_checkpoint() {
         let fixture = RewardZoneFixture::create();
         let candidate = fixture.client();
         let pool = fixture.pool();
@@ -7465,6 +7478,31 @@ mod tests {
         );
         candidate.add_reward(&pool, &None);
 
+        fixture.set_tier_state(
+            &pool,
+            BackstopTier::Usdc,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - blnd_amount - 1,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - blnd_amount - 1,
+            0,
+        );
+        candidate.remove_reward(&pool);
+        assert!(candidate.reward_zone().is_empty());
+
+        fixture.set_tier_state(
+            &pool,
+            BackstopTier::Usdc,
+            ACTIVATION_ENTRY_THRESHOLD_USDC - blnd_amount,
+            ACTIVATION_ENTRY_THRESHOLD_USDC - blnd_amount,
+            0,
+        );
+        candidate.add_reward(&pool, &None);
+        fixture.env.as_contract(&fixture.candidate, || {
+            fixture
+                .env
+                .storage()
+                .instance()
+                .set(&DataKey::ActivatedAt, &fixture.env.ledger().timestamp());
+        });
         fixture.set_tier_state(
             &pool,
             BackstopTier::Usdc,

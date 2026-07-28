@@ -29,6 +29,20 @@ mod v3_test_valuation_adapter {
     );
 }
 
+fn register_test_valuation_adapter(
+    env: &Env,
+    blnd: &Address,
+    usdc: &Address,
+    blnd_usdc: &Address,
+    blnd_xlm: &Address,
+) -> Address {
+    let admin = Address::generate(env);
+    env.register(
+        v3_test_valuation_adapter::WASM,
+        (&admin, blnd, usdc, blnd_usdc, blnd_xlm),
+    )
+}
+
 #[derive(Clone)]
 #[contracttype]
 struct QueuedSwap {
@@ -393,14 +407,12 @@ impl Fixture {
         emitter.initialize(&blnd_id, &incumbent, &legacy_token_id);
         let candidate_id = Address::generate(&env);
         let pool_factory_id = env.register(MockPoolFactory, (&candidate_id,));
-        let valuation_adapter_id = env.register(
-            v3_test_valuation_adapter::WASM,
-            (
-                &configured_blnd_id,
-                &prefund_token_id,
-                &legacy_token_id,
-                &next_token_id,
-            ),
+        let valuation_adapter_id = register_test_valuation_adapter(
+            &env,
+            &configured_blnd_id,
+            &prefund_token_id,
+            &legacy_token_id,
+            &next_token_id,
         );
         env.register_at(
             &candidate_id,
@@ -511,7 +523,7 @@ fn v3_wasm_exposes_asset_neutral_activation_hysteresis_quote() {
 }
 
 #[test]
-fn v3_wasm_exposes_bounded_checkpoint_gated_reward_zone() {
+fn v3_wasm_exposes_bounded_prefunding_reward_zone() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(1_000);
@@ -534,10 +546,8 @@ fn v3_wasm_exposes_bounded_checkpoint_gated_reward_zone() {
         .address();
     LegacyEmitterClient::new(&env, &emitter_id).initialize(&blnd, &incumbent, &blnd_usdc);
     let pool_factory_id = env.register(MockPoolFactory, (&candidate_id,));
-    let valuation_adapter = env.register(
-        v3_test_valuation_adapter::WASM,
-        (&blnd, &usdc, &blnd_usdc, &blnd_xlm),
-    );
+    let valuation_adapter =
+        register_test_valuation_adapter(&env, &blnd, &usdc, &blnd_usdc, &blnd_xlm);
     env.register_at(
         &candidate_id,
         v3_backstop::WASM,
@@ -591,12 +601,18 @@ fn v3_wasm_exposes_bounded_checkpoint_gated_reward_zone() {
     );
     assert!(candidate.try_add_reward(&first, &None).is_err());
 
-    // Later edits fail closed until the ongoing distributor records a
-    // completed checkpoint.
+    // Before migration activation, another qualified pool may enter without
+    // a checkpoint because candidate emissions cannot yet accrue.
     blnd_usdc_token.mint(&depositor, &SCALAR_7);
     candidate.deposit_blnd_usdc(&depositor, &second, &SCALAR_7);
     assert!(candidate.pool_spot_blnd_emission_values(&second).blnd_usdc > 0);
-    assert!(candidate.try_add_reward(&second, &None).is_err());
+    env.cost_estimate().budget().reset_unlimited();
+    candidate.add_reward(&second, &None);
+    assert_mainnet_invocation_limits!(env.cost_estimate().resources());
+    let reward_zone = candidate.reward_zone();
+    assert_eq!(reward_zone.len(), 2);
+    assert!(reward_zone.contains(first));
+    assert!(reward_zone.contains(second));
 }
 
 #[test]
@@ -625,10 +641,8 @@ fn optimized_v3_distributes_ongoing_blnd_across_maximum_reward_zone() {
 
     let candidate_id = Address::generate(&env);
     let pool_factory_id = env.register(MockPoolFactory, (&candidate_id,));
-    let valuation_adapter = env.register(
-        v3_test_valuation_adapter::WASM,
-        (&blnd, &usdc, &blnd_usdc, &blnd_xlm),
-    );
+    let valuation_adapter =
+        register_test_valuation_adapter(&env, &blnd, &usdc, &blnd_usdc, &blnd_xlm);
     env.register_at(
         &candidate_id,
         v3_backstop::WASM,
@@ -880,10 +894,8 @@ fn direct_transfer_only_migration_binds_blnd_through_first_distribution() {
 
     let candidate_id = Address::generate(&env);
     let pool_factory_id = env.register(MockPoolFactory, (&candidate_id,));
-    let valuation_adapter = env.register(
-        v3_test_valuation_adapter::WASM,
-        (&blnd, &usdc, &blnd_usdc, &blnd_xlm),
-    );
+    let valuation_adapter =
+        register_test_valuation_adapter(&env, &blnd, &usdc, &blnd_usdc, &blnd_xlm);
     env.register_at(
         &candidate_id,
         v3_backstop::WASM,
@@ -1307,14 +1319,12 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
     let candidate_id = candidate_deployer.deployed_address();
     let pool_hash = env.deployer().upload_contract_wasm(v3_pool::WASM);
     let factory_id = env.register(v3_pool_factory::WASM, (&candidate_id, &pool_hash));
-    let valuation_adapter_id = env.register(
-        v3_test_valuation_adapter::WASM,
-        (
-            &blnd_id,
-            &prefund_token_id,
-            &legacy_token_id,
-            &next_token_id,
-        ),
+    let valuation_adapter_id = register_test_valuation_adapter(
+        &env,
+        &blnd_id,
+        &prefund_token_id,
+        &legacy_token_id,
+        &next_token_id,
     );
     let candidate_hash = env.deployer().upload_contract_wasm(v3_backstop::WASM);
     assert_eq!(
@@ -2615,10 +2625,8 @@ fn v3_wasm_reads_current_comet_composition_for_emissions() {
         .address();
     let candidate_id = Address::generate(&env);
     let pool_factory = env.register(MockPoolFactory, (&candidate_id,));
-    let valuation_adapter = env.register(
-        v3_test_valuation_adapter::WASM,
-        (&blnd, &prefund, &blnd_usdc, &blnd_xlm),
-    );
+    let valuation_adapter =
+        register_test_valuation_adapter(&env, &blnd, &prefund, &blnd_usdc, &blnd_xlm);
     env.register_at(
         &candidate_id,
         v3_backstop::WASM,

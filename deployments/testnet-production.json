@@ -1,0 +1,288 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-28T05:52:30Z",
+  "network": {
+    "name": "Stellar Testnet",
+    "passphrase": "Test SDF Network ; September 2015",
+    "rpc_url": "https://soroban-testnet.stellar.org",
+    "protocol": 27,
+    "valuation_mode": "production-fixture"
+  },
+  "accounts": {
+    "operator": "GAM7MHKKZ5OLUPQJPGLGUFJQ5NKWVXPQN5CZ6L6GA5BMSADMOWBITGC4",
+    "depositor": "GAEQAQ3GPCWGOLYTI43FVYSUIHUJZGXPBH2P2DXLD2CKUW3SJFHUCQKE"
+  },
+  "assets": {
+    "BLND": {
+      "kind": "synthetic_classic_asset",
+      "issuer": "GAM7MHKKZ5OLUPQJPGLGUFJQ5NKWVXPQN5CZ6L6GA5BMSADMOWBITGC4",
+      "contract_id": "CAZRYLTCKNWWQ7B6YBKNEB5LYRA3M2LCLATS6NKVI647PKIA2MQRFP2X",
+      "deployment_transaction": "7cae43cb2c42bc92e9c50950e2b832407db771fce7bcc547b80299a4f150ad7f"
+    },
+    "USDC": {
+      "kind": "synthetic_classic_asset",
+      "issuer": "GAM7MHKKZ5OLUPQJPGLGUFJQ5NKWVXPQN5CZ6L6GA5BMSADMOWBITGC4",
+      "contract_id": "CDT5KCL3HLY6MEGJRZ7MZEIAGLZLJFW6A5TNJWNYC52TKBLRPQTUZZS7",
+      "deployment_transaction": "0cb56c2a3776b89e21cb3bd4748948c7ebb321aedd0c2b3e9bdedc4d96a8f451"
+    },
+    "XLM": {
+      "kind": "native_asset",
+      "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
+    },
+    "EURC": {
+      "kind": "synthetic_classic_asset",
+      "issuer": "GAM7MHKKZ5OLUPQJPGLGUFJQ5NKWVXPQN5CZ6L6GA5BMSADMOWBITGC4",
+      "contract_id": "CBRUGXVHDMJRK4MKK2RRK4NCZCXWHRX6EYB4P7Q2VPIOUVVUHS4Y6PUY",
+      "deployment_transaction": "d2ba65ff007494885208bd2428b69cfcb8463ac36855a45684b0893d101fe9bc"
+    },
+    "AQUA": {
+      "kind": "synthetic_classic_asset",
+      "issuer": "GAM7MHKKZ5OLUPQJPGLGUFJQ5NKWVXPQN5CZ6L6GA5BMSADMOWBITGC4",
+      "contract_id": "CAFAVP6EKGPASIXUFPZSGQA6PBAUKQERGFKK7A3BQ57OUOFICTYE7AIH",
+      "deployment_transaction": "452ff64c8b124bb161f6388aa69fd70c9c092e038f557f5bea4ade2fa92ccec1"
+    },
+    "USDGLO": {
+      "kind": "synthetic_classic_asset",
+      "issuer": "GAM7MHKKZ5OLUPQJPGLGUFJQ5NKWVXPQN5CZ6L6GA5BMSADMOWBITGC4",
+      "contract_id": "CDM522P2XR4UIKANB3JNT7WYK4OYARE3SFAILQEKASDTOG7WREZYM3PV",
+      "deployment_transaction": "dd0588c8b4250d2c88ca9c7d393d8e53186de94f2aac3d51b88405579bbac296"
+    },
+    "USTRY": {
+      "kind": "synthetic_classic_asset",
+      "issuer": "GAM7MHKKZ5OLUPQJPGLGUFJQ5NKWVXPQN5CZ6L6GA5BMSADMOWBITGC4",
+      "contract_id": "CDN2KGJFHHTHCM2GYHW5NLYLFAEL2WUZTR4722G3WJFAOA3SSGKT6PR7",
+      "deployment_transaction": "132e93fb227164d16edb427cc4a1ee7577ce4227c92ccb84f39d98118ff82c68"
+    },
+    "CETES": {
+      "kind": "synthetic_classic_asset",
+      "issuer": "GAM7MHKKZ5OLUPQJPGLGUFJQ5NKWVXPQN5CZ6L6GA5BMSADMOWBITGC4",
+      "contract_id": "CA76UYL4FG5X2ICQ2RY4KQN76IS4AEAOB7JQ4ILOFLXKRDR2F4XFP6QK",
+      "deployment_transaction": "af6b1274a14c117b6cbcae65a62396b31101812a609954ee8dbd6b7ef58a8ca0"
+    },
+    "PYUSD": {
+      "kind": "synthetic_classic_asset",
+      "issuer": "GAM7MHKKZ5OLUPQJPGLGUFJQ5NKWVXPQN5CZ6L6GA5BMSADMOWBITGC4",
+      "contract_id": "CA6C3DVQU2STV46VW7FXLA3UUBJW5BSZSTYPE2D5KIIWZCMYIIBZFFSR",
+      "deployment_transaction": "d33d878ccd24d33dc3a8c2a6188928173aeb630685eb9d32e558281c6307ceee"
+    }
+  },
+  "comet_pools": {
+    "BLND_USDC": {
+      "contract_id": "CAOMBYZORSCE7MTUTBUWSYHISB636C7OKWOYDKA6FGMLSK5GBISX47GE",
+      "normalized_weights": {
+        "BLND": 80,
+        "USDC": 20
+      },
+      "live_reserves_base_units": {
+        "BLND": "8800000000011",
+        "USDC": "220000000002",
+        "LP_supply": "880000000001"
+      },
+      "deployment_transaction": "b71827f43789b29f0e26f2715ed0b658b69ab5d5da0fcdf57eade7022aee8751"
+    },
+    "BLND_XLM": {
+      "contract_id": "CD6SY5AKEBDPW4HGTLSRESEC7ENFSN4E7RU45XJX53OPKTL3MTEFBH2V",
+      "normalized_weights": {
+        "BLND": 80,
+        "XLM": 20
+      },
+      "live_reserves_base_units": {
+        "BLND": "10000000000",
+        "XLM": "1000000000",
+        "LP_supply": "1000000000"
+      },
+      "deployment_transaction": "e8937a35a2654cc827fe3ddcdd57182f3b8445746485fd3621c1d7802d5605fc"
+    }
+  },
+  "valuation": {
+    "test_sep40_oracle": {
+      "contract_id": "CCAS657JNYS5M4DTDDGI7MM5UJCQH3QQKUWJG5MYZKPCIILS5T43ESGM",
+      "deployment_transaction": "d509be75d9622c9667ba9d806082485ee3831478ffb94160bced94eb2643eabf"
+    },
+    "production_adapter": {
+      "contract_id": "CBGV5OKBB2R5SU4K4EIXVKY5WP3YGHVB2UMYILDYAT67NGM6BKIVA7CQ",
+      "deployment_transaction": "b73d9c967cdae30d91454aee42ec8ac1c07366c54e8f667e4b9c98c1b8fcd175"
+    }
+  },
+  "protocol": {
+    "legacy_emitter": {
+      "contract_id": "CDO22NMYBVVSTNQHKISLTVKACELZTWRK4QECYVC4S2OILBGPRUT3ZF4H",
+      "deployment_transaction": "83900b4f83776904b3ff2a4eb8b207ecb07cfb017cf0693370950556898073f5"
+    },
+    "v2": {
+      "backstop": {
+        "contract_id": "CBUVN5MNBK5J46DN6R6YKDDCDKE4VGVLE4WLL23ABYA24UT2VPAHUD6H",
+        "deployment_transaction": "4b3ee90cce901a7aa3b0a5d911e24afa4f387ab1501779955213c4be11397782"
+      },
+      "pool_factory": {
+        "contract_id": "CAEP2ZP3SFZFSFMUXCYBLETW7NQXD3NL23BLSBXWHSITZFKXPRZZB2ER",
+        "deployment_transaction": "532387cf9ca3b0eb3b0ec4f9e22fc07c407a814d5bf45e0c56a1ca73e1df0400"
+      }
+    },
+    "v3_candidate": {
+      "backstop": {
+        "contract_id": "CB5CNXZG4VOXHHZL3AWSHWMPYMNQYVLKFMHTB2F6VUKSIJDYAVEL7J4J",
+        "deployment_transaction": "ccb7ef4b8541047e963877b8ef036cbb4f2a3bd08c3d1858b0ef4166cf26a796"
+      },
+      "pool_factory": {
+        "contract_id": "CB3YUBJTB2L7P6L3C5JROTGTK6N3HCOBMYREXXRC76SNPJFGJTWAMOAO",
+        "deployment_transaction": "9fac79ae54a455cd1704f2a83864c32da574141ebf5349900bce07a20836a87e"
+      }
+    }
+  },
+  "modeled_pools": {
+    "fixed": {
+      "v2": {
+        "pool_contract_id": "CCOQI5XUPY3YRMKWVNCGXUPIA6IVTDTXV2EZM2HR37PFTZ3WCU3UETGV",
+        "oracle_contract_id": "CCFKCQJ7V4546O4F4IKBWK7YGWUROXY767YMPTAWNELM5V36Z6E2ET6A",
+        "pool_deployment_transaction": "3024e2210207f60d5543c93ac55bb69ab8ef6436c702a87966046798b7def1bb",
+        "oracle_deployment_transaction": "6a9b854001e8f9ccfe68f6d6fcbf3e8d59d91905c6b210958e32df66ffda0082",
+        "status": "admin_active",
+        "reward_zone_member": true,
+        "backstop_lp_base_units": "220000000000",
+        "usdc_supplier_seed_base_units": "10000000000"
+      },
+      "v3": {
+        "role": "primary migration verification and post-migration emissions pool",
+        "status": "admin_active",
+        "reward_zone_member": true,
+        "pool_contract_id": "CARATH443ZE4YHIVETIST7Q77OHTKUDHWH7GCEC4MZWI4ZBSWBSCKWKG",
+        "oracle_contract_id": "CCIXI42VKPEH34LK5VLOC3R52PXERIJ2XM3AO77CGKDE46VSFCMMZRYJ",
+        "pool_deployment_transaction": "0e0e4e01579b9bacb62a8ed3ff1e0de992c608703781ba392227bfdae2584c96",
+        "oracle_deployment_transaction": "86fdfdc4e9d08525026b58c5742a4fcc7bb19e6181c174a7e62fe2c0bc1ce3f0",
+        "usdc_supplier_seed_base_units": "10000000000",
+        "emissions": {
+          "reserve_token_id": 4,
+          "position": "EURC borrow",
+          "relative_weight": 1
+        },
+        "emission_fixture": {
+          "USDC_collateral_base_units": "10000000000",
+          "EURC_supply_base_units": "5000000000",
+          "EURC_borrow_base_units": "1000000000"
+        },
+        "backstop": {
+          "BLND_USDC_base_units": "220000000001",
+          "BLND_XLM_base_units": "100000000",
+          "USDC_base_units": "125000000000"
+        },
+        "oracle_admin": "GAM7MHKKZ5OLUPQJPGLGUFJQ5NKWVXPQN5CZ6L6GA5BMSADMOWBITGC4"
+      }
+    },
+    "yieldblox": {
+      "v2": {
+        "pool_contract_id": "CA4KXQUHCOPJIOX76XKRSJS7VHRHUN44QCQSOMEUYFAWRFHP4FTPWD7W",
+        "oracle_contract_id": "CB2N56XB5XILAJEBZF36NZWVF4SIYL3HH7TSR7SB65QXMA35L7ANQ6OQ",
+        "pool_deployment_transaction": "2b0df594f7710dbfced13f9bbbfb1ab10bab81e50a9ac14734aad1ac4abfc3e3",
+        "oracle_deployment_transaction": "8998f9dbad8123b9b6ddd5a7ad9bd56bfe665f79a4dd62fa116d1480d4e79275",
+        "status": "admin_active",
+        "reward_zone_member": true,
+        "backstop_lp_base_units": "220000000000",
+        "usdc_supplier_seed_base_units": "10000000000"
+      },
+      "v3": {
+        "status": "admin_active",
+        "reward_zone_member": true,
+        "pool_contract_id": "CDTOKONG4ZUGP5XF3Z3XYSQI37VTRBMUTRZJEBIM26ZY2VEP5NX3CSHH",
+        "oracle_contract_id": "CC5AVGYX3OWGUWKQVHOWG42O2ID454F3VVK7QEKA5BVKCN74AT2BUNOM",
+        "pool_deployment_transaction": "453ef0bc4e04dc5f8768eafdbaa983d26c16d8df8acc1e7a2b33927d8e6c6c7d",
+        "oracle_deployment_transaction": "e43295636e90ac962e6b5ab55881988e37a6c9d40cce42e5f203ba647a4e6cd0",
+        "usdc_supplier_seed_base_units": "10000000000",
+        "emissions": {
+          "reserve_token_id": 3,
+          "position": "USDC supply",
+          "relative_weight": 1
+        },
+        "backstop": {
+          "BLND_USDC_base_units": "220000000000",
+          "BLND_XLM_base_units": "100000000",
+          "USDC_base_units": "125000000000"
+        },
+        "oracle_admin": "GAM7MHKKZ5OLUPQJPGLGUFJQ5NKWVXPQN5CZ6L6GA5BMSADMOWBITGC4"
+      }
+    }
+  },
+  "v3_emissions": {
+    "prepared_at": "2026-07-28T05:39:54Z",
+    "split": {
+      "backstop_percent": 70,
+      "pool_percent": 30
+    },
+    "current_reward_zone": [
+      "CDTOKONG4ZUGP5XF3Z3XYSQI37VTRBMUTRZJEBIM26ZY2VEP5NX3CSHH",
+      "CARATH443ZE4YHIVETIST7Q77OHTKUDHWH7GCEC4MZWI4ZBSWBSCKWKG"
+    ],
+    "pending_reward_zone_admission": [],
+    "transactions": {
+      "add_fixed_to_reward_zone": "aaf89c6785938d2c178d97b15307ce874d14c14ac38e99f2f115ee08cf0de2a4",
+      "add_yieldblox_to_reward_zone": "63ba04a4b41a962b77cdd795565a9d13867b3eed03a0e0c20413f119b877c1f1",
+      "configure_fixed_EURC_borrow": "7e7912b3994ca920f6848490a01d5b32cd1e51f2109d09d0ef2edc9355c279a5",
+      "seed_fixed_EURC_borrow_fixture": "5a79d41ce035bdeaf5d8439c1669d34bd20368738a8e4308481257f5adaf50b9",
+      "configure_yieldblox_USDC_supply": "3caff3b810a58cf74173b5b8e53c386d83b04624e09cf382330d95f0e450b3c7",
+      "seed_yieldblox_USDC_supply": "f081ad022818f4fd216dcea9985415c9b5467c7c0dd7c4d48b597afad7d32be1"
+    }
+  },
+  "migration": {
+    "phase": "open",
+    "queue_transaction": "15b63fbe466a2e198893150827fd8aacd0573099ebf88db1226100366cb2313f",
+    "epoch_started_at": "2026-07-28T05:29:25Z",
+    "prepare_not_before": "2026-08-21T05:29:25Z",
+    "unlock_at": "2026-08-28T05:29:25Z",
+    "incumbent_BLND_USDC_LP_base_units": "440000000000",
+    "candidate_BLND_USDC_LP_base_units": "440000000001"
+  },
+  "v2_emissions": {
+    "configured_at": "2026-07-28T05:40:25Z",
+    "verified_at": "2026-07-28T05:51:46Z",
+    "split": {
+      "backstop_percent": 70,
+      "pool_percent": 30
+    },
+    "pool_tranche_configuration": "USDC suppliers",
+    "reward_zone": [
+      "CA4KXQUHCOPJIOX76XKRSJS7VHRHUN44QCQSOMEUYFAWRFHP4FTPWD7W",
+      "CCOQI5XUPY3YRMKWVNCGXUPIA6IVTDTXV2EZM2HR37PFTZ3WCU3UETGV"
+    ],
+    "streams": {
+      "fixed_USDC_supply": {
+        "reserve_token_index": 3,
+        "expires_at": "2026-08-04T05:41:52Z"
+      },
+      "yieldblox_USDC_supply": {
+        "reserve_token_index": 3,
+        "expires_at": "2026-08-04T05:41:57Z"
+      }
+    },
+    "transactions": {
+      "add_fixed_to_reward_zone": "317eddf2617797ca4895302c4c689d95125c711fb168702e77c30f864d2ce056",
+      "add_yieldblox_to_reward_zone": "6ebbbfa7aecf863078935c14d68836097131cdc7f7c56220c93eb74929176740",
+      "shared_emitter_distribution": "edb7fb68b0b34e2d40c6aad9c915bd79c19170173ff3bc394f9a4a178c449f1b",
+      "shared_backstop_distribution": "b2293ec04a2cfcba24187f5fb2237ffba422108044f46233c2381fca674375b7"
+    }
+  },
+  "artifacts": {
+    "legacy_emitter_wasm_sha256": "438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89",
+    "v2_pool_factory_wasm_sha256": "e304170e67184748839dda5fd3b6dd5d8bf1e54055a07b536cede24da072c7a9",
+    "v2_backstop_wasm_sha256": "bf6be0f31c2110151b5a4157720626a85242f34c0ac864ff594789c3f777a3d0",
+    "v2_pool_wasm_sha256": "7df65d771d34226d3a8d20e27cfb819421449ba1a3c44223cbb868e5beb68bfa",
+    "v3_pool_factory_wasm_sha256": "3ef2744d645f8ed67b2e99143a5226201b9b95ce5e92e77e23c0449ffa3bc241",
+    "v3_backstop_wasm_sha256": "77cbef805dff32930ab7f99abb99e54d4c47d279b1cbe634a0670fdc4b3b2684",
+    "v3_pool_wasm_sha256": "faf7f27744dbc0e381a9f8f4ae19a72d9386a4f37ffa413b3db98fe74efa615d",
+    "production_valuation_adapter_wasm_sha256": "c3d7986a25f21388c134794b725111907b759ebbb838f0162c6acb17c6f87010",
+    "test_sep40_oracle_wasm_sha256": "e6f212515e0c75776b770a0d71d7bfa033e6cf69d4a415a446fd54d0b14753d3",
+    "modeled_v3_lending_oracle_wasm_sha256": "5b60aacdef6e1e6d8da448549565106afc52f118284ea0aee71ef71d21c5fa61",
+    "comet_wasm_sha256": "5d721fa580714291f6846fc01738e86d70acb47e449ea75312e272a0f7436dd8"
+  },
+  "provenance": {
+    "source_commit": "5cba6ae7ad532a25795b6c0d7805d4b218c0a95b",
+    "source_was_dirty": true,
+    "deployment_source_patch_sha256": "5ab0a9ca854c157cf8c1cfbce5720d0501e2697adcc7ebbc106b76cc5f1d7dfa",
+    "modeled_pools_deployment_source_patch_sha256": "5ab0a9ca854c157cf8c1cfbce5720d0501e2697adcc7ebbc106b76cc5f1d7dfa",
+    "modeled_pools_verification_source_patch_sha256": "04e451cfd16ef4e7def9da59fa00c6e00ee50736d7efdaacf9848fa94d5c777d"
+  },
+  "security": {
+    "contains_secret_keys": false,
+    "contains_local_identity_names": false,
+    "testnet_only": true
+  }
+}

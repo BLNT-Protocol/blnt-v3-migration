@@ -34,6 +34,7 @@ pub struct PriceQuote {
 #[derive(Clone)]
 #[contracttype]
 enum DataKey {
+    Admin,
     Blnd,
     BlndUsdc,
     BlndXlm,
@@ -61,11 +62,13 @@ pub struct TestValuationAdapter;
 impl TestValuationAdapter {
     pub fn __constructor(
         env: Env,
+        admin: Address,
         blnd: Address,
         usdc: Address,
         blnd_usdc: Address,
         blnd_xlm: Address,
     ) {
+        env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Blnd, &blnd);
         env.storage().instance().set(&DataKey::Usdc, &usdc);
         env.storage().instance().set(&DataKey::BlndUsdc, &blnd_usdc);
@@ -85,11 +88,16 @@ impl TestValuationAdapter {
         }
     }
 
+    pub fn admin(env: Env) -> Address {
+        env.storage().instance().get(&DataKey::Admin).unwrap()
+    }
+
     /// Store a fixture price in its own persistent ledger entry.
     ///
     /// Compatibility resource tests use this path to model the per-asset
     /// footprint of an optimized stateful oracle.
     pub fn set_price(env: Env, asset: Address, quote: PriceQuote) {
+        require_admin(&env);
         env.storage()
             .persistent()
             .set(&DataKey::Price(asset), &quote);
@@ -100,6 +108,7 @@ impl TestValuationAdapter {
     /// Resource tests use this to include stateful LP-valuation reads in the
     /// measured bad-debt exhaustion path.
     pub fn set_valuation(env: Env, token: Address, valuation: AssetValuation) {
+        require_admin(&env);
         env.storage()
             .persistent()
             .set(&DataKey::Valuation(token), &valuation);
@@ -149,5 +158,76 @@ impl TestValuationAdapter {
             price: 10_000_000,
             valid_until: u64::MAX,
         }
+    }
+}
+
+fn require_admin(env: &Env) {
+    let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+    admin.require_auth();
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use super::*;
+    use soroban_sdk::{
+        testutils::{Address as _, MockAuth, MockAuthInvoke},
+        IntoVal,
+    };
+
+    #[test]
+    fn fixture_updates_require_the_configured_admin() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let blnd = Address::generate(&env);
+        let usdc = Address::generate(&env);
+        let blnd_usdc = Address::generate(&env);
+        let blnd_xlm = Address::generate(&env);
+        let adapter = env.register(
+            TestValuationAdapter,
+            (&admin, &blnd, &usdc, &blnd_usdc, &blnd_xlm),
+        );
+        let client = TestValuationAdapterClient::new(&env, &adapter);
+        let asset = Address::generate(&env);
+        let quote = PriceQuote {
+            decimals: 7,
+            price: 10_000_000,
+            valid_until: u64::MAX,
+        };
+
+        assert_eq!(client.admin(), admin);
+        assert!(client.try_set_price(&asset, &quote).is_err());
+        client
+            .mock_auths(&[MockAuth {
+                address: &admin,
+                invoke: &MockAuthInvoke {
+                    contract: &adapter,
+                    fn_name: "set_price",
+                    args: (asset.clone(), quote.clone()).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .set_price(&asset, &quote);
+        assert_eq!(client.price(&asset), quote);
+
+        let valuation = AssetValuation {
+            underlying_blnd: 10_000_000,
+            usdc_value: 10_000_000,
+            valid_until: u64::MAX,
+        };
+        assert!(client.try_set_valuation(&blnd_usdc, &valuation).is_err());
+        client
+            .mock_auths(&[MockAuth {
+                address: &admin,
+                invoke: &MockAuthInvoke {
+                    contract: &adapter,
+                    fn_name: "set_valuation",
+                    args: (blnd_usdc.clone(), valuation.clone()).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .set_valuation(&blnd_usdc, &valuation);
+        assert_eq!(client.quote(&blnd_usdc, &10_000_000), valuation);
     }
 }

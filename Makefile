@@ -85,11 +85,63 @@ testnet-emissions:
 testnet-claim-emissions:
 	bash scripts/testnet-migration.sh claim-emissions
 
+testnet-production-plan:
+	bash scripts/testnet-production-migration.sh plan
+
+testnet-production-validate:
+	bash scripts/testnet-production-migration.sh validate
+
+testnet-production-run:
+	bash scripts/testnet-production-migration.sh run
+
+testnet-production-status:
+	bash scripts/testnet-production-migration.sh status
+
+testnet-production-keepalive:
+	bash scripts/testnet-production-migration.sh keepalive
+
+testnet-production-refresh-oracle:
+	bash scripts/testnet-production-migration.sh refresh-oracle
+
+testnet-production-deploy-modeled-pools:
+	bash scripts/testnet-production-migration.sh deploy-modeled-pools
+
+testnet-production-verify-modeled-pools:
+	bash scripts/testnet-production-migration.sh verify-modeled-pools
+
+testnet-production-prepare:
+	bash scripts/testnet-production-migration.sh prepare
+
+testnet-production-finalize:
+	bash scripts/testnet-production-migration.sh finalize
+
+testnet-production-verify:
+	bash scripts/testnet-production-migration.sh verify
+
+testnet-production-emissions:
+	bash scripts/testnet-production-migration.sh emissions
+
+testnet-production-claim-emissions:
+	bash scripts/testnet-production-migration.sh claim-emissions
+
+oracle-plan:
+	bash scripts/valuation-oracle.sh plan
+
+oracle-check:
+	bash scripts/valuation-oracle.sh check
+
+oracle-deploy:
+	bash scripts/valuation-oracle.sh deploy
+
+oracle-verify:
+	bash scripts/valuation-oracle.sh verify
+
 build-v3:
 	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-backstop --target wasm32v1-none --release --locked
 	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked
 	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-pool --target wasm32v1-none --release --locked
 	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-pool-factory --target wasm32v1-none --release --locked
+	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-test-sep40-oracle --target wasm32v1-none --release --locked
 	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-test-valuation-adapter --target wasm32v1-none --release --locked
 	cargo +1.91.0 build --manifest-path v3/Cargo.toml --package blend-v3-valuation-adapter --target wasm32v1-none --release --locked
 	mkdir -p v3/target/wasm32v1-none/optimized
@@ -106,6 +158,9 @@ build-v3:
 	stellar contract optimize \
 		--wasm v3/target/wasm32v1-none/release/blend_v3_pool_factory.wasm \
 		--wasm-out v3/target/wasm32v1-none/optimized/blend_v3_pool_factory.wasm
+	stellar contract optimize \
+		--wasm v3/target/wasm32v1-none/release/blend_v3_test_sep40_oracle.wasm \
+		--wasm-out v3/target/wasm32v1-none/optimized/blend_v3_test_sep40_oracle.wasm
 	stellar contract optimize \
 		--wasm v3/target/wasm32v1-none/release/blend_v3_test_valuation_adapter.wasm \
 		--wasm-out v3/target/wasm32v1-none/optimized/blend_v3_test_valuation_adapter.wasm

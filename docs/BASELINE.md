@@ -62,3 +62,7 @@ must not modify the root v2 dependency graph or `Cargo.lock`.
 The Protocol-27 migration harness now uses the isolated v3 backstop as the
 candidate without changing the incumbent v2 contracts. The root SDK-22 test
 retains a second v2 backstop only as a frozen historical-emitter baseline.
+Emitter replacement changes only the recipient of future BLND distributions.
+It does not migrate or mutate incumbent v2 supplier, borrower, or backstop
+positions; those remain governed by the deployed v2 contracts and their
+existing claim and withdrawal rules.

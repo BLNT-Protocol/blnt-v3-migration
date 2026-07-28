@@ -16,17 +16,19 @@ the system specification.
 | Activation hysteresis | One threshold | 12,500 USDC entry; 10,000 USDC maintenance | Approved exception |
 | Q4W basis | Shares of one LP token | Verified value across three tier assets | Implemented tier delta |
 | Reward zone | Permissionless, maximum 30 pools | Same shape; positive-BLND entry and zero-weight liveness removal | Implemented safety fix |
-| Ongoing split | 70% backstop / 30% supply and borrow | Same, with scoped carry-forward | Backstop distribution and claims implemented |
+| Ongoing split | 70% backstop / 30% supply and borrow | Same, with scoped carry-forward | Implemented end to end |
 | BLND receipt binding | Emitter owns the canonical token | Configured token must pass an exact emitter-mint balance delta | Implemented safety fix |
 | Pool emission weight | Nonqueued BLND:USDC LP tokens | Underlying BLND across nonqueued BLND:USDC and BLND:XLM | Distribution and five-second mutation guard implemented |
 | Backstop user weight | Nonqueued backstop shares | User underlying BLND across the same two tiers | Per-tier indexes and user claims implemented |
 | Plain-USDC emissions | Not applicable | Zero weight | Formula implemented |
-| 30% configuration | Mutable relative supply/debt-token weights selected by pool admin | Same | Specified; not implemented |
+| 30% configuration | Mutable relative supply/debt-token weights selected by pool admin | Same | Configuration, streams, accrual, and claims implemented |
 | Pending bad-debt emissions | Capital remains until disposed | Eligible until an actual fill transfers assets | Pool active-asset accounting implemented |
 | Take-rate realization | One backstop-token interest auction | V2-shaped tier-specific auctions with `5:5:4` allocation | Implemented tier delta |
 | Bad-debt realization | One backstop-token auction, then supplier loss | One tier per auction in strict waterfall order, then supplier loss | Implemented tier delta |
 | Rounding dust | Some floor remainders remain unattributed | Carry forward at the same accounting scope | Top-level, reward-zone, tier-index, and user carry implemented |
 | Protocol replacement | Legacy emitter queue and swap | Same | Implemented |
+| Incumbent positions after replacement | Existing positions remain in their deployed v2 contracts | Same; emitter replacement moves no lending or backstop position | Settled isolation policy |
+| Incumbent emissions after replacement | Registered v2 backstop receives emitter distributions | While v3 remains registered, new distributions follow the emitter to v3; existing v2 accrual remains under v2 rules | Implemented emitter behavior |
 | Migration distribution | Emitter permits a bounded initial drop | Zero discretionary award; at most 10M BLND backfill | Implemented migration policy |
 
 Implementation work should update this matrix whenever a parity gap closes or

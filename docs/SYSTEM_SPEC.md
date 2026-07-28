@@ -1,7 +1,8 @@
 # Blend V3 Candidate System Specification
 
 Status: Draft 0.1  
-Implementation status: Experimental migration, backstop, status, and lending core
+Implementation status: Experimental candidate; time-gated migration evidence,
+production-provider qualification, and independent security review remain.
 
 ## 1. Purpose
 
@@ -77,7 +78,7 @@ require v3 source code to compile against intermediate SDK versions.
 - Permissioned lending hooks.
 - Fixed-term or fixed-rate lending.
 - A production frontend.
-- A final protocol-fee policy.
+- Any protocol fee. This candidate implements none.
 
 These features require separate specifications before implementation.
 
@@ -92,8 +93,9 @@ These features require separate specifications before implementation.
   candidate for migration.
 - **Activation capital:** Pool-allocated backstop value counted by the
   candidate's activation policy.
-- **Legacy position:** A pre-finalization position denominated in the v2
-  BLND:USDC LP token.
+- **Candidate legacy-token position:** A pre-finalization deposit into the v3
+  candidate denominated in the incumbent BLND:USDC LP token. It is not a
+  position held by the incumbent v2 backstop.
 - **Tier:** A collection of backstop assets sharing a position in the loss
   waterfall.
 - **Queued capital:** Capital associated with a pending withdrawal.
@@ -169,6 +171,17 @@ the emitter's direct-balance rule.
 
 The incumbent v2 contracts MUST remain available in the test workspace so the
 same test can deploy an incumbent and a candidate.
+
+The candidate MUST NOT upgrade, rewrite, or migrate custody or lending
+positions out of the incumbent v2 contracts. Existing v2 supplier, borrower,
+and backstop positions remain governed exclusively by the deployed v2 code.
+The legacy-emitter swap changes the recipient of future BLND distributions; it
+does not change position ownership, lending principal, collateral, liabilities,
+backstop shares, pool configuration, or withdrawal rules in an incumbent v2
+pool or backstop. Immediately before the recipient changes, the emitter
+mints its final time-accrued BLND distribution directly to the incumbent.
+Subsequent allocation and claims from BLND held by v2 remain governed by the
+existing v2 emission rules.
 
 ## 6. Candidate lifecycle
 
@@ -322,13 +335,22 @@ can never extend migration beyond 138 days from candidate construction.
 After finalization:
 
 - Ongoing BLND emissions accrue according to the v3 emission policy.
-- The new designated token controls qualification for the next protocol
-  migration.
-- Existing BLND:USDC positions continue in the same first-loss tier without a
-  conversion, asset swap, or second opt-in.
+- The configured BLND:XLM Comet LP is the emitter-designated token controlling
+  qualification for the next protocol migration.
+- Existing candidate BLND:USDC tier positions continue in that same first-loss
+  tier without a conversion, asset swap, or second opt-in.
 - A depositor MAY withdraw under the tier's ordinary withdrawal rules.
   Unwithdrawn positions remain fully accounted for and MUST NOT be treated as
   unencumbered protocol capital.
+- Existing incumbent v2 supplier, borrower, and backstop positions remain in
+  their original contracts. Migration MUST NOT move, convert, close, or import
+  them into v3.
+- While the candidate remains registered, the incumbent v2 backstop receives
+  no new legacy-emitter distributions after the swap. BLND already held,
+  allocated, or accrued by v2 remains governed by the existing v2 accounting
+  and claim rules.
+- Incumbent v2 lending and position management MAY continue independently of
+  v3, subject only to the immutable v2 rules and available market liquidity.
 
 ## 7. Multi-asset backstop
 
@@ -382,9 +404,11 @@ only the approved pool WASM, so registration is the authoritative identity
 check for this path. Custody entry points retain the stronger callback probe.
 
 `backstop_withdrawal_allowed(backstop)` is a permanent compatibility boundary.
-Every factory-approved pool MUST preserve its signature and fail-closed
-semantics across any WASM upgrade. A pool upgrade MUST be rejected unless the
-replacement implementation retains this interface.
+Every factory-deployed pool MUST expose its signature and fail-closed
+semantics. The immutable factory deploys only the approved pool WASM, and this
+candidate exposes no pool-WASM replacement path. Any future candidate that
+proposes pool upgrades requires a separate specification and MUST preserve this
+interface.
 
 Positions MUST be attributable to:
 
@@ -1833,10 +1857,12 @@ BLND but not the backstop-depositor claimed counter.
 
 ## 11. Protocol fees and interest accounting
 
-No ongoing protocol fee is approved by this specification.
+This candidate implements no ongoing protocol fee. Borrower interest continues
+to follow the supplier-yield and backstop-take-rate accounting defined by the
+v2-compatible lending design and the three-tier realization mechanism.
 
-Before implementing one, the specification MUST define a conservation equation
-showing how borrower interest is divided among:
+Any future candidate proposing a fee requires a separate specification with a
+conservation equation showing how borrower interest is divided among:
 
 - Supplier yield.
 - Backstop compensation.
@@ -1849,10 +1875,12 @@ verify the equation under accrual, repayment, liquidation, and bad debt.
 
 ## 12. Designated token selection
 
-The next designated token MAY be an LP token or a plain SEP-41 asset. The
-legacy emitter only requires a compatible token balance interface.
+This candidate immutably selects the configured BLND:XLM Comet LP as the next
+designated token. The legacy emitter only requires a compatible token balance
+interface, but the candidate additionally binds this address as its BLND:XLM
+backstop tier and verifies the queued emitter token against that binding.
 
-Before queuing a token, the candidate design MUST verify:
+Before queuing BLND:XLM, the candidate design MUST verify:
 
 - It implements the expected token interface.
 - The candidate can custody it directly.
@@ -1862,7 +1890,9 @@ Before queuing a token, the candidate design MUST verify:
   or impossible.
 
 Selecting the designated token is separate from choosing which assets count
-toward pool activation.
+toward pool activation. A future candidate MAY propose another LP token or a
+plain SEP-41 asset, but that choice requires its own specification and must not
+retroactively change this candidate.
 
 ## 13. Authorization, immutability, and protocol replacement
 
@@ -1945,18 +1975,28 @@ Before a candidate can be described as migration-ready:
 
 The detailed test matrix is maintained in `docs/MIGRATION_TEST_PLAN.md`.
 
-## 16. Open decisions
+## 16. Settled policy and remaining production decisions
 
-The following require explicit resolution before their associated behavior is
-implemented:
+The candidate has settled the following protocol policies:
 
-- Production LP price sources, averaging, staleness, and failure policy.
+- Production LP valuation uses the immutable SEP-40 USDC-base TWAP,
+  staleness, fail-closed, and conservative Comet policy defined in Section 8.
+- BLND:XLM Comet LP is the immutable next emitter-designated token.
+- The candidate implements no protocol or treasury fee.
+- Incumbent v2 contracts and their supplier, borrower, and backstop positions
+  remain isolated and unchanged. The emitter swap ends new v2 BLND
+  distributions but performs no position migration.
+
+The following production-readiness decisions remain:
+
+- Selection and qualification of a concrete production SEP-40 provider whose
+  deployed feeds and exact WASM satisfy the implemented valuation policy.
 - Production lending-reserve admission policy for issuer controls, clawback,
   deauthorization, rebasing, and other nonstandard token behavior.
-- Post-migration designated token.
-- Protocol-fee existence and incidence.
-- Whether existing v2 pool positions remain isolated or receive an explicit
-  position-migration mechanism.
+
+Any future opt-in mechanism for moving a user from v2 to v3 is a separate
+product and protocol proposal. It is not part of this candidate and MUST NOT
+be inferred from the emitter migration.
 
 ## 17. Initial implementation milestones
 
@@ -2033,35 +2073,38 @@ enforces a conservative 120,000-byte optimized-WASM ceiling after deployment
 testing found that the earlier 126,044-byte artifact exceeded Protocol-27
 testnet CPU limits during upload. A completed wall-clock local run and the
 time-gated completion of both public-testnet exercises remain in progress.
-The second public-testnet lane has completed its queue-open deployment using
-native XLM, synthetic BLND and USDC, fresh real 80:20 BLND:USDC and BLND:XLM
-Comets, a bounded test-only SEP-40 oracle, and the optimized production
-valuation adapter. Its two live adapter quotes and exact Comet bindings passed,
-and its unshortened legacy-emitter queue unlocks on 2026-08-27. This controlled
-fixture is deployment evidence, not provider qualification. The current
-production fixture was freshly redeployed with Fixed v3 as its primary
-migration-verification and post-migration emission pool from construction,
-with YieldBlox v3 registered alongside it. A fail-closed, evidence-producing
-provider qualification, deployment, and four-quote simulation lane is
-implemented, but no concrete production-provider SEP-40 deployment has passed
-it: the official Reflector public Stellar-DEX feeds
-checked on 2026-07-27 lack
-the exact BLND asset, and the testnet mirror also lacks the expected
-native-XLM asset. Concrete-provider approval and the final atomic candidate
-resource simulation against that provider's exact WASM and initialized storage
-therefore remain intentionally incomplete. The production LP
-valuation contract, immutable TWAP policy, conservative Comet formula, and a
-generic optimized-WASM regression with 25 independently stored ticks per asset
-are implemented. Milestone 10's policy
-arithmetic, admin and pending-loss policies, canonical spot-composition read
-boundary,
-permissionless maximum-30 reward-zone membership, emitter reconciliation,
-pool-level accrual and carry, production distribution checkpoint writer,
-two-tier per-share indexes, per-user backstop checkpoints, and owner-authorized
-backstop claims are implemented. The 30% path now includes v2-compatible
-admin-selected reserve-token weights, once-daily pool reservation, seven-day
-supply/debt streams, mutation-time checkpoints, scoped carry, and
-owner-authorized claims paid directly from candidate custody.
+The deterministic public-testnet lane has completed its queue-open deployment,
+and its unshortened legacy-emitter queue unlocks on 2026-08-27. The separate
+production-adapter public-testnet lane uses native XLM, synthetic BLND and
+USDC, fresh real 80:20 BLND:USDC and BLND:XLM Comets, a bounded test-only
+SEP-40 oracle, and the optimized production valuation adapter. Its two live
+adapter quotes and exact Comet bindings passed. The current production fixture
+was freshly redeployed with Fixed v3 as its primary migration-verification and
+post-migration emission pool from construction, with YieldBlox v3 registered
+alongside it, and its unshortened queue unlocks on 2026-08-28. This controlled
+fixture is deployment evidence, not provider qualification.
 
-New economic features should be introduced only after the corresponding open
-decision is resolved in this specification.
+A fail-closed, evidence-producing provider qualification, deployment, and
+four-quote simulation lane is implemented, but no concrete
+production-provider SEP-40 deployment has passed it: the official Reflector
+public Stellar-DEX feeds checked on 2026-07-27 lack the exact BLND asset, and
+the testnet mirror also lacks the expected native-XLM asset.
+Concrete-provider approval and the final atomic candidate resource simulation
+against that provider's exact WASM and initialized storage therefore remain
+intentionally incomplete. The production LP valuation contract, immutable
+TWAP policy, conservative Comet formula, and a generic optimized-WASM
+regression with 25 independently stored ticks per asset are implemented.
+
+Milestone 10's policy arithmetic, admin and pending-loss policies, canonical
+spot-composition read boundary, permissionless maximum-30 reward-zone
+membership, emitter reconciliation, pool-level accrual and carry, production
+distribution checkpoint writer, two-tier per-share indexes, per-user backstop
+checkpoints, and owner-authorized backstop claims are implemented. The 30%
+path now includes v2-compatible admin-selected reserve-token weights,
+once-daily pool reservation, seven-day supply/debt streams, mutation-time
+checkpoints, scoped carry, and owner-authorized claims paid directly from
+candidate custody.
+
+New economic features require a separately approved specification. Remaining
+production-readiness decisions do not authorize changes to the settled
+candidate economics.

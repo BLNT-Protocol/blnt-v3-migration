@@ -39,15 +39,16 @@ interface and its immutable binding to this candidate during construction, and
 accepts accounted deposits in all three tiers only for factory-registered
 pools that expose the required loss-state callback.
 Validation occurs before token custody or share accounting. The callback is a
-permanent compatibility boundary that factory-approved pool upgrades must
-preserve. After activation, any caller can fund the exact scheduled backfill
-through the published emitter's one-time drop. Its exact balance delta verifies
-the immutable BLND token binding. If no position has eligible backfill weight,
-the first positive ongoing distribution establishes the same binding with an
-exact current-call delta instead. Position owners can then direct one
-floor-rounded claim per frozen position without iteration; remaining integer
-dust stays segregated in the backfill reserve. The backstop can reserve and
-settle a single-tier bad-debt auction by transferring the time-scaled tier token
+permanent compatibility boundary; this candidate exposes no pool-WASM
+replacement path that could bypass it. After activation, any caller can fund
+the exact scheduled backfill through the published emitter's one-time drop.
+Its exact balance delta verifies the immutable BLND token binding. If no
+position has eligible backfill weight, the first positive ongoing distribution
+establishes the same binding with an exact current-call delta instead. Position
+owners can then direct one floor-rounded claim per frozen position without
+iteration; remaining integer dust stays segregated in the backfill reserve. The
+backstop can reserve and settle a single-tier bad-debt auction by transferring
+the time-scaled tier token
 directly to the filler and impairing the pool-tier exchange rate by exactly that
 transferred amount. It also allocates accrued reserve credit with canonical
 `5:5:4` tier weighting and realizes it through one cyclic tier-specific
@@ -158,8 +159,9 @@ bid worth 120% of the reserve lot. Partial fills use the inherited 400-ledger
 curve and leave the time discount in persistent pending credit; stale deletion
 after 500 ledgers releases the unfilled reservation without rewriting that
 credit. Bid donation mints no shares and requires no depositor claim.
-Supply/borrow reserve-token BLND accrual and claims are still required before
-the pool is a complete lending market.
+Supply/borrow reserve-token BLND accrual and claims are implemented through
+pool-admin relative weights, once-daily reservation, seven-day streams,
+mutation-time checkpoints, scoped carry, and owner-authorized claims.
 
 The v3 pool factory stores immutable backstop and pool-WASM configuration,
 deploys pools with explicit transferable admins, initial lending
@@ -173,10 +175,10 @@ verified, pool-specific values of BLND:XLM LP, BLND:USDC LP, and plain USDC.
 Each USDC of eligible value counts equally. An
 inactive pool qualifies at or above 12,500 USDC, while an active pool remains
 qualified at or above 10,000 USDC. The public entry point returns a quote, and
-stored pool-status transitions use the same canonical adapter boundary. A
-production valuation adapter and loss-eligible position accounting are still
-required; untrusted caller inputs or instantaneous Comet reserve ratios must
-not be used as authoritative values.
+stored pool-status transitions use the same canonical adapter boundary. The
+production valuation adapter and loss-eligible position accounting are
+integrated; untrusted caller inputs or instantaneous Comet reserve ratios are
+not accepted as authoritative activation values.
 
 The backstop also exposes non-authoritative arithmetic for the v2-compatible
 pool statuses `0` through `6`. Multi-asset Q4W percentage uses verified USDC
@@ -215,7 +217,9 @@ tiers have take-rate weights `2.5,2.5,2`, represented exactly on-chain as
 value multiplied by its weight. This priority and weighting do not change
 equal-USDC activation accounting. Permissionless next-tier sequencing and
 v2-style supplier residual settlement are implemented as a separate bounded
-continuation call. Take-rate accrual remains implementation work.
+continuation call. Reserve interest accrues the v2-compatible backstop credit,
+which the tier-specific interest-auction path realizes into the selected
+backstop tier.
 
 The backstop implements permissionless ongoing BLND distribution after
 migration. Reward-zone pools are weighted by eligible underlying BLND across
@@ -244,9 +248,10 @@ advanced through \(10^{14}\)-scaled per-share indexes with pool, tier-index,
 and user carry. User checkpoints before active-share mutations prevent late
 deposits and queued shares from receiving prior accrual. Position owners can
 claim both eligible tiers' accrued BLND for one pool to a selected recipient;
-migration backfill and the 30% pool tranche remain segregated. The 30%
-supply/borrow configuration, reserve-token accumulators, and their claims
-remain implementation work.
+migration backfill and the 30% pool tranche remain segregated. The pool admin
+configures the 30% tranche's relative supply/debt-token weights, and bounded
+reserve-token streams and owner-authorized claims distribute that allocation
+without mixing it into the backstop-depositor indexes.
 
 The contract extends its code and instance TTL to 90 days at construction and
 renews it whenever fewer than 89 days remain. This does not change the
@@ -270,6 +275,13 @@ emitter's initial drop only once, for the exact schedule, and only to the
 candidate. `claim_backfill()` requires the position owner's authorization.
 Funded, claimed, and remaining-reserve totals are public; rounding dust cannot
 be redirected or treated as ongoing emissions.
+
+Emitter migration changes the recipient of future BLND distributions; it does
+not upgrade the incumbent v2 contracts or move their lending or backstop
+positions. The emitter mints its final time-accrued BLND distribution directly
+to the incumbent before the swap. While this candidate remains registered,
+subsequent distributions go to v3. Existing v2 positions and previously
+accrued v2 claims remain under the deployed v2 rules afterward.
 
 ## Migration operations
 

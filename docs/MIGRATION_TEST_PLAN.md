@@ -18,6 +18,14 @@ The test suite must verify:
   to the incumbent before changing the registered backstop.
 - The candidate's ongoing-emission clock starts at the finalization timestamp;
   it receives no ongoing emissions for the pre-finalization interval.
+- Except for the emitter's final time-accrued BLND mint to the incumbent,
+  finalization changes no incumbent lending principal, collateral, debt, or
+  backstop share. It invokes no position conversion, transfer, close, or import
+  into v3.
+- After finalization and while the candidate remains registered, new
+  legacy-emitter distributions go only to the candidate. BLND already held,
+  allocated, or accrued in v2 remains governed by v2 accounting and claim
+  rules.
 - Preparation is unavailable until the final seven days before unlock, verifies
   the registered original queue, and preserves its unlock time as the immutable
   recovery anchor.
@@ -89,7 +97,8 @@ The test suite must verify:
 - The complete 107-day original-queue-plus-recovery horizon schedules
   9,244,800 BLND rather than the theoretical 10 million maximum.
 - Finalization moves BLND emissions from the incumbent to the candidate.
-- The newly queued designated token is used for the next migration.
+- The newly queued BLND:XLM Comet LP is used as the designated token for the
+  next migration.
 - Successful migration awards zero discretionary BLND.
 - If the initial BLND drop funds backfill, its aggregate distribution equals
   the immutable scheduled backfill obligation, does not exceed 10 million
@@ -126,8 +135,9 @@ The v3 tests must verify:
   tokens or minting shares.
 - A registered compatible pool may accept new deposits while its callback
   blocks withdrawal.
-- Once pool WASM upgrades are implemented, upgrade tests preserve the
-  `backstop_withdrawal_allowed(backstop)` interface and fail-closed semantics.
+- The candidate exposes no pool-WASM replacement path that could bypass the
+  `backstop_withdrawal_allowed(backstop)` interface or its fail-closed
+  semantics.
 - The immutable v3 factory deploys a registered Protocol-27 pool configured
   with the candidate backstop.
 - The canonical pool callback rejects any address other than its configured

@@ -25,6 +25,14 @@ Reusable Git dependencies are kept beside this repository:
 - The pinned `moderc3156` interface is vendored in `vendor/moderc3156` so fresh
   clones and CI builds do not need to fetch the Git repository.
 
+The emitter migration does not upgrade the deployed v2 contracts or move
+their supplier, borrower, or backstop positions. Immediately before switching
+recipients, the legacy emitter mints its final time-accrued BLND distribution
+to the incumbent backstop. Subsequent emitter distributions go to v3, while
+existing v2 positions and previously accrued v2 claims remain governed by the
+v2 contracts. This routing lasts while v3 remains the emitter's registered
+backstop.
+
 See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the candidate requirements,
 [docs/V2_PARITY.md](docs/V2_PARITY.md) for the v2 parity matrix,
 [docs/BASELINE.md](docs/BASELINE.md) for the baseline policy, and

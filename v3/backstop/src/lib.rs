@@ -17,7 +17,7 @@ const MAX_RETRY_QUEUES: u32 = 2;
 const RECOVERY_HORIZON_SECONDS: u64 = MAX_RETRY_QUEUES as u64 * RETRY_PERIOD_SECONDS;
 const MAX_MIGRATION_LIFETIME_SECONDS: u64 = 2 * QUEUE_SECONDS + RECOVERY_HORIZON_SECONDS;
 const Q4W_LOCK_SECONDS: u64 = 17 * DAY_IN_SECONDS;
-const MAX_Q4W_ENTRIES: u32 = 20;
+const MAX_USER_POOL_Q4W_ENTRIES: u32 = 20;
 const SCALAR_7: i128 = 10_000_000;
 const BLND_SCALAR: i128 = SCALAR_7;
 const MAX_BACKFILL_BLND: i128 = 10_000_000 * BLND_SCALAR;
@@ -3625,9 +3625,7 @@ fn queue_standard_tier_withdrawal(
     if shares > active_shares {
         panic_with_error!(env, BackstopError::InsufficientBalance);
     }
-    if queue.len() >= MAX_Q4W_ENTRIES {
-        panic_with_error!(env, BackstopError::TooManyQ4WEntries);
-    }
+    require_q4w_entry_capacity(env, tier, &from, &pool, queue.len());
     require_recent_ongoing_checkpoint_for_weight_change(env, tier, &pool);
     checkpoint_user_ongoing_for_weight_change(env, tier, &from, &pool);
 
@@ -4732,9 +4730,7 @@ fn queue_blnd_usdc_withdrawal(env: &Env, from: Address, pool: Address, amount: i
     if amount > active_shares {
         panic_with_error!(env, BackstopError::InsufficientBalance);
     }
-    if queue.len() >= MAX_Q4W_ENTRIES {
-        panic_with_error!(env, BackstopError::TooManyQ4WEntries);
-    }
+    require_q4w_entry_capacity(env, BackstopTier::BlndUsdc, &from, &pool, queue.len());
     require_recent_ongoing_checkpoint_for_weight_change(env, BackstopTier::BlndUsdc, &pool);
     checkpoint_user_ongoing_for_weight_change(env, BackstopTier::BlndUsdc, &from, &pool);
 
@@ -4940,6 +4936,46 @@ fn queued_shares(env: &Env, queue: &Vec<Q4WEntry>) -> i128 {
         total = checked_add_i128(env, total, entry.amount);
     }
     total
+}
+
+fn require_q4w_entry_capacity(
+    env: &Env,
+    selected_tier: BackstopTier,
+    user: &Address,
+    pool: &Address,
+    selected_queue_len: u32,
+) {
+    let mut total = selected_queue_len;
+    if selected_tier != BackstopTier::BlndUsdc {
+        total = total
+            .checked_add(q4w_entry_count(env, BackstopTier::BlndUsdc, user, pool))
+            .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError));
+    }
+    if selected_tier != BackstopTier::BlndXlm {
+        total = total
+            .checked_add(q4w_entry_count(env, BackstopTier::BlndXlm, user, pool))
+            .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError));
+    }
+    if selected_tier != BackstopTier::Usdc {
+        total = total
+            .checked_add(q4w_entry_count(env, BackstopTier::Usdc, user, pool))
+            .unwrap_or_else(|| panic_with_error!(env, BackstopError::ArithmeticError));
+    }
+    if total >= MAX_USER_POOL_Q4W_ENTRIES {
+        panic_with_error!(env, BackstopError::TooManyQ4WEntries);
+    }
+}
+
+fn q4w_entry_count(env: &Env, tier: BackstopTier, user: &Address, pool: &Address) -> u32 {
+    let key = match tier {
+        BackstopTier::BlndUsdc => PersistentKey::BlndUsdcQ4W(user.clone(), pool.clone()),
+        _ => PersistentKey::TierQ4W(tier, user.clone(), pool.clone()),
+    };
+    env.storage()
+        .persistent()
+        .get::<_, Vec<Q4WEntry>>(&key)
+        .map(|queue| queue.len())
+        .unwrap_or(0)
 }
 
 fn pool_shares(env: &Env, tier: BackstopTier, pool: &Address) -> i128 {
@@ -8310,6 +8346,72 @@ mod tests {
         assert!(candidate
             .try_withdraw_blnd_usdc(&user, &pool, &1, &recipient)
             .is_err());
+    }
+
+    #[test]
+    fn q4w_entry_limit_is_aggregate_across_tiers_per_user_pool() {
+        let fixture = RewardZoneFixture::create();
+        fixture.env.mock_all_auths();
+        let candidate = fixture.client();
+        let user = Address::generate(&fixture.env);
+        let pool = fixture.pool();
+
+        for tier in [
+            BackstopTier::BlndUsdc,
+            BackstopTier::BlndXlm,
+            BackstopTier::Usdc,
+        ] {
+            fixture.set_tier_state(&pool, tier, 40, 40, 0);
+        }
+        fixture.env.as_contract(&fixture.candidate, || {
+            set_position(
+                &fixture.env,
+                &user,
+                &pool,
+                &MigrationPosition {
+                    amount: 40,
+                    backfill_amount: 40,
+                    backfill_claimed: false,
+                    frozen_weight: None,
+                    time_basis: 40_000,
+                },
+            );
+            set_tier_shares(&fixture.env, BackstopTier::BlndXlm, &user, &pool, 40);
+            set_tier_shares(&fixture.env, BackstopTier::Usdc, &user, &pool, 40);
+        });
+
+        for _ in 0..7 {
+            candidate.queue_blnd_usdc_withdrawal(&user, &pool, &1);
+            candidate.queue_blnd_xlm_withdrawal(&user, &pool, &1);
+        }
+        for _ in 0..6 {
+            candidate.queue_usdc_withdrawal(&user, &pool, &1);
+        }
+        assert_eq!(
+            candidate
+                .tier_withdrawal_queue(&BackstopTier::BlndUsdc, &user, &pool)
+                .len()
+                + candidate
+                    .tier_withdrawal_queue(&BackstopTier::BlndXlm, &user, &pool)
+                    .len()
+                + candidate
+                    .tier_withdrawal_queue(&BackstopTier::Usdc, &user, &pool)
+                    .len(),
+            MAX_USER_POOL_Q4W_ENTRIES
+        );
+        assert!(candidate
+            .try_queue_usdc_withdrawal(&user, &pool, &1)
+            .is_err());
+
+        candidate.dequeue_blnd_usdc_withdrawal(&user, &pool, &1);
+        candidate.queue_usdc_withdrawal(&user, &pool, &1);
+
+        let other_pool = fixture.pool();
+        fixture.set_tier_state(&other_pool, BackstopTier::Usdc, 1, 1, 0);
+        fixture.env.as_contract(&fixture.candidate, || {
+            set_tier_shares(&fixture.env, BackstopTier::Usdc, &user, &other_pool, 1);
+        });
+        candidate.queue_usdc_withdrawal(&user, &other_pool, &1);
     }
 
     #[test]

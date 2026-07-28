@@ -36,7 +36,7 @@ backstop.
 See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the specification index and
 composition rules, [docs/V2_SYSTEM_SPEC.md](docs/V2_SYSTEM_SPEC.md) for the
 frozen v2 baseline, [docs/V3_SYSTEM_SPEC.md](docs/V3_SYSTEM_SPEC.md) for the
-v3-only delta, [docs/V2_PARITY.md](docs/V2_PARITY.md) for the cross-reference
+v3 specification, [docs/V2_PARITY.md](docs/V2_PARITY.md) for the cross-reference
 matrix, [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for
 non-normative candidate progress,
 [docs/BASELINE.md](docs/BASELINE.md) for the baseline policy, and

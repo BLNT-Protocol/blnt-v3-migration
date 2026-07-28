@@ -198,7 +198,10 @@ The v3 tests must verify:
 - Every tier requires a 17-day Q4W entry and consumes expired entries
   oldest-first.
 - Every tier's dequeue operations restore active shares newest-first.
-- Each user/pool/tier queue is bounded to 20 entries.
+- Each user/pool is bounded to 20 aggregate entries across its three
+  tier-specific queues. The twenty-first entry fails regardless of tier;
+  removing an entry restores capacity, and another pool has an independent
+  bound.
 - Queued shares remain in custody and in the raw migration balance, retain
   backfill eligibility until actual withdrawal, and are exposed separately
   from active shares so canonical activation and ongoing-emission integrations
@@ -891,3 +894,22 @@ Modeled v2 reserve setup MUST be resumable across its non-atomic
 `queue_set_reserve` / `set_reserve` sequence. If interruption occurs after the
 queue transaction commits, the next run MUST finalize the existing unlocked
 queue instead of submitting a duplicate queue.
+
+## Release gate
+
+Before the candidate may be described as migration-ready:
+
+1. The inherited v2 suite and native and WASM v2-to-v3 migration tests pass.
+2. Queue, cancellation, expiry, balance-race, and repeat-finalization cases
+   pass.
+3. Activation boundaries and manipulation cases pass for every supported
+   asset.
+4. Withdrawal, loss, auction, and emission interactions pass.
+5. Authorization tests do not depend solely on `mock_all_auths()`.
+6. Maximum supported pools, assets, tiers, reserves, positions, and bounded
+   request sets remain within Protocol-27 resource limits.
+7. An isolated local-network deployment completes migration.
+8. An isolated public-testnet deployment exercises production transaction
+   assembly and operational monitoring.
+
+Independent security review MUST be completed before any mainnet proposal.

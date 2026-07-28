@@ -4,9 +4,8 @@ Status: Experimental candidate
 
 This document records implementation and deployment progress. It is
 non-normative and does not authorize protocol behavior. Normative
-requirements are defined by [SYSTEM_SPEC.md](SYSTEM_SPEC.md),
-[V2_SYSTEM_SPEC.md](V2_SYSTEM_SPEC.md), and
-[V3_SYSTEM_SPEC.md](V3_SYSTEM_SPEC.md).
+requirements are the specification set indexed by
+[SYSTEM_SPEC.md](SYSTEM_SPEC.md).
 
 ## Initial implementation milestones
 
@@ -51,8 +50,8 @@ activation-policy arithmetic, an immutable versioned valuation-adapter
 boundary that derives active and queued values from canonical pool-tier
 asset/share state,
 pool-local checked asset/share exchange rates that proportionally expose active
-and queued shares to tier impairment, and 17-day bounded withdrawal queues for
-all three tiers, exact one-time
+and queued shares to tier impairment, and 17-day tier-specific withdrawal
+queues with one aggregate 20-entry user/pool bound, exact one-time
 backfill funding and owner-authorized constant-time claims, an immutable
 Protocol-27 pool factory, transferable per-pool admin and stored status,
 canonical permissionless and admin status transitions, v2-compatible pool
@@ -120,3 +119,10 @@ candidate custody.
 New economic features require a separately approved specification. Remaining
 production-readiness decisions do not authorize changes to the settled
 candidate economics.
+
+## Remaining production-readiness decisions
+
+- Select and qualify a concrete production SEP-40 provider whose deployed
+  feeds and exact WASM satisfy the normative valuation-adapter policy.
+- Define production lending-reserve admission policy for issuer controls,
+  clawback, deauthorization, rebasing, and other nonstandard token behavior.

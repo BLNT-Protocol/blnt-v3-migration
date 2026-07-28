@@ -4,7 +4,10 @@ The candidate treats deployed Blend v2 behavior as the default. A v3
 difference must be required by the three-tier backstop, legacy migration,
 Protocol 27, a conservation/safety fix, or an explicitly approved exception in
 the v3 specification. The identifier/section column ties every row to
-the composed normative specification.
+the composed normative specification. Every material v3 departure should be
+recorded here before implementation. Normative inheritance does not depend on
+this matrix: where the v3 specification is silent, frozen v2 behavior is
+inherited.
 
 | Area | V2 baseline | V3 policy | Normative reference | Status |
 | --- | --- | --- | --- | --- |
@@ -12,13 +15,17 @@ the composed normative specification.
 | Pool admin | Transferable two-step admin | Same | `V2-POOL-ADMIN-001`; v3 §8.1 | Implemented |
 | Pool parameters | Admin-updatable take rate, maximum positions, and minimum collateral | Same | `V2-POOL-ADMIN-001`; v3 §8.1 | Implemented |
 | Reserve configuration | Admin queue/cancel, seven-day post-Setup delay, permissionless apply | Same | `V2-POOL-CONFIG-001`; v3 §8.1-8.2 | Implemented |
-| Status codes and action matrix | Codes 0-6 and v2 Q4W boundaries | Same | `V2-POOL-STATUS-001` and `002`; v3 §8.1 | Implemented |
+| Status codes and action matrix | Codes 0-6 and v2 Q4W boundaries | Same | `V2-POOL-STATUS-001` and `V2-POOL-STATUS-002`; v3 §8.1 | Implemented |
 | Submission entry points | Direct and per-asset-netted allowance submissions | Same, with exact balance-delta verification | `V2-LENDING-001`; v3 §8.2 | Implemented safety extension |
 | Flash loans | Zero-fee borrow before callback and allowance-settled requests | Same, with exact balance-delta verification | `V2-LENDING-001`; v3 §8.2 | Implemented safety extension |
 | Request-count bound | No separate batch-length bound | Maximum 60 requests per submission | v3 §8.2 | Implemented Protocol-27 safety extension |
+| Backstop assets and shares | One BLND:USDC token and one share ledger per pool | Three isolated pool-tier ledgers using inherited share rounding | `V2-BACKSTOP-001` and `V2-BACKSTOP-002`; v3 §7.1-7.2 | Implemented tier extension |
+| Fully drained shares | Zero-token withdrawal fails and worthless shares remain | Expired worthless shares may burn for zero; recapitalization waits until all are removed | `V2-BACKSTOP-002`; v3 §7.2 | Implemented liveness safety fix |
 | Activation | BLND/USDC product threshold | Aggregate verified USDC across three tiers | `V2-BACKSTOP-004`; v3 §8 | Implemented tier delta |
 | Activation hysteresis | One threshold | 12,500 USDC entry; 10,000 USDC maintenance | `V2-BACKSTOP-004`; v3 §8 and §8.1 | Approved exception |
 | Q4W basis | Shares of one LP token | Verified value across three tier assets | `V2-POOL-STATUS-002`; v3 §8.1 | Implemented tier delta |
+| Q4W entry bound | Maximum 20 entries per user/pool | Same aggregate bound across the three tier-specific queues | `V2-BACKSTOP-003`; v3 §7.3 | Implemented parity and resource bound |
+| Withdrawal loss gate | Withdrawal rejects while the backstop holds pool liabilities | Fail-closed callback also covers committed loss and unresolved bad debt | `V2-BACKSTOP-003`; v3 §7.3 | Implemented multi-tier safety extension |
 | Reward zone | Permissionless, maximum 30 pools | Same shape; positive-BLND entry and zero-weight liveness removal | `V2-BACKSTOP-005`; v3 §10.1 | Implemented safety fix |
 | Ongoing split | 70% backstop / 30% supply and borrow | Same, with scoped carry-forward | `V2-EMISSIONS-002`; v3 §10.1 | Implemented end to end |
 | Backstop accrual timing | Pool gulp streams the 70% tranche over seven days | Successful distribution checkpoints assign it immediately through two tier indexes | `V2-BACKSTOP-006`; v3 §10.1 | Implemented tier delta |
@@ -33,8 +40,9 @@ the composed normative specification.
 | Bad-debt realization | One backstop-token auction, then supplier loss | One tier per auction in strict waterfall order, then supplier loss | `V2-AUCTION-003`; v3 §9 | Implemented tier delta |
 | Rounding dust | Some floor remainders remain unattributed | Carry forward at the same accounting scope | `V2-SAFETY-001`; v3 §1.1, §9.1, and §10 | Top-level, reward-zone, tier-index, and user carry implemented |
 | Protocol replacement | Legacy emitter queue and swap | Same mechanism with v3 preparation and synchronization | `V2-EMITTER-002`; v3 §4, §6, and §12 | Implemented |
-| Incumbent positions after replacement | Existing positions remain in their deployed v2 contracts | Same; emitter replacement moves no lending or backstop position | `V2-ISOLATION-001`; v3 §15 | Settled isolation policy |
+| Incumbent positions after replacement | Existing positions remain in their deployed v2 contracts | Same; emitter replacement moves no lending or backstop position | `V2-ISOLATION-001`; v3 §6.4 | Settled isolation policy |
 | Incumbent emissions after replacement | Registered v2 backstop receives emitter distributions | While v3 remains registered, new distributions follow the emitter to v3; existing v2 accrual remains under v2 rules | `V2-EMITTER-001`, `V2-ISOLATION-001`; v3 §6 and §10 | Implemented emitter behavior |
+| Backfill eligibility | Aggregate 1-BLND-per-second backfill before the first valid emitter checkpoint, capped at 10M BLND | Surviving pre-unlock BLND:USDC principal multiplied by holding time; withdrawal forfeits its weight | `V2-BACKSTOP-007`; v3 §7.2.1 and §10 | Implemented migration policy |
 | Migration distribution | Emitter permits a bounded initial drop | Zero discretionary award; at most 10M BLND backfill | `V2-EMITTER-003`, `V2-BACKSTOP-007`; v3 §10 | Implemented migration policy |
 
 Implementation work should update this matrix whenever a parity gap closes or

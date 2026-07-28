@@ -14,7 +14,7 @@ specification.
    specification for the immutable v3 production LP-valuation boundary.
 4. [V2_PARITY.md](V2_PARITY.md) is the concise cross-reference matrix. It does
    not replace the normative specifications.
-5. [MIGRATION_TEST_PLAN.md](MIGRATION_TEST_PLAN.md) defines the executable
+5. [MIGRATION_TEST_PLAN.md](MIGRATION_TEST_PLAN.md) is the normative executable
    acceptance matrix for the composed specification.
 
 [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) records current progress

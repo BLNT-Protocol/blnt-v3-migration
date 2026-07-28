@@ -18,6 +18,11 @@ The workspace contains:
 - `compat-tests`: Protocol-27 WASM tests covering the SDK-22 boundary and the
   complete legacy-emitter swap into optimized v3 backstop WASM.
 
+The legacy emitter sends BLND and migration registration to the top-level v3
+backstop coordinator. That coordinator owns migration, tier, activation,
+withdrawal, loss, and emission accounting for factory-registered v3 lending
+pools. Pricing remains isolated behind the immutable valuation adapter.
+
 The repository-level local-network runner deploys the published legacy emitter,
 a coherent frozen SDK-22 incumbent stack, independently issued local assets,
 and the SDK-27 candidate stack on Protocol-27 Quickstart with testnet resource
@@ -73,7 +78,8 @@ token transfers remain outside accounted assets. BLND:USDC migration backfill
 tracks actual contributed LP principal separately from tier shares once the
 exchange rate differs from one.
 All three tier withdrawals use independent bounded 17-day queues with at most
-20 entries per user, pool, and tier, FIFO withdrawal, and LIFO dequeue.
+20 aggregate entries per user and pool across the three tiers. Withdrawal is
+FIFO and dequeue is LIFO within the selected tier.
 Withdrawal also requires an affirmative, read-only response from the attributed
 pool's `backstop_withdrawal_allowed` interface; missing, failed, and false
 responses block the transfer. Queued shares remain in custody and retain

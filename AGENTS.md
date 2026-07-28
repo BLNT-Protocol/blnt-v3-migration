@@ -79,6 +79,9 @@ side effect of work in this repository.
   withdrawn, but are excluded immediately from activation value and ongoing
   BLND-emission weight. Queueing does not shield their redemption value from
   losses absorbed by their tier.
+- Each user may have at most 20 queued-withdrawal entries in aggregate for one
+  pool across all three tiers. FIFO withdrawal and LIFO dequeue remain
+  tier-local.
 - Assets counted as backstop capital must be available to the specified loss
   waterfall.
 - Bad-debt auctions use at most one backstop tier at a time in strict

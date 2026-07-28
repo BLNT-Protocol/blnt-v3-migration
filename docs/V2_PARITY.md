@@ -3,7 +3,7 @@
 The candidate treats deployed Blend v2 behavior as the default. A v3
 difference must be required by the three-tier backstop, legacy migration,
 Protocol 27, a conservation/safety fix, or an explicitly approved exception in
-the v3 delta specification. The identifier/section column ties every row to
+the v3 specification. The identifier/section column ties every row to
 the composed normative specification.
 
 | Area | V2 baseline | V3 policy | Normative reference | Status |

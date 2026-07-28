@@ -29,9 +29,10 @@ cache; they are not separate Git checkouts.
 
 The frozen executable behavior is documented normatively in
 [V2_SYSTEM_SPEC.md](V2_SYSTEM_SPEC.md). Candidate-only changes are documented
-in [V3_SYSTEM_SPEC.md](V3_SYSTEM_SPEC.md) and compose under
-[SYSTEM_SPEC.md](SYSTEM_SPEC.md). `V3_SYSTEM_SPEC.md` MUST NOT silently restate
-or redefine an inherited v2 rule.
+in [V3_SYSTEM_SPEC.md](V3_SYSTEM_SPEC.md), with the production pricing boundary
+specified in [VALUATION_ADAPTER.md](VALUATION_ADAPTER.md). They compose under
+[SYSTEM_SPEC.md](SYSTEM_SPEC.md). Candidate specifications MUST NOT silently
+restate or redefine an inherited v2 rule.
 
 Before changing protocol behavior:
 

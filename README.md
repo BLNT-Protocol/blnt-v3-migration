@@ -41,7 +41,7 @@ matrix, [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for
 non-normative candidate progress,
 [docs/BASELINE.md](docs/BASELINE.md) for the baseline policy, and
 [docs/MIGRATION_TEST_PLAN.md](docs/MIGRATION_TEST_PLAN.md) for the migration
-test requirements. The production LP-pricing design is documented in
+test requirements. The normative production LP-pricing specification is
 [docs/VALUATION_ADAPTER.md](docs/VALUATION_ADAPTER.md), with the fail-closed
 provider qualification and deployment process in
 [docs/ORACLE_DEPLOYMENT.md](docs/ORACLE_DEPLOYMENT.md). Operational instructions

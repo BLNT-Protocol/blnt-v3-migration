@@ -31,16 +31,8 @@ requirements.
 
 ### 1.1 Inheritance and delta classification
 
-Every frozen v2 requirement is inherited unless this document explicitly
-classifies a v3 requirement as:
-
-- **Added:** behavior with no v2 equivalent.
-- **Replaced:** behavior that supersedes an identified v2 rule.
-- **Extended:** inherited behavior generalized only as stated here.
-- **Safety fix:** an approved corrective deviation.
-- **Approved exception:** an approved economic or administrative deviation.
-
-A v3 difference MUST be required by:
+Classification, inheritance, and precedence are governed by
+[SYSTEM_SPEC.md](SYSTEM_SPEC.md). A v3 difference MUST be required by:
 
 - the three-tier backstop;
 - legacy-emitter migration compatibility;
@@ -50,15 +42,12 @@ A v3 difference MUST be required by:
 
 Integer carry-forward at the same pool, reserve, tier, or user accounting
 scope is an approved conservation fix. The 12,500-USDC entry / 10,000-USDC
-maintenance hysteresis is the sole currently approved economic exception to
-strict v2 parity. Except for the differences explicitly stated in this
-specification, v3 MUST preserve v2 economic and administrative behavior.
-Implementation details MUST NOT introduce additional fees, allocations,
-privileged roles, governance, or upgrade paths.
+maintenance hysteresis is the sole currently approved economic exception.
+Implementation details MUST NOT introduce any other fee, allocation,
+privileged role, governance system, or upgrade path.
 
-Omission means inheritance. Contextual references to v2 do not redefine the
-baseline. [V2_PARITY.md](V2_PARITY.md) records the cross-reference and
-implementation status of the major approved differences.
+[V2_PARITY.md](V2_PARITY.md) records the cross-reference and implementation
+status of the major approved differences.
 
 ## 2. System boundaries
 
@@ -97,6 +86,7 @@ does not need to compile against SDK 22 or any intermediate SDK version.
 - Fixed-term or fixed-rate lending.
 - A production frontend.
 - Any protocol fee. This candidate implements none.
+- Any opt-in movement of a user's v2 position into v3.
 
 These features require separate specifications before implementation.
 
@@ -121,47 +111,18 @@ effects. Its tests MUST cover accrual, repayment, liquidation, and bad debt.
 
 ## 4. Legacy-emitter compatibility — **Added obligations**
 
-The deployed emitter is treated as an external, immutable compatibility
-boundary.
+V3 inherits `V2-EMITTER-001` through `V2-EMITTER-003` without modifying the
+deployed emitter. All additions are candidate-side obligations.
 
-The candidate MUST account for the following behavior:
+Qualifying migration capital MUST remain in the candidate's direct designated-
+token balance. The candidate MUST verify the emitter queue, qualifying balance,
+registered backstop, and next designated token at the lifecycle boundaries in
+Section 6. It MUST NOT treat market value, LP composition, pool attribution, or
+backstop accounting as a substitute for the emitter's raw balance comparison.
 
-1. The emitter recognizes one incumbent backstop address.
-2. The emitter recognizes one designated SEP-41 token at a time.
-3. Migration qualification compares the designated token's direct balance at
-   the candidate address with its direct balance at the incumbent address.
-4. The candidate balance must be strictly greater; equality is insufficient.
-5. The comparison continues to use the old designated token during the
-   migration queue.
-6. The candidate must remain larger when migration is finalized.
-7. Finalization is unavailable until the 31-day queue expires.
-8. Finalization registers both the new backstop and the token that will be used
-   to compare the next migration.
-9. Finalization distributes all BLND accrued through the finalization timestamp
-   to the incumbent backstop before changing the registered backstop.
-10. Finalization initializes the candidate's ongoing-distribution clock at the
-    finalization timestamp, so the candidate does not receive ongoing emissions
-    for the pre-finalization interval.
-11. The emitter sends ongoing BLND emissions to one registered backstop address.
-12. The emitter permits one initial drop per registered backstop, with an
-    aggregate maximum of 50 million BLND.
-
-The emitter performs a raw token-balance comparison. It does not calculate
-market value, risk-adjusted value, LP composition, backstop tiers, or pool
-activation.
-
-The candidate MUST NOT place qualifying migration capital in a child vault if
-doing so removes it from the candidate backstop address's direct token balance.
-
-The legacy emitter's permissionless, economically gated queue and swap are the
-candidate's only protocol-wide replacement mechanism. The candidate MUST NOT
-add a governance vote, multisig approval, administrator key, or alternate
-upgrade entry point that can bypass or replace that mechanism.
-
-Successful migration MUST award zero discretionary BLND. The emitter's
-otherwise available initial-drop capacity MUST NOT be distributed to the
-deployer, transaction submitters, a treasury, migration participants
-generally, or any other discretionary recipient.
+The inherited queue and swap remain the only protocol-wide replacement
+mechanism, subject to Section 12. Successful migration awards zero
+discretionary BLND; Section 10 defines the only permitted initial-drop use.
 
 ## 5. Candidate architecture — **Added**
 
@@ -190,45 +151,37 @@ direct-balance rule.
 The incumbent v2 contracts MUST remain available in the test workspace so the
 same test can deploy an incumbent and a candidate.
 
-Existing v2 supplier, borrower, and backstop positions remain governed
-exclusively by the deployed v2 code. Emitter migration redirects future BLND
-distributions without moving or modifying those positions.
-Immediately before the recipient changes, the emitter mints its final
-time-accrued BLND distribution directly to the incumbent. Subsequent allocation
-and claims from BLND held by v2 remain governed by the existing v2 emission
-rules.
+V2 position and emission isolation remain governed by `V2-ISOLATION-001`; this
+specification introduces no override.
 
 ## 6. Candidate lifecycle — **Added**
 
 ### 6.1 Pre-migration
 
-Before finalization, the candidate MUST:
+The migration uses these immutable limits:
 
-- Start a public prefunding campaign at candidate construction.
-- Require the original emitter queue to begin no more than 31 days after the
-  prefunding campaign starts.
-- Provide a permissionless `begin_migration` operation that atomically creates
-  the canonical legacy-emitter queue and records its accounting epoch.
-- Open a public accounting epoch from the original queue's deterministic
-  31-day start without treating that early observation as finalization
-  verification.
-- Refuse to prepare migration unless the accounting epoch has already opened.
-- Prepare migration during the final seven days before a verified emitter queue
-  unlocks, using the registered original queue's unlock time as the immutable
-  recovery-horizon anchor before backfill is finalized or claimable.
-- Store an immutable absolute migration deadline at construction, 138 days
-  after the prefunding campaign begins.
-- Accept the incumbent BLND:USDC designated token directly into the continuous
-  BLND:USDC first-loss tier. The same accounted shares MUST serve migration,
-  activation, loss, take-rate, and emission roles without conversion or
-  duplicate balances.
-- Keep enough designated tokens directly at the candidate address to remain
-  strictly larger than the incumbent.
-- Record user, pool, amount, shares, deposit time, and withdrawal state needed
-  for backfill and legacy claims.
-- Distinguish migration eligibility from pool activation.
-- Permit approved post-migration backstop assets to be prefunded without
-  counting them toward the legacy emitter comparison.
+| Limit | Value |
+| --- | ---: |
+| Original queue start after candidate construction | At most 31 days |
+| Emitter queue delay | 31 days |
+| Preparation window | Final 7 days before verified unlock |
+| Direct-swap synchronization deadline | Verified unlock plus 7 days |
+| Verified replacement queues | At most 2 |
+| Recovery horizon | Original unlock plus 76 days |
+| Absolute migration deadline | Construction plus 138 days |
+
+Construction starts public prefunding and fixes the absolute deadline.
+Permissionless `begin_migration()` atomically creates the canonical emitter
+queue and records its original accounting epoch. If another caller creates the
+correct queue first, permissionless `open_migration_epoch()` may record it
+while it remains observable. Neither operation treats the queue as finalized.
+
+Preparation requires an opened epoch, a currently verifiable queue, the
+strictly greater direct designated-token balance, and invocation during that
+queue's preparation window. The original unlock permanently anchors the
+recovery horizon. Sections 7 and 10 govern the continuous BLND:USDC tier and
+its backfill accounting; lifecycle state does not create a separate balance or
+a lower-risk temporary position.
 
 ### 6.2 Queue period
 
@@ -236,21 +189,10 @@ During the 31-day queue:
 
 - The incumbent remains the emitter recipient.
 - Repeated preparation of the same queue MUST be idempotent.
-- At most two replacement queues MAY be verified. Each replacement MUST target
-  the configured candidate and designated token, MUST be prepared during its
-  final seven days, and MUST fit within the absolute recovery horizon.
-- The absolute recovery horizon MUST end 76 days after the original unlock and
-  MUST NOT be extended by cancellation or re-queueing.
-- No queue, retry, recovery, synchronization, or backfill endpoint MAY extend
-  beyond the deployment-anchored 138-day absolute migration deadline.
-- Direct-swap synchronization MUST expire seven days after the currently
-  verified queue unlocks. Because another replacement requires a fresh 31-day
-  delay, an unverified queue cannot unlock during that synchronization window.
+- A replacement MUST target the configured candidate and designated token,
+  receive fresh verification and preparation, and fit every limit in Section
+  6.1. Cancellation or re-queueing MUST NOT move either absolute horizon.
 - The candidate MUST continue validating its qualifying balance.
-- BLND:USDC tier positions remain subject to the same pool attribution,
-  withdrawal, loss-commitment, activation, and reward rules that apply after
-  migration. Migration lifecycle state MUST NOT create a lower-risk temporary
-  version of the tier.
 - A loss of the strictly-greater balance MUST prevent finalization.
 - Accounting changes MUST NOT allow the same capital to support incompatible
   withdrawal and migration claims.
@@ -265,8 +207,8 @@ Finalization MUST:
   cannot exceed the deployment-anchored absolute deadline.
 - Invoke the legacy emitter swap in the canonical finalization path.
 - Verify that the emitter now recognizes the candidate.
-- End time-weighted backfill at the earlier of actual activation or 76 days
-  after the original verified queue unlock.
+- End time-weighted backfill at the earlier of successful emitter migration or
+  76 days after the original verified queue unlock.
 - Account for the emitter's final pre-swap distribution to the incumbent
   without crediting it to candidate depositors.
 - Stop new accrual under the pre-migration backfill regime.
@@ -288,13 +230,10 @@ MUST NOT modify the original recovery-horizon anchor. After that queue's grace
 period, synchronization MUST reject rather than risk accepting an unverified
 replacement queue.
 
-The canonical operational path MUST call `candidate.finalize_migration()`, not
-the emitter directly. Candidate finalization invokes `swap_backstop`, verifies
-the emitter transition, and activates the candidate atomically.
-`candidate.sync_migration()` is only the recovery path when another caller
-invokes the emitter's permissionless `swap_backstop` first. Operators MUST
-monitor the emitter during the finalization window and invoke synchronization
-immediately after detecting that transition.
+The canonical path is `candidate.finalize_migration()`, which invokes
+`swap_backstop`, verifies the emitter transition, and activates the candidate
+atomically. `candidate.sync_migration()` is only the recovery path when another
+caller invokes the emitter directly first.
 
 The synchronization deadline is seven days after the currently verified
 queue's unlock time, not seven days after the direct swap transaction. A direct
@@ -330,20 +269,10 @@ weight. This temporary fail-closed boundary prevents the unsynchronized
 interval from being reweighted and guarantees that candidate mutations cannot
 strand recovery.
 
-The canonical queue-creation path MUST call `candidate.begin_migration()`.
-That operation atomically invokes the legacy emitter's permissionless
-`queue_swap_backstop` and records the returned queue as the candidate's
-original accounting epoch. `prepare_migration()` MUST NOT silently adopt a
-queue when no epoch has been recorded.
-
-If another caller creates a correct emitter queue directly,
-`candidate.open_migration_epoch()` is the permissionless recovery path.
-Operators MUST invoke it immediately after detecting the queue and before the
-queue can be canceled or replaced. The legacy emitter does not retain canceled
-queue history, so a queue that is both unobserved and canceled cannot later be
-reconstructed on-chain. This draft accepts that bounded operational assumption.
-The deployment-anchored absolute deadline ensures that an observed replacement
-can never extend migration beyond 138 days from candidate construction.
+`prepare_migration()` MUST NOT silently adopt an emitter queue when no epoch
+has been recorded. Because the emitter does not retain canceled queue history,
+an unobserved queue that is canceled cannot later be reconstructed on-chain.
+The fixed limits in Section 6.1 bound this operational assumption.
 
 ### 6.4 Post-migration
 
@@ -354,14 +283,8 @@ After finalization:
   qualification for the next protocol migration.
 - Existing candidate BLND:USDC tier positions continue in that same first-loss
   tier without conversion, an asset swap, or a second opt-in.
-- Incumbent v2 positions remain in their original contracts. Migration MUST
-  NOT move, convert, close, or import them into v3.
-- While the candidate remains registered, the incumbent v2 backstop receives
-  no new legacy-emitter distributions after the swap. BLND already held,
-  allocated, or accrued by v2 remains governed by the existing v2 accounting
-  and claim rules.
-- Incumbent v2 lending and position management MAY continue independently of
-  v3, subject only to the immutable v2 rules and available market liquidity.
+- Incumbent position and emission isolation remain exactly as specified by
+  `V2-ISOLATION-001`.
 
 ## 7. Multi-asset backstop — **Replaced and extended**
 
@@ -371,32 +294,24 @@ pool-share and Q4W accounting in `V2-BACKSTOP-001` through
 
 ### 7.1 Asset configuration
 
-Each accepted asset MUST have an explicit configuration containing, directly
-or by reference:
+The candidate immutably binds exactly these three seven-decimal assets:
 
-- Token contract address.
-- Valuation method and precision.
-- Oracle or market-data source, if applicable.
-- Staleness and failure policy.
-- Activation haircut.
-- Concentration limit.
-- Loss tier.
-- Deposit and withdrawal status.
-- Liquidation or disposal path.
+| Tier | Asset | USDC valuation | Migration role | Backfill | Ongoing BLND weight |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | BLND:USDC 80:20 LP | Normative valuation adapter | Incumbent comparison | Eligible as specified in Section 10 | Yes |
+| 2 | BLND:XLM 80:20 LP | Normative valuation adapter | Next designated token | No | Yes |
+| 3 | Plain USDC | One-for-one | None | No | No |
 
-The three required activation assets are:
-
-- BLND:USDC 80:20 LP.
-- BLND:XLM 80:20 LP.
-- Plain USDC.
+All three tiers count equally per verified USDC for activation, participate in
+the fixed-weight take-rate policy, and absorb loss in table order. There is no
+asset-specific activation haircut or concentration limit.
 
 The candidate supports no optional custom backstop tiers. Adding another
 backstop asset requires a new protocol candidate and the legacy-emitter
 replacement process.
 
-Approval for activation does not by itself make a position eligible. Capital
-MUST also be allocated to the evaluated pool, committed to the defined loss
-waterfall, and subject to the applicable withdrawal rules.
+Eligibility additionally depends on pool attribution and capital state as
+specified in Section 7.3.
 
 ### 7.2 Position accounting
 
@@ -425,56 +340,22 @@ candidate exposes no pool-WASM replacement path. Any future candidate that
 proposes pool upgrades requires a separate specification and MUST preserve this
 interface.
 
-Positions MUST be attributable to:
+Each pool-tier independently applies the deposit, redemption, exchange-rate,
+pool-isolation, and final-redemption rules in `V2-BACKSTOP-002`. Checked
+`assets`, `shares`, and `queued_shares` are stored per pool and tier; global
+per-tier totals provide a bounded conservation check but grant no cross-pool
+claim. Raw direct transfers are excluded.
 
-- Pool.
-- Depositor.
-- Asset.
-- Tier.
-- Active shares.
-- Queued-withdrawal shares.
-- Any capital already committed to a loss or auction.
+Active and queued shares use one exchange rate and absorb gains and losses
+proportionally. Canonical policy converts the two partitions independently and
+rounds asset amounts down; partition dust remains in the pool-tier until final
+redemption.
 
-Share conversion MUST specify rounding direction for every operation. A user
-MUST NOT receive more assets than the position owns, and dust MUST have a
-documented destination.
-
-The implemented exchange-rate foundation stores checked `assets`, `shares`,
-and `queued_shares` for every pool and tier. Accounted assets are pool-local:
-a loss attributed to one pool MUST NOT impair another pool's tier. Global
-per-tier asset totals provide a bounded conservation check but do not include
-raw direct token transfers.
-
-The first deposit into an empty pool-tier mints one share per token base unit.
-Later deposits mint
-\(\lfloor deposited\ assets \times existing\ shares / existing\ assets\rfloor\)
-shares. A deposit that would mint zero shares MUST fail before custody or
-accounting changes. In particular, a fully drained tier with outstanding
-shares rejects new deposits rather than donating a recapitalization to the
-worthless shares.
-
-A withdrawal burns the requested shares and returns
-\(\lfloor burned\ shares \times existing\ assets / existing\ shares\rfloor\)
-token base units. Burning the final outstanding share balance returns all
-remaining accounted assets, so conversion dust remains in its pool-tier until
-the final redemption rather than being assigned to the protocol or a favored
-depositor. Expired shares in a fully drained tier MAY be burned for zero
-assets; only after all outstanding shares are removed can a later deposit
-initialize a fresh one-to-one rate.
-
-Active and queued shares in one tier MUST use the same share-to-asset exchange
-rate. Queueing MUST NOT snapshot or guarantee the position's current asset
-value. A gain or loss applied to the tier changes the redemption value of
-active and queued shares proportionally; the implementation MUST NOT preserve
-queued principal by charging the change only to active shares.
-
-Canonical activation, status, and ongoing-emission valuation converts active
-and queued shares independently at the common pool-tier exchange rate and
-rounds both asset amounts down. Any partition rounding dust remains unallocated
-in the pool-tier until later redemption. The exchange-rate mutation used by
-the future waterfall is internal-only until the loss auction and disposal
-policy is implemented; there is no administrator or external loss-adjustment
-entry point.
+As a v3 liveness safety fix, expired shares in a fully drained tier MAY be
+burned for zero assets. A new deposit remains prohibited while worthless
+shares exist and may initialize a fresh one-to-one exchange rate only after all
+outstanding shares are removed. No administrator or external caller can adjust
+an exchange rate directly.
 
 ### 7.2.1 Continuous BLND:USDC migration tier
 
@@ -522,125 +403,54 @@ activation value, loss capacity, take-rate eligibility, or emission weight.
 
 ### 7.2.2 BLND:XLM and plain-USDC tiers
 
-The candidate MUST configure three distinct token contracts: the incumbent
-BLND:USDC token, the emitter's next designated token representing BLND:XLM,
-and plain USDC. The constructor and legacy read interface retain the name
-`prefund_token` for plain USDC for deployment compatibility; `usdc_token`
-provides the canonical read name.
+BLND:XLM and USDC accept pool-attributed deposits before and after migration
+and apply Sections 7.2 and 7.3 independently. Neither enters the incumbent
+emitter comparison or migration backfill. Their other roles are fixed by the
+table in Section 7.1.
 
-BLND:XLM and USDC MUST:
-
-- Accept pool-attributed deposits before and after emitter migration.
-- Maintain independent, checked user, pool, and global total-share and
-  queued-share ledgers.
-- Participate in the same bounded Q4W and fail-closed pool-withdrawal rules as
-  BLND:USDC.
-- Remain separate from the incumbent emitter comparison, migration positions,
-  and migration-backfill weights. BLND:XLM and USDC deposits receive no
-  migration backfill.
-- Supply activation, take-rate, and waterfall inputs through the eligibility
-  rules defined for their respective tiers. BLND:XLM, but not plain USDC, is
-  eligible for ongoing BLND-emission weight.
-
-BLND:XLM and USDC use the same implemented checked pool-local share-to-asset
-exchange rate, conservative conversion rounding, drained-tier behavior, and
-final-redemption dust sweep as BLND:USDC. Active and queued shares use that same
-rate and absorb changes proportionally.
-
-Direct BLND:XLM or USDC transfers that do not use an attributed deposit entry
-point MUST NOT create shares or count toward activation, loss capacity,
-take-rate allocation, backfill, or emissions.
+The constructor and legacy read interface retain the name `prefund_token` for
+plain USDC for deployment compatibility; `usdc_token` is the canonical read
+name.
 
 ### 7.3 Withdrawals
 
-All three backstop tiers inherit the v2 queue-for-withdrawal shape:
+Each tier independently inherits the 17-day delay, 20-entry per-user/pool
+bound, oldest-first withdrawal, newest-first dequeue, and common-exchange-rate
+loss exposure in `V2-BACKSTOP-003`.
 
-- Queuing creates a position with an expiry exactly 17 days after the queue
-  transaction.
-- A user may have at most 20 queue entries for each pool and tier.
-- Expired withdrawals consume entries oldest-first.
-- Dequeue operations restore active shares newest-first and MAY occur before or
-  after expiry.
-- Queued BLND:USDC shares remain in contract custody and continue contributing
-  to the legacy emitter's raw balance comparison until the tokens are
-  withdrawn.
-- Queuing BLND:USDC alone does not forfeit migration-backfill weight. If the
-  tokens are actually withdrawn before emitter migration succeeds, the
-  withdrawn shares forfeit their proportional accumulated backfill weight.
-  BLND:XLM and USDC never receive migration-backfill weight.
-- Queued shares are excluded from activation value and ongoing BLND-emission
-  weight immediately upon queueing.
-- Queued shares remain eligible for take-rate realization while they remain in
-  contract custody. A completed interest auction donates its tier-token bid
-  against the tier's total shares, including active and queued shares, exactly
-  once.
-- Queued shares remain exposed to the tier's loss waterfall until actual
-  withdrawal. Queueing does not reserve their underlying assets or protect
-  their redemption value; a tier loss reduces active and queued share value
-  proportionally through their common exchange rate, as in v2.
-- Queueing and dequeueing do not change take-rate eligibility. While an
-  interest-auction commitment is active, deposits into and actual withdrawals
-  from its selected tier MUST fail so the share set that receives the donated
-  bid cannot change between preparation and settlement. Queueing and
-  dequeueing remain available because they do not change total shares. Other
-  tiers are unaffected by this interest-only lock. Permissionless stale-auction
-  deletion bounds the lock to 500 ledgers after the auction start.
-- User, pool, and global total shares are reduced only when an expired
-  withdrawal transfers the tokens out of the contract.
-- Every withdrawal calls the attributed pool's read-only
-  `backstop_withdrawal_allowed(backstop)` interface. The pool MUST return true
-  only when the backstop has no capital committed to a loss and no unresolved
-  bad debt. A missing interface, failed call, or false result blocks withdrawal.
+Capital state has these canonical policy effects:
 
-The canonical pool callback MUST derive its result from three protocol-owned
-record sets:
+| Capital state | Emitter comparison | Migration backfill | Activation/status | Loss | Take rate | Ongoing BLND |
+| --- | --- | --- | --- | --- | --- | --- |
+| Active accounted shares | BLND:USDC only | Eligible BLND:USDC only | Included | Available | Included | BLND-bearing tiers |
+| Queued shares | BLND:USDC only, until withdrawn | Preserved until actual withdrawal | Excluded | Available | Included | Excluded |
+| Bad-debt committed assets | Inherits underlying share state | Inherits underlying share state | Excluded | Reserved for that loss | Included | Inherits active-share state until transferred |
+| Raw direct transfer | BLND:USDC only | Excluded | Excluded | Excluded | Excluded | Excluded |
 
-- Nonzero liabilities held by the configured backstop.
-- Capital committed to an active loss or auction.
-- Unresolved bad-debt records.
+Actual BLND:USDC withdrawal before successful migration forfeits the withdrawn
+shares' proportional backfill weight. Queueing alone does not. User, pool, and
+global shares decrease only when an expired withdrawal transfers custody out.
 
-The initial Protocol-27 pool stores bounded liability, committed-loss, and
-unresolved-bad-debt maps in instance state. Liability and unresolved-bad-debt
-maps are keyed by reserve: a zero amount removes its record, negative amounts
-are invalid, and replacing an existing nonzero amount does not change the
-count. General committed losses are presence-only records keyed by auction
-identifier because a multi-asset auction has no single amount unit. The one
-prepared bad-debt auction is an additional canonical singleton commitment
-whose temporary lifetime exactly matches the backstop's reserved lot; its
-presence contributes one committed-loss entry without duplicating its
-identifier in the general map. Monetary amounts from reserves with different
-units MUST NOT be combined. Borrow and repay synchronize the configured
-backstop's reserve liability record.
+While an interest-auction commitment is active, deposits into and actual
+withdrawals from its selected tier MUST fail; queueing and dequeueing remain
+available because total shares do not change. Other tiers are unaffected.
+Permissionless stale-auction deletion bounds this lock to the inherited
+500-ledger stale boundary.
 
-The callback MUST return false for an address other than the pool's immutable
-backstop or when any count is nonzero. Missing canonical loss records MUST fail
-closed rather than being interpreted as empty. No administrator, governance
-address, or mutable boolean override may make the callback return true.
-An interest-auction commitment is a gain process rather than committed loss
-capital and MUST NOT enter this pool-level loss callback. The backstop enforces
-its narrower selected-tier deposit and withdrawal lock directly.
+Every withdrawal calls
+`backstop_withdrawal_allowed(backstop)` on the attributed pool. The callback
+MUST return true only for the pool's immutable backstop and only when its
+bounded canonical records contain no nonzero backstop liability, committed
+loss, or unresolved bad debt. Liability and unresolved-debt amounts remain
+reserve-keyed and MUST NOT be summed across asset units. Missing or inconsistent
+records, a missing interface, a failed call, or any nonzero count fails closed.
+No privileged override is permitted.
 
-The withdrawal implementation MUST:
-
-- Preserve a queue or delay sufficient to prevent capital from escaping known
-  losses.
-- Prevent withdrawal of capital committed to an outstanding loss process.
-- Remain executable without iterating over an unbounded number of users or
-  assets.
-
-The bounded Q4W accounting and Protocol-27 pool implement this fail-closed
-record and state boundary. Ordinary backstop borrow and repay create and
-resolve liability records. Bad-debt auction preparation now creates the
-canonical singleton commitment atomically with the backstop reservation.
-Bad-debt fills atomically move scaled dToken liabilities to a healthy filler,
-transfer the scaled tier-token lot, impair the pool-tier exchange rate, and
-update the singleton commitment. Permissionless continuation either prepares
-the next eligible strict-tier auction or, only after the backstop verifies
-that all tiers are below the auction minimum, clears the residual canonical
-liabilities while applying the loss to suppliers. A completed
-user-liquidation auction that exhausts the liquidatee's collateral atomically
-hands every residual dToken liability to the configured backstop and updates
-the same canonical reserve-keyed records.
+Borrow, repay, liquidation handoff, bad-debt preparation and fill,
+continuation, stale release, and supplier default MUST update their affected
+canonical records atomically. An interest-auction commitment is a gain process
+and does not enter this pool-level loss callback; the backstop enforces its
+selected-tier lock directly.
 
 ## 8. Pool activation — **Replaced**
 
@@ -696,138 +506,31 @@ Plain USDC is the unit of account and contributes one USDC of activation value
 per eligible token.
 
 The candidate binds one valuation-adapter address immutably at construction.
-The adapter interface version is fixed by the candidate. The interface also
-returns an immutable binding containing BLND, plain USDC, BLND:USDC, and
-BLND:XLM addresses. Candidate construction MUST reject an adapter unless all
-four addresses exactly match the candidate constructor arguments. A production
-adapter MUST itself have immutable pricing dependencies and no privileged
-configuration or WASM-upgrade path. For a positive LP-token amount it returns:
-
-- underlying BLND in seven-decimal base units;
-- USDC value in seven-decimal base units; and
-- an inclusive `valid_until` ledger timestamp.
+Its interface, immutable asset binding, production pricing policy, conservative
+80:20 Comet formula, TWAP requirements, rounding, and failure behavior are
+normatively specified by
+[VALUATION_ADAPTER.md](VALUATION_ADAPTER.md). Candidate construction MUST
+reject a version or BLND, USDC, BLND:USDC, or BLND:XLM binding mismatch.
 
 The candidate derives LP amounts from its own pool-attributed share ledgers,
 calls the adapter separately for active and queued BLND:USDC and BLND:XLM
 shares, and values accounted plain USDC exactly one-for-one. Zero LP amounts
-do not require an external quote. A missing or incompatible adapter, failed
-adapter invocation, negative result, or quote whose expiry precedes the
-current ledger timestamp MUST fail the canonical valuation atomically.
-Unattributed direct token transfers MUST NOT enter the calculation.
+do not require an external quote. A missing, incompatible, failed, negative, or
+expired quote fails canonical valuation atomically. Eligibility follows Section
+7.3; unattributed direct transfers cannot enter the calculation.
 
-Canonical valuation converts active and queued shares independently through
-their common pool-tier exchange rate before quoting LP token amounts or
-plain-USDC value. Conservative rounding can leave conversion dust unallocated;
-the final share redemption sweeps the remaining accounted assets.
-
-The production adapter uses one immutable SEP-40 feed whose base asset is the
-configured Stellar USDC asset. The feed MUST publish BLND and XLM prices in
-that base. BLND, USDC, XLM, both Comet LP tokens, the feed, and every averaging
-parameter are fixed at adapter construction. The adapter exposes no
-administrator, setter, alternate price path, or WASM-upgrade function.
-
-Let \(D_o\) be the oracle's immutable precision, \(P_b\) and \(P_q\) the
-validated arithmetic-mean prices of BLND and the paired asset, and
-\(R_b\), \(R_q\), and \(S\) the Comet's current BLND reserve, paired reserve,
-and LP-token supply. All token quantities use seven decimals. Reserve values
-are:
-
-\[
-U_b = \left\lfloor \frac{R_bP_b}{10^{D_o}} \right\rfloor
-\]
-
-\[
-U_q =
-\begin{cases}
-R_q & \text{for BLND:USDC}\\
-\left\lfloor \frac{R_qP_q}{10^{D_o}} \right\rfloor
-& \text{for BLND:XLM}
-\end{cases}
-\]
-
-Because the accepted Comets have immutable 80% BLND and 20% paired-asset
-weights, each side independently implies a total LP value:
-
-\[
-T_b = \left\lfloor U_b\frac{10^7}{8{,}000{,}000}\right\rfloor,
-\qquad
-T_q = \left\lfloor U_q\frac{10^7}{2{,}000{,}000}\right\rfloor
-\]
-
-For LP amount \(A\), the adapter returns:
-
-\[
-V(A) =
-\left\lfloor
-A\frac{\min(T_b,T_q)}{S}
-\right\rfloor
-\]
-
-and:
-
-\[
-B(A) = \left\lfloor A\frac{R_b}{S}\right\rfloor
-\]
-
-as `usdc_value` and `underlying_blnd`, respectively. Taking the lesser
-reserve-implied total makes a one-sided donation or swap imbalance unable to
-increase the verified LP value. A manipulation can reduce the quote, which is
-the conservative failure direction. A proportionate liquidity contribution
-increases reserve value together with LP supply and therefore does not inflate
-the value per LP share.
-
-The production TWAP accepts 2 through 25 uniform SEP-40 records. The immutable
-record count and oracle resolution MUST define a window from 30 minutes
-through 24 hours. Maximum price age MUST be at least one oracle resolution and
-no more than one hour. Every returned record MUST have a positive price, a
-nonfuture timestamp aligned to the immutable resolution, and a unique tick;
-the records, in any order, MUST span exactly
-`resolution * (record_count - 1)`. The arithmetic mean rounds down. A quote is
-valid inclusively through the latest accepted tick plus the configured maximum
-age. BLND:XLM uses the earlier expiry of the BLND and XLM averages.
-
-Construction MUST verify the USDC oracle base, BLND and XLM feed membership,
-seven-decimal token interfaces, exact two-token Comet membership, and exact
-80:20 normalized weights. Every quote rechecks the oracle base, precision, and
-resolution and the applicable Comet weights. A nonpositive or excessive LP
-amount, missing or malformed history, future or stale tick, changed oracle
-identity, nonpositive supply or reserve, unsupported token, or arithmetic
-failure MUST fail closed. A positive LP amount whose conservative value or
-underlying BLND rounds below one seven-decimal base unit returns zero for that
-field; valuation dust MUST NOT make the entire pool unavailable.
-
-Instantaneous Comet composition remains canonical only for
-`underlying_blnd`. It does not by itself set activation value. This preserves
-the separately approved spot-composition emission policy while activation,
-take-rate, auction, and supplier-loss accounting use the conservative
-externally priced value. See
-[VALUATION_ADAPTER.md](VALUATION_ADAPTER.md) for deployment and security
-constraints.
-
-The implemented activation policy MUST:
-
-- Count only capital allocated to the evaluated pool.
-- Count only assets available to the defined loss waterfall.
-- Avoid double-counting common underlying assets across wrappers or claims.
-- Specify treatment of queued withdrawals and committed loss capital.
-- Fail safely when required prices are stale or unavailable.
-- Resist same-transaction price, reserve, and LP-supply manipulation.
-- Use one canonical activation valuation for pool-status and reward-zone
-  threshold decisions.
-- Define behavior exactly at the threshold.
-
-Activation status MUST be refreshable permissionlessly.
+This canonical valuation is shared by permissionless activation refresh,
+pool-status thresholds, reward-zone thresholds, take-rate allocation,
+backstop-auction sizing, and supplier-loss eligibility. Instantaneous Comet
+composition determines underlying-BLND emission weight only; it does not set
+USDC value.
 
 ### 8.1 Pool-status valuation — **Extended and approved exception**
 
-V3 inherits the numeric status codes, action matrix, Q4W boundaries,
-permissionless refresh shape, transferable admin, pool parameters, and reserve
-configuration rules in `V2-POOL-ADMIN-001`, `V2-POOL-CONFIG-001`,
-`V2-POOL-STATUS-001`, and `V2-POOL-STATUS-002`.
-
-V3 replaces only the activation threshold and Q4W measurement basis. Because
-the three tiers have different token and share units, pool \(p\)'s Q4W
-percentage uses verified USDC value:
+V3 inherits `V2-POOL-ADMIN-001`, `V2-POOL-CONFIG-001`,
+`V2-POOL-STATUS-001`, and `V2-POOL-STATUS-002`. It replaces only the
+activation threshold and Q4W measurement basis. Pool \(p\)'s Q4W percentage
+uses verified USDC value:
 
 \[
 Q_p =
@@ -843,48 +546,16 @@ valuation inputs. Take-rate weights MUST NOT affect this ratio. If the
 denominator is zero, \(Q_p = 0\); activation independently keeps the pool
 On-Ice. Every comparison uses seven-decimal precision and rounds upward.
 
-A permissionless refresh MUST apply the inherited inclusive Q4W boundaries
-with the v3 activation hysteresis:
+The inherited inclusive 30%, 50%, 60%, and 75% transitions and bounded admin
+overrides apply to \(Q_p\) unchanged. Statuses 0 and 1 use the 10,000-USDC
+maintenance threshold. Statuses 2 through 6 are inactive and MUST meet the
+12,500-USDC entry threshold before returning to an active status. Statuses 4
+and 6 continue to reject permissionless refresh.
 
-- For status 0, failure of the 10,000-USDC maintenance threshold or
-  \(Q_p \ge 50\%\) moves the pool to status 3; otherwise it remains status 0.
-- For status 2, \(Q_p \ge 75\%\) moves the pool to status 5; otherwise it
-  remains status 2.
-- For statuses 1, 3, and 5, \(Q_p \ge 60\%\) produces status 5;
-  \(Q_p \ge 30\%\) or failure of the applicable activation threshold
-  produces status 3; otherwise the result is status 1.
-- Statuses 4 and 6 reject permissionless refresh.
-
-Statuses 0 and 1 use the 10,000-USDC maintenance threshold. Statuses 2 through
-6 are inactive and MUST meet the 12,500-USDC entry threshold before returning
-to an active status.
-
-The inherited pool admin MAY request:
-
-- Status 0 when the applicable activation threshold is met and
-  \(Q_p < 50\%\).
-- Status 2 or status 3 when \(Q_p < 75\%\).
-- Status 4 without an additional Q4W condition.
-
-Status 0 retains v2's bounded risk-on override between the ordinary 30% and
-admin 50% Q4W boundaries. Statuses 2 and 4 remain risk-off controls.
-
-The admin MUST NOT change the v3 activation thresholds or valuation,
-three-tier configuration, `5:5:4` take-rate weights, waterfall, withdrawal
-eligibility, migration rules, immutable 70/30 split, contract WASM, or any
-protocol-wide policy.
-
-Queueing shares does not itself change stored pool status. Status refresh,
-admin status requests, and action enforcement MUST consume the same canonical
-status result. Reward-zone entry and maintenance MUST consume the same
-canonical activation valuation, but stored pool status is not an additional
-reward-zone gate.
-
-The SDK-27 pool persists the inherited status and admin lifecycle and calls the
-immutable backstop for canonical v3 valuation. Bad-debt and tier-specific
-interest-auction direct entry points remain available under every status
-because they settle existing loss or accrued credit rather than create a new
-user lending position.
+Queueing does not itself change stored status. Status refresh and admin status
+requests use canonical valuation. Stored status is not an additional
+reward-zone gate. Bad-debt and tier-specific interest-auction direct entry
+points remain available under every status.
 
 ### 8.2 Pool integration — **Inherited with safety extensions**
 
@@ -894,42 +565,23 @@ limits, disabled-reserve behavior, and atomic rollback requirements in
 `V2-POOL-ADMIN-001`, `V2-POOL-CONFIG-001`, and `V2-LENDING-001` through
 `V2-LENDING-005`.
 
-The v3 pool implements inherited request types 0 through 5. User-liquidation
-fill and cancellation retain codes 6 and 9. Tier-specific interest and
-bad-debt processes use the dedicated direct entry points defined by this spec
-rather than changing inherited position semantics. V3 introduces no
-unauthenticated repay-on-behalf path.
+The v3 pool implements inherited request types 0 through 5.
+User-liquidation fill and cancellation retain codes 6 and 9. Tier-specific
+interest and bad-debt processes use dedicated direct entry points.
 
 Only these integration and safety extensions apply:
 
-- Both inherited submission entry points are available. `submit` performs
-  direct transfers, while `submit_with_allowance` nets each asset's aggregate
-  incoming and outgoing transfer actions and collects a positive net through
-  SEP-41 `transfer_from`. Both accept an authenticated empty request list as a
-  no-op.
-- The inherited zero-fee `flash_loan` entry point creates its borrow before the
-  request set, invokes `exec_op(from, asset, amount, 0)`, and settles the
-  requests through the allowance path. The flash borrow may be repaid in that
-  set or remain only if the final position is healthy. Its event preserves the
-  v2 topics `["flash_loan", asset, from, contract]` and vector data
-  `[tokens_out, d_tokens_minted]`.
 - A submission contains at most 60 requests. This Protocol-27 resource-safety
   bound applies equally to direct, allowance, and flash-loan request sets.
 - The immutable oracle interface returns a positive price, exact decimal scale,
   and inclusive validity timestamp. Wrong decimals, nonpositive prices, or an
   expired timestamp fail closed.
-- Collateral value still rounds down and liability value rounds up under the
-  inherited factors. Borrow and collateral withdrawal require a health factor
-  of at least 1.00001 and the immutable minimum effective collateral value.
 - Intermediate fixed-point multiplication uses checked I256 arithmetic.
   Results that do not fit i128 fail the transaction.
 - Each submission verifies exact per-asset pool token-balance deltas. A
   fee-on-transfer token, downward rebase during the call, or other mismatch
   fails atomically. This does not make later issuer clawback,
   deauthorization, or out-of-band negative rebasing safe.
-- Accrued `backstop_credit` remains isolated by pool and reserve until a
-  tier-specific v3 interest auction realizes it. No direct user or admin claim
-  is added.
 - When the configured backstop borrows or repays, the transition atomically
   synchronizes the reserve-keyed canonical backstop-liability record used by
   the withdrawal gate. Values remain in their reserve units and are never
@@ -937,9 +589,8 @@ Only these integration and safety extensions apply:
 - Reserve and user state use bounded persistent entries with explicit
   Protocol-27 TTL renewal.
 
-A failed authorization, status, reserve, utilization, health, price, cap,
-arithmetic, transfer-delta, or position-count check MUST roll back every pool,
-backstop-record, event, position, reserve, and token effect.
+These extensions participate in the inherited atomic rollback boundary,
+including their backstop records and exact token-delta checks.
 
 ### 8.3 User-liquidation integration — **Inherited with safety extensions**
 
@@ -947,7 +598,7 @@ V3 inherits `V2-AUCTION-001` and `V2-AUCTION-002`, including creation,
 health, incentive, repair-band, percentage, curve, fill, cancellation, stale
 deletion, status, filler-health, and aggregate-share-supply behavior.
 
-The v3 delta affects only the completed-auction bad-debt handoff. When a
+The v3 change affects only the completed-auction bad-debt handoff. When a
 completed liquidation exhausts collateral while liabilities remain, the same
 transaction MUST:
 
@@ -987,33 +638,12 @@ The candidate uses the following strict first-loss order:
 4. Pool suppliers for any residual loss after every backstop tier is
    operationally exhausted under the minimum-value policy below.
 
-Each backstop asset occupies its own tier. A loss MUST exhaust the eligible,
-uncommitted capital in a tier before consuming capital from the next tier.
-Activation weighting is independent of this ordering: one USDC of verified
-eligible value continues to contribute one USDC to the activation score
-regardless of tier.
-
-Capital queued for withdrawal is excluded from activation but remains
-loss-bearing capital while it is still in custody. Within a tier, a loss MUST
-impair active and queued shares proportionally through their common
-share-to-asset exchange rate. The implementation MUST NOT consume active
-shares first, preserve the queued shares' pre-loss redemption value, or permit
-withdrawal while the pool reports a committed or unresolved loss.
-
-Losses and tier capacity MUST be compared in the same verified USDC unit used
-by the activation policy. Rounding MUST NOT understate the loss passed to a
-later tier. Capital already committed to an outstanding loss or auction MUST
-NOT be counted again.
-
-For every tier, the implementation MUST define:
-
-- Priority relative to other tiers.
-- How losses are valued.
-- How losses are divided among assets in the same tier.
-- Rounding and residual-loss behavior.
-- The liquidation path for each asset.
-- Behavior when an oracle or market is unavailable.
-- When supplier balances absorb losses after backstop exhaustion.
+Tier ordering and capital-state eligibility follow Sections 7.1 and 7.3. A
+loss MUST exhaust eligible, uncommitted capital in one tier before consuming
+the next tier. Active and queued shares absorb a tier loss through their
+inherited common exchange rate. Loss and capacity comparisons use the
+canonical verified USDC unit, rounding MUST NOT understate loss passed to a
+later tier, and committed capital MUST NOT be counted twice.
 
 The implemented auction boundary retains v2's
 one-bad-debt-auction-per-pool shape and 120%-of-debt target, but each auction
@@ -1053,20 +683,11 @@ withdrawals blocked until the underlying debt is resolved. Once a tier lot is
 committed, subsequent price movement below 200 USDC does not cancel or shrink
 that commitment.
 
-After its next-ledger start, any authenticated account other than the pool or
-backstop may fill from 1% through 100% of the current bad-debt auction. The
-filler MUST NOT have an active user-liquidation auction and, after assuming the
-filled dToken shares, MUST satisfy the pool's ordinary maximum-position,
-minimum-collateral, and health requirements. Bad-debt fills remain available
-under On-Ice and Frozen statuses, matching the v2 action matrix.
-
-Bad-debt auctions use the same 400-ledger price curve and asymmetric rounding
-as user-liquidation auctions. The requested percentage first selects a base
-dToken bid with ceiling rounding and a base tier-token lot with floor rounding.
-The current ledger modifier then scales only the dToken shares and tier tokens
-actually transferred. The unselected base bid and lot remain in the auction.
-The selected base amounts are removed from the auction even when the
-time-scaled transfer is smaller.
+Bad-debt fills inherit the start, caller, percentage, filler-health, status,
+400-ledger curve, and asymmetric base-selection rules in `V2-AUCTION-001` and
+`V2-AUCTION-003`. The current ledger modifier scales only the dToken shares and
+tier tokens actually transferred. The selected base amounts are removed from
+the auction even when their time-scaled transfers are smaller.
 
 The filler assumes the time-scaled dToken bid directly from the configured
 backstop and receives the time-scaled selected tier token directly from the
@@ -1121,30 +742,11 @@ BLND:XLM LP, and plain USDC was successfully valued below 200 USDC, invalid,
 unavailable, or stale valuation fails closed before supplier loss. The
 supplier-default loop is bounded by the immutable 30-reserve maximum.
 
-For each affected reserve, the pool first accrues interest and then applies
-Blend v2's default arithmetic:
-
-```text
-default_asset_amount = ceil(d_tokens * d_rate / 10^12)
-b_rate_loss = ceil(default_asset_amount * 10^12 / b_supply)
-new_b_rate = max(previous_b_rate - b_rate_loss, 0)
-```
-
-The default removes the configured backstop's full dToken position, reduces
-reserve `d_supply` by the same shares, leaves `b_supply` unchanged, and emits
-the dToken, underlying-asset, and before/after bRate amounts. A missing
-supplier base, arithmetic failure, or inconsistent reserve state fails the
-entire call. After every reserve succeeds, the canonical liability map is
-cleared and backstop withdrawal eligibility is recomputed from the remaining
-loss records. No token transfer occurs during supplier default. If the loss
-exceeds supplier value, bRate intentionally saturates at zero as it does in
-v2.
-
-Emission weights do not need to follow loss priority. Any difference MUST be
-explicit and tested.
-
-No asset may count toward loss capacity unless the protocol can actually seize
-or dispose of it under the specified loss process.
+For each affected reserve, the pool first accrues interest and then applies the
+supplier-default arithmetic and reserve transitions in `V2-AUCTION-003`
+unchanged. After every reserve succeeds, the canonical liability map is
+cleared and withdrawal eligibility is recomputed. Any failure rolls back the
+complete continuation.
 
 ### 9.1 Take-rate allocation — **Replaced**
 
@@ -1178,12 +780,10 @@ A tier with zero eligible value contributes zero to the numerator and
 denominator. The formula therefore renormalizes across only populated,
 eligible tiers.
 
-For take-rate purposes, eligible value is derived from every accounted
-pool-tier asset still held in contract custody, whether its corresponding
-shares are active or queued for withdrawal. The canonical weighting quote MUST
-use full accounted assets rather than subtract assets separately committed to
-a bad-debt auction. A bad-debt commitment and an interest commitment may
-coexist, but their transfers MUST remain independently accounted and atomic.
+Take-rate eligibility follows Section 7.3. The canonical weighting quote uses
+full accounted assets without subtracting assets committed to bad debt. Bad-
+debt and interest commitments may coexist, but their transfers MUST remain
+independently accounted and atomic.
 
 The fixed weights compensate earlier-loss capital more per USDC of eligible
 value without changing activation weighting. Take-rate weighting is separate
@@ -1240,15 +840,12 @@ auction and backstop commitment MUST use the identical quote, identifier,
 selected tier, and fixed 46-day temporary lifetime. Only the registered pool
 may create, resize, settle, or release its commitment.
 
-Interest fills inherit v2's 400-ledger auction curve. During the first 200
-ledgers the bid is full while the lot ramps from zero to full; during the next
-200 ledgers the lot is full while the bid declines from full to zero.
-Percentage selection rounds the base bid up and base lot down. A partial fill
-removes the selected base amounts from the auction, transfers only their
-time-scaled amounts, releases any base-lot discount from the reservation, and
-leaves the pool auction and backstop commitment synchronized. Only reserve
-assets actually transferred from the pool are subtracted from both the
-persistent pending tier amount and accrued backstop credit.
+Interest fills inherit `V2-AUCTION-001`. A partial fill removes the selected
+base amounts, transfers only their time-scaled amounts, releases any base-lot
+discount from the reservation, and leaves the pool auction and backstop
+commitment synchronized. Only reserve assets actually transferred from the
+pool are subtracted from both the persistent pending tier amount and accrued
+backstop credit.
 
 The filler MUST authorize the call, MUST NOT be the pool or backstop, transfers
 the actual tier-token bid directly to the backstop, and receives the actual
@@ -1287,7 +884,6 @@ The candidate MUST distinguish:
 - Pre-migration backfill.
 - Ongoing backstop-depositor emissions.
 - Pool supply and borrow emissions.
-- Any other explicitly approved allocation.
 
 The migration backfill clock MUST start when the original legacy-emitter queue
 begins:
@@ -1345,15 +941,15 @@ W_i = \sum_k A_{i,k}(T_{\mathrm{end}} - T_{i,k})
 
 where \(A_{i,k}\) and \(T_{i,k}\) are the amount and effective deposit time of
 each eligible surviving tranche, and \(T_{\mathrm{end}}\) is the earlier of
-activation or the absolute recovery-horizon end. For an eligible tranche, the
-effective deposit time MUST be the actual deposit time. A tranche deposited at
-or after the currently verified unlock has zero weight for that queue and is
-omitted from this sum. Prefunding used to establish the candidate's qualifying
-balance therefore earns proportional allocation weight before the original
-queue begins, while the 31-day campaign limit prevents unbounded early-weight
-accumulation. Prefunding weight changes only how scheduled BLND is divided; it
-does not move the 1-BLND-per-second scheduling start earlier than the original
-queue. A position's allocation is:
+successful emitter migration or the absolute recovery-horizon end. For an
+eligible tranche, the effective deposit time MUST be the actual deposit time.
+A tranche deposited at or after the currently verified unlock has zero weight
+for that queue and is omitted from this sum. Prefunding used to establish the
+candidate's qualifying balance therefore earns proportional allocation weight
+before the original queue begins, while the 31-day campaign limit prevents
+unbounded early-weight accumulation. Prefunding weight changes only how
+scheduled BLND is divided; it does not move the 1-BLND-per-second scheduling
+start earlier than the original queue. A position's allocation is:
 
 \[
 B_i = \left\lfloor B \frac{W_i}{\sum_j W_j} \right\rfloor
@@ -1474,33 +1070,18 @@ backstop user weighting in this section, while \(E_{\mathrm{pool}}\) remains
 segregated for pool supply and borrow positions and follows the v2-compatible
 configuration rule below.
 
-The candidate MUST preserve v2's bounded reward-zone shape:
+The maximum-30-pool, permissionless, unique-membership, full-zone replacement,
+and post-activation one-hour checkpoint shape in `V2-BACKSTOP-005` is
+inherited with these changes:
 
-- The reward zone contains at most 30 registered pools.
-- Any caller may add a nonmember that meets the 12,500-USDC entry threshold and
-  has strictly positive eligible underlying BLND.
-- Any caller may remove a member that falls below the 10,000-USDC maintenance
-  threshold.
-- Any caller may remove a member with zero eligible underlying BLND regardless
-  of its remaining activation value and without a distribution checkpoint.
-  Zero-weight removal is allocation-neutral and is the fail-open liveness path
-  if all of a member's BLND-bearing capital becomes queued, withdrawn, or
-  impaired.
-- If the zone is full, an addition must name one existing member to remove and
-  the entrant must have strictly greater eligible underlying-BLND weight than
-  that member.
-- A pool cannot appear twice.
-- Before migration activation, any number of qualified pools up to the
-  30-member bound may enter, and a positive-weight member below maintenance may
-  be removed, without a distribution checkpoint. No ongoing candidate
-  emissions can accrue during that phase, so these edits cannot reassign an
-  unresolved interval.
-- After migration activation, reward-zone edits after the first entry require
-  a distribution checkpoint within the preceding hour, matching v2's
-  protection against retroactive disruption, except for the
-  allocation-neutral removal of a zero-weight member. This separately
-  inherited rule means any post-activation weight-bearing membership edit can
-  affect an unresolved interval of up to one hour.
+- Entry requires the 12,500-USDC threshold and positive eligible underlying
+  BLND.
+- Ordinary removal requires failure of the 10,000-USDC maintenance threshold.
+- A zero-underlying-BLND member may be removed regardless of activation value
+  and without a checkpoint.
+- Full-zone replacement compares eligible underlying BLND and remains strict.
+- Before migration activation, qualified entry and ordinary removal require no
+  checkpoint because no ongoing candidate emissions can accrue.
 
 Pool activation remains independent of reward-zone admission. A pool backed
 only by at least 12,500 USDC can activate, but it earns no BLND and cannot enter
@@ -1717,7 +1298,7 @@ a valid configuration is restored. Configuration input is bounded to 60
 entries for Protocol-27 resource safety, including entries later replaced by
 the last-write-wins rule.
 
-The v3 delta begins after reward-zone allocation
+The v3 change begins after reward-zone allocation
 \(E_{\mathrm{pool},p}\): integer remainder at the pool, reserve-token, and
 user scopes is carried forward at that same scope, and the candidate contract
 retains custody of the BLND allocated to the pool tranche.
@@ -1757,68 +1338,31 @@ BLND but not the backstop-depositor claimed counter.
 
 ## 11. Designated token selection — **Replaced**
 
-The queue mechanism remains inherited from `V2-EMITTER-002`; this section
-replaces only the next designated-token choice and its candidate-side binding.
-
-This candidate immutably selects the configured BLND:XLM Comet LP as the next
-designated token. The legacy emitter only requires a compatible token balance
-interface, but the candidate additionally binds this address as its BLND:XLM
-backstop tier and verifies the queued emitter token against that binding.
-
-Before queuing BLND:XLM, the candidate design MUST verify:
-
-- It implements the expected token interface.
-- The candidate can custody it directly.
-- Future candidates can acquire and transfer it.
-- A raw-balance comparison is economically and operationally acceptable.
-- Decimal conventions cannot make the next migration unintentionally trivial
-  or impossible.
-
-Selecting the designated token is separate from choosing which assets count
-toward pool activation. A future candidate MAY propose another LP token or a
-plain SEP-41 asset, but that choice requires its own specification and must not
-retroactively change this candidate.
+The queue mechanism remains inherited from `V2-EMITTER-002`. This candidate
+immutably selects the seven-decimal BLND:XLM Comet LP bound as Tier 2 in
+Section 7.1 and MUST verify that exact address as the queued next designated
+token. A different choice requires a new candidate specification and emitter
+replacement.
 
 ## 12. Authorization, immutability, and replacement — **Added constraints**
 
 These constraints extend `V2-IMMUTABILITY-001`, `V2-POOL-ADMIN-001`, and
 `V2-AUTH-001` to the candidate's new coordinator and three-tier contracts.
 
-The v3 candidate MUST NOT introduce protocol governance, multisig control,
-protocol-wide administrator-controlled recovery, a protocol-wide emergency
-override, or an independent WASM upgrade authority. A transferable v2-style
-pool admin is a pool-local operating role and is not a protocol replacement
-mechanism.
-
-The candidate backstop, factory, migration policy, activation policy,
-emissions policy, and loss-waterfall rules MUST be immutable after deployment.
-Their contract interfaces MUST NOT expose an entry point that replaces contract
-WASM or changes those protocol-wide rules through a privileged caller.
-
-Future protocol-wide changes MUST deploy a new candidate and use the existing
-legacy-emitter replacement mechanism:
-
-1. The new candidate directly acquires a strictly greater balance of the
-   incumbent designated token.
-2. A permissionless caller creates and observes the emitter's 31-day queue.
-3. Permissionless preparation verifies the queue during its final seven days.
-4. A permissionless caller finalizes the emitter swap after unlock.
+The candidate backstop, factory, migration, activation, emissions, and
+loss-waterfall policies MUST be immutable after deployment. Their interfaces
+MUST expose no governance, multisig, protocol-wide administrator or emergency
+override, privileged WASM replacement, or alternate upgrade path. Future
+protocol-wide changes require a new candidate and the inherited emitter
+replacement mechanism.
 
 Deployment keys and transaction submitters are operational actors only. They
 MUST NOT receive continuing protocol authority merely because they deploy,
 fund, prepare, finalize, or synchronize a candidate.
 
-The continuing pool-local authority is the explicitly configured transferable
-pool admin described in Section 8.1. It includes v2-compatible configuration,
-reserve-queue, emission-weight, Admin Active, Admin On-Ice, and Admin Frozen
-controls. It cannot alter the candidate backstop, factory, migration policy,
-activation policy, tier rules, loss waterfall, immutable 70/30 split, or
-contract WASM and cannot act as a protocol-upgrade path.
-
-User authorization remains required for custody-changing actions involving
-that user's assets or shares. This is distinct from protocol governance and
-MUST NOT create authority to alter global policy or bypass migration
-invariants.
+The inherited transferable pool admin and user authorization rules remain
+pool-local and custody-local respectively. Neither can alter a protocol-wide
+binding or policy.
 
 No recovery path may override the emitter's queue, balance comparison, or
 unlock time. Bounded permissionless recovery may only observe, validate, or
@@ -1829,13 +1373,10 @@ synchronize state already established by the legacy emitter.
 These requirements extend `V2-SAFETY-001` and `V2-SAFETY-002` for the
 Protocol-27 runtime and the candidate's longer migration horizon.
 
-- Contract arithmetic MUST use integers and explicit fixed-point scales.
 - Release overflow checks MUST remain enabled.
 - Saturating arithmetic MAY be used only where all saturated results are
   intentionally equivalent, such as a threshold comparison, and must be
   documented.
-- Conversions MUST define floor or ceiling behavior.
-- Asset decimals MUST be validated.
 - Critical calls MUST use bounded work and bounded ledger footprints.
 - The top-level candidate MUST extend its code and instance TTL to 90 days at
   construction and whenever the remaining TTL falls below 89 days.
@@ -1867,25 +1408,9 @@ Before a candidate can be described as migration-ready:
 The detailed test matrix is maintained in
 [MIGRATION_TEST_PLAN.md](MIGRATION_TEST_PLAN.md).
 
-## 15. Settled policy and remaining production decisions
-
-The candidate has settled the following protocol policies:
-
-- Production LP valuation uses the immutable SEP-40 USDC-base TWAP,
-  staleness, fail-closed, and conservative Comet policy defined in Section 8.
-- BLND:XLM Comet LP is the immutable next emitter-designated token.
-- The candidate implements no protocol or treasury fee.
-- Incumbent v2 contracts and their supplier, borrower, and backstop positions
-  remain isolated and unchanged. The emitter swap ends new v2 BLND
-  distributions but performs no position migration.
-
-The following production-readiness decisions remain:
+## 15. Remaining production decisions
 
 - Selection and qualification of a concrete production SEP-40 provider whose
-  deployed feeds and exact WASM satisfy the implemented valuation policy.
+  deployed feeds and exact WASM satisfy the normative valuation-adapter policy.
 - Production lending-reserve admission policy for issuer controls, clawback,
   deauthorization, rebasing, and other nonstandard token behavior.
-
-Any future opt-in mechanism for moving a user from v2 to v3 is a separate
-product and protocol proposal. It is not part of this candidate and MUST NOT
-be inferred from the emitter migration.

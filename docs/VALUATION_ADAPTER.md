@@ -1,10 +1,17 @@
 # Production LP Valuation Adapter
 
+Status: Normative v3 component specification
+
+This document composes with
+[V3_SYSTEM_SPEC.md](V3_SYSTEM_SPEC.md) under the inheritance and precedence
+rules in [SYSTEM_SPEC.md](SYSTEM_SPEC.md).
+
 The production valuation adapter is the candidate's immutable pricing boundary
 for BLND:USDC and BLND:XLM Comet LP tokens. It supplies canonical USDC values
 for activation, status, take-rate allocation, bad-debt lots, interest lots,
-and verified backstop exhaustion. It also returns current underlying BLND for
-the candidate's reward-zone eligibility boundary.
+and verified backstop exhaustion. It also exposes current underlying BLND;
+Section 10.1 of the v3 specification independently defines the canonical spot
+calculation used for reward-zone and emission weight.
 
 The deterministic adapter in `v3/test-valuation-adapter` is a localnet and test
 fixture. Its asset bindings are immutable, while its test-only price and
@@ -137,7 +144,8 @@ An audited adapter cannot make an untrusted or compromised feed trustworthy.
 Feed selection remains a deployment security decision and must be disclosed to
 depositors.
 
-The automated qualification and deployment lane is documented in
+The following paragraph records deployment status and is non-normative. The
+automated qualification and deployment lane is documented in
 [`ORACLE_DEPLOYMENT.md`](ORACLE_DEPLOYMENT.md). As of 2026-07-27, both official
 Reflector Stellar-DEX public deployments fail the immutable compatibility
 gates: neither advertises the exact BLND asset, and the testnet mirror also

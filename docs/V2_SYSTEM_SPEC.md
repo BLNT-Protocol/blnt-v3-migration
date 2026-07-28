@@ -16,7 +16,7 @@ document differs from that executable behavior, the executable behavior wins
 and this document MUST be corrected.
 
 Normative terms `MUST`, `MUST NOT`, `SHOULD`, and `MAY` describe the behavior a
-v3 candidate inherits unless the v3 delta explicitly overrides it.
+v3 candidate inherits unless the v3 specification explicitly overrides it.
 
 ## 2. Frozen runtime and contracts
 
@@ -112,6 +112,9 @@ Each pool has one backstop-token asset balance and one share supply:
 - Redemptions use
   `floor(burned_shares * existing_tokens / existing_shares)`.
 - Burning all remaining shares returns all remaining pool-attributed tokens.
+- If the pool-attributed token balance is zero while shares remain, a deposit
+  converts to zero shares and fails. A withdrawal that converts to zero tokens
+  also fails; v2 does not burn a worthless queued share for zero assets.
 
 A token gain or loss changes the common exchange rate for every active and
 queued share in that pool. Pool-attributed value MUST NOT be used to satisfy
@@ -357,8 +360,9 @@ V2:
   positions, supply caps, and maximum utilization.
 - Supports at most 60 effective collateral and liability positions per user.
 
-Borrow and collateral withdrawal MUST leave the position healthy under the
-frozen v2 calculation.
+Borrow and collateral withdrawal MUST leave the position at or above the
+seven-decimal health-factor floor `1.0000100` and at or above the configured
+minimum effective collateral value.
 
 ### V2-LENDING-005: Atomicity
 
@@ -415,6 +419,11 @@ V2 creates at most one bad-debt auction per pool. The auction:
 - Transfers filled dToken liabilities from the backstop to the filler.
 - Transfers the time-scaled LP-token lot to the filler.
 - Reduces pool-attributed backstop assets without burning shares.
+
+After the next-ledger start, an authenticated filler other than the pool or
+backstop may fill from 1% through 100%. The resulting position must satisfy the
+ordinary maximum-position, minimum-collateral, and health requirements.
+Bad-debt fills remain available while the pool is On-Ice or Frozen.
 
 If the v2 backstop cannot cover residual debt under its frozen minimum and
 auction policy, supplier loss follows the v2 default calculation:
@@ -527,7 +536,8 @@ A candidate claiming v2 parity MUST:
 3. Execute optimized SDK-22 v2 WASM on the target Protocol-27 host.
 4. Preserve the status codes, action matrix, pool administration, reserve
    configuration, lending accounting, liquidation shape, supplier-default
-   arithmetic, and 70/30 split unless the v3 delta explicitly overrides them.
+   arithmetic, and 70/30 split unless the v3 specification explicitly
+   overrides them.
 5. Demonstrate that emitter migration leaves existing v2 positions unchanged
    and operational.
 

@@ -14,7 +14,7 @@ const SECONDS_PER_YEAR: i128 = 31_536_000;
 pub(crate) const SECONDS_PER_WEEK: u64 = 604_800;
 const MAX_RESERVES: u32 = 30;
 const MAX_POSITIONS: u32 = MAX_RESERVES * 2;
-const MAX_REQUESTS: u32 = MAX_POSITIONS;
+pub(crate) const MAX_REQUESTS: u32 = MAX_POSITIONS;
 const MIN_HEALTH_FACTOR: i128 = 10_000_100;
 const RESERVE_QUEUE_TTL_THRESHOLD: u32 = 100 * 17_280;
 const RESERVE_QUEUE_TTL_BUMP: u32 = 120 * 17_280;
@@ -131,6 +131,14 @@ pub struct Request {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
+pub struct FlashLoan {
+    pub contract: Address,
+    pub asset: Address,
+    pub amount: i128,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
 pub struct PriceQuote {
     pub decimals: u32,
     pub price: i128,
@@ -204,6 +212,12 @@ pub trait PriceOracle {
     fn price(env: Env, asset: Address) -> PriceQuote;
 }
 
+#[contractclient(name = "FlashLoanReceiverClient")]
+#[allow(dead_code)]
+pub trait FlashLoanReceiver {
+    fn exec_op(env: Env, caller: Address, token: Address, amount: i128, fee: i128);
+}
+
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LendingAction {
@@ -211,6 +225,19 @@ pub struct LendingAction {
     pub amount: i128,
     pub asset: Address,
     pub owner: Address,
+    pub position_delta: i128,
+}
+
+#[contractevent(topics = ["flash_loan"], data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FlashLoanExecuted {
+    #[topic]
+    pub asset: Address,
+    #[topic]
+    pub owner: Address,
+    #[topic]
+    pub receiver: Address,
+    pub amount: i128,
     pub position_delta: i128,
 }
 
@@ -233,6 +260,12 @@ enum LendingPersistentKey {
 struct Transfers {
     incoming: Map<Address, i128>,
     outgoing: Map<Address, i128>,
+}
+
+#[derive(Copy, Clone)]
+enum TransferMode {
+    Allowance,
+    Direct,
 }
 
 impl Transfers {
@@ -464,13 +497,55 @@ pub(crate) fn submit(
     to: &Address,
     requests: Vec<Request>,
 ) -> Positions {
+    execute_submit(env, from, spender, to, requests, TransferMode::Direct, None)
+}
+
+pub(crate) fn submit_with_allowance(
+    env: &Env,
+    from: &Address,
+    spender: &Address,
+    to: &Address,
+    requests: Vec<Request>,
+) -> Positions {
+    execute_submit(
+        env,
+        from,
+        spender,
+        to,
+        requests,
+        TransferMode::Allowance,
+        None,
+    )
+}
+
+pub(crate) fn flash_loan(
+    env: &Env,
+    from: &Address,
+    flash_loan: FlashLoan,
+    requests: Vec<Request>,
+) -> Positions {
+    execute_submit(
+        env,
+        from,
+        from,
+        from,
+        requests,
+        TransferMode::Allowance,
+        Some(flash_loan),
+    )
+}
+
+fn execute_submit(
+    env: &Env,
+    from: &Address,
+    spender: &Address,
+    to: &Address,
+    requests: Vec<Request>,
+    transfer_mode: TransferMode,
+    flash_loan: Option<FlashLoan>,
+) -> Positions {
     let pool = env.current_contract_address();
-    if from == &pool
-        || spender == &pool
-        || to == &pool
-        || requests.is_empty()
-        || requests.len() > MAX_REQUESTS
-    {
+    if from == &pool || spender == &pool || to == &pool || requests.len() > MAX_REQUESTS {
         panic_with_error!(env, PoolError::BadRequest);
     }
     spender.require_auth();
@@ -485,6 +560,48 @@ pub(crate) fn submit(
     let mut liability_checks: Map<Address, bool> = Map::new(env);
     let mut prices: Map<Address, PriceQuote> = Map::new(env);
     let mut utilization_checks: Map<Address, bool> = Map::new(env);
+
+    // Match v2 by creating the flash-borrow liability before executing the
+    // accompanying request set. The request set may repay it immediately or
+    // leave a healthy collateralized liability.
+    if let Some(flash) = flash_loan.as_ref() {
+        if flash.amount <= 0 {
+            panic_with_error!(env, PoolError::BadRequest);
+        }
+        require_action_allowed(env, get_status(env), ACTION_BORROW);
+        let mut reserve = accrue_reserve(env, &flash.asset);
+        if !reserve.config.enabled || reserve.config.l_factor == 0 {
+            panic_with_error!(env, PoolError::ReserveDisabled);
+        }
+        emissions::checkpoint_before_lending_change(
+            env,
+            from,
+            &user,
+            &reserve,
+            reserve
+                .config
+                .index
+                .checked_mul(2)
+                .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError)),
+        );
+        let minted = to_d_tokens_up(env, &reserve, flash.amount);
+        require_positive(env, minted);
+        add_position(env, &mut user.liabilities, reserve.config.index, minted);
+        reserve.data.d_supply = checked_add(env, reserve.data.d_supply, minted);
+        require_utilization_below_one(env, &reserve);
+        set_reserve_data(env, &reserve.config.asset, &reserve.data);
+        liability_checks.set(reserve.config.asset.clone(), true);
+        utilization_checks.set(reserve.config.asset.clone(), true);
+        health_check = true;
+        FlashLoanExecuted {
+            asset: flash.asset.clone(),
+            owner: from.clone(),
+            receiver: flash.contract.clone(),
+            amount: flash.amount,
+            position_delta: minted,
+        }
+        .publish(env);
+    }
 
     for request in requests {
         if request.amount < 0
@@ -630,8 +747,9 @@ pub(crate) fn submit(
             ACTION_REPAY => {
                 let balance = user.liabilities.get(reserve.config.index).unwrap_or(0);
                 require_positive(env, balance);
-                let debt = to_asset_from_d_tokens(env, &reserve, balance);
-                let (burn, repaid) = if request.amount >= debt {
+                let requested_burn = to_d_tokens_down(env, &reserve, request.amount);
+                let (burn, repaid) = if requested_burn > balance {
+                    let debt = to_asset_from_d_tokens(env, &reserve, balance);
                     transfers.add_outgoing(
                         env,
                         &reserve.config.asset,
@@ -639,10 +757,7 @@ pub(crate) fn submit(
                     );
                     (balance, debt)
                 } else {
-                    (
-                        to_d_tokens_down(env, &reserve, request.amount),
-                        request.amount,
-                    )
+                    (requested_burn, request.amount)
                 };
                 require_positive(env, burn);
                 transfers.add_incoming(env, &reserve.config.asset, request.amount);
@@ -702,16 +817,58 @@ pub(crate) fn submit(
             );
         }
     }
-    for (asset, amount) in transfers.incoming.iter() {
-        token::Client::new(env, &asset).transfer(spender, &pool, &amount);
+    if let Some(flash) = flash_loan.as_ref() {
+        if !balances_before.contains_key(flash.asset.clone()) {
+            balances_before.set(
+                flash.asset.clone(),
+                token::Client::new(env, &flash.asset).balance(&pool),
+            );
+        }
+        token::Client::new(env, &flash.asset).transfer(&pool, &flash.contract, &flash.amount);
+        FlashLoanReceiverClient::new(env, &flash.contract).exec_op(
+            from,
+            &flash.asset,
+            &flash.amount,
+            &0,
+        );
     }
-    for (asset, amount) in transfers.outgoing.iter() {
-        if amount > 0 {
-            token::Client::new(env, &asset).transfer(&pool, to, &amount);
+    match transfer_mode {
+        TransferMode::Direct => {
+            for (asset, amount) in transfers.incoming.iter() {
+                token::Client::new(env, &asset).transfer(spender, &pool, &amount);
+            }
+            for (asset, amount) in transfers.outgoing.iter() {
+                if amount > 0 {
+                    token::Client::new(env, &asset).transfer(&pool, to, &amount);
+                }
+            }
+        }
+        TransferMode::Allowance => {
+            for (asset, incoming) in transfers.incoming.iter() {
+                let outgoing = transfers.outgoing.get(asset.clone()).unwrap_or(0);
+                if incoming > outgoing {
+                    token::Client::new(env, &asset).transfer_from(
+                        &pool,
+                        spender,
+                        &pool,
+                        &checked_sub_nonnegative(env, incoming, outgoing),
+                    );
+                }
+            }
+            for (asset, outgoing) in transfers.outgoing.iter() {
+                let incoming = transfers.incoming.get(asset.clone()).unwrap_or(0);
+                if outgoing > incoming {
+                    token::Client::new(env, &asset).transfer(
+                        &pool,
+                        to,
+                        &checked_sub_nonnegative(env, outgoing, incoming),
+                    );
+                }
+            }
         }
     }
     for (asset, balance_before) in balances_before {
-        let expected = checked_sub_nonnegative(
+        let after_requests = checked_sub_nonnegative(
             env,
             checked_add(
                 env,
@@ -720,6 +877,12 @@ pub(crate) fn submit(
             ),
             transfers.outgoing.get(asset.clone()).unwrap_or(0),
         );
+        let flash_amount = flash_loan
+            .as_ref()
+            .filter(|flash| flash.asset == asset)
+            .map(|flash| flash.amount)
+            .unwrap_or(0);
+        let expected = checked_sub_nonnegative(env, after_requests, flash_amount);
         if token::Client::new(env, &asset).balance(&pool) != expected {
             panic_with_error!(env, PoolError::InvalidTokenBalance);
         }

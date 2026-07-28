@@ -1,5 +1,9 @@
 # V2 to V3 Migration Test Plan
 
+This plan validates the frozen
+[v2 baseline](V2_SYSTEM_SPEC.md) and [v3 delta](V3_SYSTEM_SPEC.md) as composed
+by the [specification index](SYSTEM_SPEC.md).
+
 The emitter migration and an individual pool's activation rule are independent
 mechanisms. Tests must keep those concepts separate.
 
@@ -364,7 +368,14 @@ The v3 tests must verify:
   removal of a nonzero liability factor, preserve the interest modifier for
   non-curve changes, and reset it when inherited curve parameters change.
 - Supply, withdraw, collateral supply, collateral withdraw, borrow, and repay
-  execute against native and optimized pool WASM.
+  execute through both direct and allowance submissions against native and
+  optimized pool WASM. The allowance path nets incoming and outgoing amounts
+  independently for each asset.
+- A zero-fee flash loan creates its borrow before the accompanying requests,
+  invokes the receiver with `(from, asset, amount, 0)`, and settles the request
+  set through `from`'s allowance. Immediate repayment and a healthy retained
+  liability both work; callback, allowance, health, utilization, or balance
+  failure rolls back the complete invocation.
 - Every request enforces the stored status before changing reserve or position
   accounting. On-Ice rejects borrow; Frozen rejects supply and collateral
   supply while repayment and ordinary safe withdrawals remain available.
@@ -373,8 +384,17 @@ The v3 tests must verify:
   unauthenticated repay-on-behalf.
 - bToken minting rounds down, bToken withdrawal burns round up, dToken borrowing
   rounds up, and partial dToken repayment rounds down.
-- Repayment at or above live debt clears the complete position and returns the
-  exact excess token input to `to`.
+- Repayment reproduces v2's dToken comparison at a non-unit dRate. A
+  rounded-down burn equal to the position balance clears the debt but collects
+  the complete request in both transfer modes, even when rounding places it
+  slightly above live debt. Only a burn strictly greater than the balance
+  enters the over-repayment branch: direct submission returns the excess to
+  `to`, while allowance submission nets it and pulls only live debt.
+- Authenticated empty direct and allowance submissions succeed as no-ops and
+  return the owner's current positions.
+- The flash-loan event exactly preserves the v2 topics
+  `["flash_loan", asset, from, contract]` and vector data
+  `[tokens_out, d_tokens_minted]`.
 - The adaptive interest curve matches inherited v2 reference vectors, increases
   dRate, allocates the immutable take-rate portion to accrued backstop credit,
   and allocates the remainder through bRate.
@@ -382,8 +402,10 @@ The v3 tests must verify:
   result below 1.00001 or below minimum effective collateral, and fails closed
   for nonpositive, expired, or wrong-decimal oracle quotes.
 - Disabled reserves, supply caps, maximum utilization, maximum positions,
-  request-count bounds, unknown reserves, invalid constructor configuration,
-  and arithmetic overflow fail atomically.
+  unknown reserves, invalid constructor configuration, and arithmetic overflow
+  fail atomically. Direct, allowance, and flash-loan paths reject more than 60
+  requests before changing state; the bound does not assert that every
+  60-request composition fits the network resource envelope.
 - A failed health, status, authorization, price, token transfer, or arithmetic
   check leaves token balances, reserve state, user positions, loss records, and
   events unchanged.
@@ -748,6 +770,10 @@ The v3 tests must verify:
 - The pool admin can configure positive relative weights among valid supply and
   debt token identifiers for the 30% tranche; disabled reserves are omitted and
   remaining weights renormalize as in v2.
+- Matching the frozen setter, an empty configuration is accepted and duplicate
+  identifiers use the last supplied weight. While the configuration is empty,
+  `gulp` fails before consuming or reserving candidate emissions. More than 60
+  configuration entries fail before checkpointing streams.
 - Supply and borrow emissions remain separate from the backstop-depositor
   tranche and are claimable to an authorized user's chosen destination.
 - A positive pool gulp is limited to once per 24 hours, rejects less than one

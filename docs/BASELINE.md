@@ -27,13 +27,19 @@ cache; they are not separate Git checkouts.
 
 ## Baseline policy
 
+The frozen executable behavior is documented normatively in
+[V2_SYSTEM_SPEC.md](V2_SYSTEM_SPEC.md). Candidate-only changes are documented
+in [V3_SYSTEM_SPEC.md](V3_SYSTEM_SPEC.md) and compose under
+[SYSTEM_SPEC.md](SYSTEM_SPEC.md). `V3_SYSTEM_SPEC.md` MUST NOT silently restate
+or redefine an inherited v2 rule.
+
 Before changing protocol behavior:
 
 1. Run the inherited v2 unit and integration tests.
 2. Run `test_v2_to_v3_candidate` to verify the legacy emitter migration
    harness.
-3. Record intentional compatibility changes in this document or a dedicated
-   design document.
+3. Record every intentional compatibility change in `V3_SYSTEM_SPEC.md` and
+   cross-reference it in `V2_PARITY.md`.
 4. Add a regression test before changing an existing invariant.
 
 Do not upgrade the inherited v2 toolchain. The repository root remains frozen

@@ -94,7 +94,7 @@ pub struct PoolEmissionsClaimed {
 }
 
 pub(crate) fn set_config(env: &Env, metadata: Vec<ReserveEmissionMetadata>) {
-    if metadata.is_empty() || metadata.len() > MAX_RESERVE_TOKEN_IDS {
+    if metadata.len() > MAX_RESERVE_TOKEN_IDS {
         panic_with_error!(env, PoolError::InvalidEmissionConfig);
     }
 
@@ -109,9 +109,8 @@ pub(crate) fn set_config(env: &Env, metadata: Vec<ReserveEmissionMetadata>) {
             .and_then(|value| value.checked_add(entry.res_type))
             .unwrap_or_else(|| panic_with_error!(env, PoolError::ArithmeticError));
         require_reserve_token_id(env, reserve_token_id);
-        if next.contains_key(reserve_token_id) {
-            panic_with_error!(env, PoolError::InvalidEmissionConfig);
-        }
+        // Preserve v2's input behavior: later duplicate identifiers replace
+        // earlier weights.
         next.set(reserve_token_id, entry.share);
     }
 

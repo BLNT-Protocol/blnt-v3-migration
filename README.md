@@ -33,8 +33,12 @@ existing v2 positions and previously accrued v2 claims remain governed by the
 v2 contracts. This routing lasts while v3 remains the emitter's registered
 backstop.
 
-See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the candidate requirements,
-[docs/V2_PARITY.md](docs/V2_PARITY.md) for the v2 parity matrix,
+See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the specification index and
+composition rules, [docs/V2_SYSTEM_SPEC.md](docs/V2_SYSTEM_SPEC.md) for the
+frozen v2 baseline, [docs/V3_SYSTEM_SPEC.md](docs/V3_SYSTEM_SPEC.md) for the
+v3-only delta, [docs/V2_PARITY.md](docs/V2_PARITY.md) for the cross-reference
+matrix, [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for
+non-normative candidate progress,
 [docs/BASELINE.md](docs/BASELINE.md) for the baseline policy, and
 [docs/MIGRATION_TEST_PLAN.md](docs/MIGRATION_TEST_PLAN.md) for the migration
 test requirements. The production LP-pricing design is documented in

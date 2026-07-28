@@ -11,7 +11,8 @@ the incumbent v2 protocol.
 Treat deployed v2 behavior as the default specification. V3 behavioral changes
 require an explicit justification tied to the three-tier backstop, legacy
 migration compatibility, Protocol 27 compatibility, a conservation/safety
-fix, or a separately approved exception recorded in the system specification.
+fix, or a separately approved exception recorded in the v3 delta
+specification.
 Carrying integer dust forward at the same accounting scope and the
 12,500-USDC entry / 10,000-USDC maintenance hysteresis are approved exceptions.
 
@@ -24,9 +25,11 @@ implicit assumptions.
 Read these before changing protocol behavior:
 
 1. `docs/SYSTEM_SPEC.md`
-2. `docs/MIGRATION_TEST_PLAN.md`
-3. `docs/BASELINE.md`
-4. Existing contract tests and the implementation being changed
+2. `docs/V2_SYSTEM_SPEC.md`
+3. `docs/V3_SYSTEM_SPEC.md`
+4. `docs/MIGRATION_TEST_PLAN.md`
+5. `docs/BASELINE.md`
+6. Existing contract tests and the implementation being changed
 
 If the documents conflict with executable legacy behavior, preserve the legacy
 behavior needed for migration and document the conflict. Do not silently choose
@@ -193,7 +196,9 @@ emissions.
 
 ## Specification discipline
 
-Requirements marked `MUST` in `docs/SYSTEM_SPEC.md` are acceptance criteria.
+Requirements marked `MUST` in `docs/V2_SYSTEM_SPEC.md` and
+`docs/V3_SYSTEM_SPEC.md` are acceptance criteria under the composition rules
+in `docs/SYSTEM_SPEC.md`.
 Items listed under “Open decisions” are not implementation authorization.
 When an open decision blocks safe implementation, update the specification or
 ask for a decision before encoding policy.

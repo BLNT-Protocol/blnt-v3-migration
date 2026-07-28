@@ -17,9 +17,10 @@ pub use emissions::{
     ReserveEmissionMetadata, ReserveEmissionUpdated, UserEmissionData,
 };
 pub use lending::{
-    LendingAction, LendingConfig, PositionHealth, Positions, PriceQuote, Request, Reserve,
-    ReserveConfig, ReserveConfigUpdate, ReserveData, ACTION_BORROW, ACTION_REPAY, ACTION_SUPPLY,
-    ACTION_SUPPLY_COLLATERAL, ACTION_WITHDRAW, ACTION_WITHDRAW_COLLATERAL,
+    FlashLoan, FlashLoanExecuted, LendingAction, LendingConfig, PositionHealth, Positions,
+    PriceQuote, Request, Reserve, ReserveConfig, ReserveConfigUpdate, ReserveData, ACTION_BORROW,
+    ACTION_REPAY, ACTION_SUPPLY, ACTION_SUPPLY_COLLATERAL, ACTION_WITHDRAW,
+    ACTION_WITHDRAW_COLLATERAL,
 };
 
 use soroban_sdk::{
@@ -488,6 +489,31 @@ impl PoolContract {
         lending::submit(&env, &from, &spender, &to, requests)
     }
 
+    /// Execute an atomic v2-compatible request set using per-asset net
+    /// transfers and SEP-41 allowances for amounts owed to the pool.
+    pub fn submit_with_allowance(
+        env: Env,
+        from: Address,
+        spender: Address,
+        to: Address,
+        requests: Vec<Request>,
+    ) -> Positions {
+        extend_instance_ttl(&env);
+        lending::submit_with_allowance(&env, &from, &spender, &to, requests)
+    }
+
+    /// Execute a zero-fee v2-compatible flash borrow before an atomic request
+    /// set. Any net amount owed by `from` is collected with SEP-41 allowance.
+    pub fn flash_loan(
+        env: Env,
+        from: Address,
+        flash_loan: FlashLoan,
+        requests: Vec<Request>,
+    ) -> Positions {
+        extend_instance_ttl(&env);
+        lending::flash_loan(&env, &from, flash_loan, requests)
+    }
+
     /// Create a permissionless v2-compatible user-liquidation auction.
     pub fn new_liquidation_auction(
         env: Env,
@@ -816,7 +842,7 @@ mod tests {
         contract, contractimpl,
         testutils::{Address as _, Events, Ledger, MockAuth, MockAuthInvoke},
         token::{StellarAssetClient, TokenClient},
-        vec, Event, IntoVal,
+        vec, Event, FromVal, IntoVal, Symbol, Val,
     };
 
     #[contract]
@@ -827,6 +853,9 @@ mod tests {
 
     #[contract]
     struct MockFeeToken;
+
+    #[contract]
+    struct MockFlashLoanReceiver;
 
     #[derive(Clone)]
     #[contracttype]
@@ -865,6 +894,17 @@ mod tests {
     #[contracttype]
     enum MockFeeTokenKey {
         Balance(Address),
+    }
+
+    #[derive(Clone)]
+    #[contracttype]
+    enum MockFlashLoanReceiverKey {
+        Calls,
+        Fail,
+        LastAmount,
+        LastAsset,
+        LastCaller,
+        LastFee,
     }
 
     #[contractimpl]
@@ -1331,6 +1371,73 @@ mod tests {
         }
     }
 
+    #[contractimpl]
+    impl MockFlashLoanReceiver {
+        pub fn set_fail(env: Env, fail: bool) {
+            env.storage()
+                .instance()
+                .set(&MockFlashLoanReceiverKey::Fail, &fail);
+        }
+
+        pub fn exec_op(env: Env, caller: Address, token: Address, amount: i128, fee: i128) {
+            assert!(
+                !env.storage()
+                    .instance()
+                    .get::<_, bool>(&MockFlashLoanReceiverKey::Fail)
+                    .unwrap_or(false),
+                "forced flash-loan receiver failure"
+            );
+            let calls = env
+                .storage()
+                .instance()
+                .get::<_, u32>(&MockFlashLoanReceiverKey::Calls)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&MockFlashLoanReceiverKey::Calls, &(calls + 1));
+            env.storage()
+                .instance()
+                .set(&MockFlashLoanReceiverKey::LastAmount, &amount);
+            env.storage()
+                .instance()
+                .set(&MockFlashLoanReceiverKey::LastAsset, &token);
+            env.storage()
+                .instance()
+                .set(&MockFlashLoanReceiverKey::LastCaller, &caller);
+            env.storage()
+                .instance()
+                .set(&MockFlashLoanReceiverKey::LastFee, &fee);
+        }
+
+        pub fn calls(env: Env) -> u32 {
+            env.storage()
+                .instance()
+                .get(&MockFlashLoanReceiverKey::Calls)
+                .unwrap_or(0)
+        }
+
+        pub fn last_call(env: Env) -> (Address, Address, i128, i128) {
+            (
+                env.storage()
+                    .instance()
+                    .get(&MockFlashLoanReceiverKey::LastCaller)
+                    .unwrap(),
+                env.storage()
+                    .instance()
+                    .get(&MockFlashLoanReceiverKey::LastAsset)
+                    .unwrap(),
+                env.storage()
+                    .instance()
+                    .get(&MockFlashLoanReceiverKey::LastAmount)
+                    .unwrap(),
+                env.storage()
+                    .instance()
+                    .get(&MockFlashLoanReceiverKey::LastFee)
+                    .unwrap(),
+            )
+        }
+    }
+
     fn status_quote(status: u32, transition_allowed: bool) -> PoolStatusQuote {
         PoolStatusQuote {
             eligible_value: 12_500 * 10_000_000,
@@ -1378,6 +1485,23 @@ mod tests {
             supply_cap: 1_000_000_000_000_000,
             util: 7_500_000,
         }
+    }
+
+    fn v2_rounding_gap_repayment(env: &Env, d_tokens: i128, d_rate: i128) -> (i128, i128) {
+        let live_debt = lending::mul_div_ceil(env, d_tokens, d_rate, lending::SCALAR_12);
+        let next_d_token_cost = lending::mul_div_ceil(
+            env,
+            lending::checked_add(env, d_tokens, 1),
+            d_rate,
+            lending::SCALAR_12,
+        );
+        let request = next_d_token_cost - 1;
+        assert!(request > live_debt);
+        assert_eq!(
+            lending::mul_div_floor(env, request, lending::SCALAR_12, d_rate),
+            d_tokens
+        );
+        (live_debt, request)
     }
 
     fn reserve_config_update(config: &ReserveConfig) -> ReserveConfigUpdate {
@@ -3650,10 +3774,11 @@ mod tests {
         assert_eq!(pool.backstop_loss_state().liability_entries, 1);
         assert!(!pool.backstop_withdrawal_allowed(&backstop));
 
+        let direct_refund_recipient = Address::generate(&env);
         let repaid = pool.submit(
             &borrower,
             &borrower,
-            &borrower,
+            &direct_refund_recipient,
             &vec![
                 &env,
                 Request {
@@ -3664,7 +3789,140 @@ mod tests {
             ],
         );
         assert!(repaid.liabilities.is_empty());
-        assert_eq!(borrowed_token.balance(&borrower), 250_000_000);
+        assert_eq!(borrowed_token.balance(&borrower), 200_000_000);
+        assert_eq!(borrowed_token.balance(&direct_refund_recipient), 50_000_000);
+        assert_eq!(pool.backstop_loss_state().liability_entries, 0);
+        assert!(pool.backstop_withdrawal_allowed(&backstop));
+
+        let reopened = pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &vec![
+                &env,
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 200_000_000,
+                    request_type: lending::ACTION_BORROW,
+                },
+            ],
+        );
+        assert_eq!(reopened.liabilities.get(1), Some(200_000_000));
+        assert_eq!(borrowed_token.balance(&borrower), 400_000_000);
+
+        let allowance_spender = Address::generate(&env);
+        let allowance_recipient = Address::generate(&env);
+        borrowed_admin.mint(&allowance_spender, &250_000_000);
+        borrowed_token.approve(&allowance_spender, &pool_id, &250_000_000, &100);
+        let repaid_with_allowance = pool.submit_with_allowance(
+            &borrower,
+            &allowance_spender,
+            &allowance_recipient,
+            &vec![
+                &env,
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 250_000_000,
+                    request_type: lending::ACTION_REPAY,
+                },
+            ],
+        );
+        assert!(repaid_with_allowance.liabilities.is_empty());
+        assert_eq!(borrowed_token.balance(&allowance_spender), 50_000_000);
+        assert_eq!(borrowed_token.balance(&allowance_recipient), 0);
+        assert_eq!(
+            borrowed_token.allowance(&allowance_spender, &pool_id),
+            50_000_000
+        );
+        assert_eq!(pool.backstop_loss_state().liability_entries, 0);
+        assert!(pool.backstop_withdrawal_allowed(&backstop));
+
+        // V2 only recognizes an over-repayment when the rounded-down dToken
+        // burn exceeds the liability balance. With a non-unit dRate, a
+        // request can exceed live debt while still rounding to exactly the
+        // outstanding dTokens; that entire request is collected.
+        let direct_rounding_gap = pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &vec![
+                &env,
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 200_000_000,
+                    request_type: lending::ACTION_BORROW,
+                },
+            ],
+        );
+        env.ledger().set_timestamp(1_000 + 100_u64 * 31_536_000);
+        let accrued_reserve = pool.reserve(&borrowed_asset);
+        assert!(accrued_reserve.data.d_rate > lending::SCALAR_12);
+        let direct_d_tokens = direct_rounding_gap.liabilities.get(1).unwrap();
+        let (direct_live_debt, direct_request) =
+            v2_rounding_gap_repayment(&env, direct_d_tokens, accrued_reserve.data.d_rate);
+        assert!(direct_request > direct_live_debt);
+        let direct_rounding_recipient = Address::generate(&env);
+        borrowed_admin.mint(&borrower, &direct_request);
+        let borrower_balance_before = borrowed_token.balance(&borrower);
+        let direct_cleared = pool.submit(
+            &borrower,
+            &borrower,
+            &direct_rounding_recipient,
+            &vec![
+                &env,
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: direct_request,
+                    request_type: lending::ACTION_REPAY,
+                },
+            ],
+        );
+        assert!(direct_cleared.liabilities.is_empty());
+        assert_eq!(borrowed_token.balance(&direct_rounding_recipient), 0);
+        assert_eq!(
+            borrowed_token.balance(&borrower),
+            borrower_balance_before - direct_request
+        );
+
+        let allowance_rounding_gap = pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &vec![
+                &env,
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: 200_000_000,
+                    request_type: lending::ACTION_BORROW,
+                },
+            ],
+        );
+        let high_rate_reserve = pool.reserve(&borrowed_asset);
+        let allowance_d_tokens = allowance_rounding_gap.liabilities.get(1).unwrap();
+        let (allowance_live_debt, allowance_request) =
+            v2_rounding_gap_repayment(&env, allowance_d_tokens, high_rate_reserve.data.d_rate);
+        assert!(allowance_request > allowance_live_debt);
+        let rounding_spender = Address::generate(&env);
+        let rounding_recipient = Address::generate(&env);
+        borrowed_admin.mint(&rounding_spender, &allowance_request);
+        borrowed_token.approve(&rounding_spender, &pool_id, &allowance_request, &100);
+        let allowance_cleared = pool.submit_with_allowance(
+            &borrower,
+            &rounding_spender,
+            &rounding_recipient,
+            &vec![
+                &env,
+                Request {
+                    address: borrowed_asset.clone(),
+                    amount: allowance_request,
+                    request_type: lending::ACTION_REPAY,
+                },
+            ],
+        );
+        assert!(allowance_cleared.liabilities.is_empty());
+        assert_eq!(borrowed_token.balance(&rounding_spender), 0);
+        assert_eq!(borrowed_token.balance(&rounding_recipient), 0);
+        assert_eq!(borrowed_token.allowance(&rounding_spender, &pool_id), 0);
         assert_eq!(pool.backstop_loss_state().liability_entries, 0);
         assert!(pool.backstop_withdrawal_allowed(&backstop));
 
@@ -3684,6 +3942,10 @@ mod tests {
         assert!(closed.collateral.is_empty());
         assert_eq!(collateral_token.balance(&borrower), 1_000_000_000);
 
+        let supply_before_withdrawal = pool.positions(&liquidity_provider).supply.get(1).unwrap();
+        let supply_b_rate = pool.reserve(&borrowed_asset).data.b_rate;
+        let expected_burn =
+            lending::mul_div_ceil(&env, 500_000_000, lending::SCALAR_12, supply_b_rate);
         let remaining_supply = pool.submit(
             &liquidity_provider,
             &liquidity_provider,
@@ -3691,16 +3953,297 @@ mod tests {
             &vec![
                 &env,
                 Request {
-                    address: borrowed_asset,
+                    address: borrowed_asset.clone(),
                     amount: 500_000_000,
                     request_type: lending::ACTION_WITHDRAW,
                 },
             ],
         );
-        assert_eq!(remaining_supply.supply.get(1), Some(500_000_000));
+        assert_eq!(
+            remaining_supply.supply.get(1),
+            Some(supply_before_withdrawal - expected_burn)
+        );
         assert_eq!(borrowed_token.balance(&liquidity_provider), 500_000_000);
         assert_eq!(pool.reserve_list().len(), 2);
         assert_eq!(pool.lending_config().oracle, oracle_id);
+    }
+
+    #[test]
+    fn allowance_submission_nets_each_asset_and_uses_transfer_from() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let token_admin = Address::generate(&env);
+        let asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let asset_admin = StellarAssetClient::new(&env, &asset);
+        let asset_token = TokenClient::new(&env, &asset);
+        let pool_id = register_custom_lending_pool(
+            &env,
+            &Address::generate(&env),
+            &Address::generate(&env),
+            &LendingConfig {
+                backstop_take_rate: 0,
+                max_positions: 2,
+                min_collateral: 0,
+                oracle: Address::generate(&env),
+                price_decimals: 7,
+            },
+            &vec![&env, reserve_config(&asset, 0)],
+        );
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let user = Address::generate(&env);
+        asset_admin.mint(&user, &(100 * lending::SCALAR_7));
+        asset_token.approve(&user, &pool_id, &(100 * lending::SCALAR_7), &100);
+
+        let supplied = pool.submit_with_allowance(
+            &user,
+            &user,
+            &user,
+            &vec![
+                &env,
+                Request {
+                    address: asset.clone(),
+                    amount: 100 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY,
+                },
+            ],
+        );
+        assert_eq!(supplied.supply.get(0), Some(100 * lending::SCALAR_7));
+        assert_eq!(asset_token.allowance(&user, &pool_id), 0);
+
+        // The second submission has 10 incoming and 30 outgoing. The
+        // allowance path transfers only the net 20 from the pool to the user.
+        let remaining = pool.submit_with_allowance(
+            &user,
+            &user,
+            &user,
+            &vec![
+                &env,
+                Request {
+                    address: asset.clone(),
+                    amount: 30 * lending::SCALAR_7,
+                    request_type: ACTION_WITHDRAW,
+                },
+                Request {
+                    address: asset.clone(),
+                    amount: 10 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY,
+                },
+            ],
+        );
+        assert_eq!(remaining.supply.get(0), Some(80 * lending::SCALAR_7));
+        assert_eq!(asset_token.balance(&user), 20 * lending::SCALAR_7);
+        assert_eq!(asset_token.balance(&pool_id), 80 * lending::SCALAR_7);
+
+        let direct_noop = pool.submit(&user, &user, &user, &Vec::new(&env));
+        assert_eq!(direct_noop, remaining);
+        let allowance_noop = pool.submit_with_allowance(&user, &user, &user, &Vec::new(&env));
+        assert_eq!(allowance_noop, remaining);
+        assert_eq!(asset_token.balance(&user), 20 * lending::SCALAR_7);
+        assert_eq!(asset_token.balance(&pool_id), 80 * lending::SCALAR_7);
+    }
+
+    #[test]
+    fn flash_loan_executes_callback_then_allowance_repayment_atomically() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let token_admin = Address::generate(&env);
+        let asset = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let asset_admin = StellarAssetClient::new(&env, &asset);
+        let asset_token = TokenClient::new(&env, &asset);
+        let oracle_id = env.register(MockPriceOracle, ());
+        MockPriceOracleClient::new(&env, &oracle_id).set_price(
+            &asset,
+            &PriceQuote {
+                decimals: 7,
+                price: lending::SCALAR_7,
+                valid_until: u64::MAX,
+            },
+        );
+        let pool_id = register_custom_lending_pool(
+            &env,
+            &Address::generate(&env),
+            &Address::generate(&env),
+            &LendingConfig {
+                backstop_take_rate: 0,
+                max_positions: 2,
+                min_collateral: 0,
+                oracle: oracle_id,
+                price_decimals: 7,
+            },
+            &vec![&env, reserve_config(&asset, 0)],
+        );
+        env.as_contract(&pool_id, || {
+            env.storage().instance().set(&DataKey::Status, &1_u32);
+        });
+        let pool = PoolContractClient::new(&env, &pool_id);
+        let supplier = Address::generate(&env);
+        let borrower = Address::generate(&env);
+        let receiver_id = env.register(MockFlashLoanReceiver, ());
+        let receiver = MockFlashLoanReceiverClient::new(&env, &receiver_id);
+        let amount = 100 * lending::SCALAR_7;
+
+        asset_admin.mint(&supplier, &(1_000 * lending::SCALAR_7));
+        pool.submit(
+            &supplier,
+            &supplier,
+            &supplier,
+            &vec![
+                &env,
+                Request {
+                    address: asset.clone(),
+                    amount: 1_000 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY,
+                },
+            ],
+        );
+        asset_admin.mint(&borrower, &amount);
+        asset_token.approve(&borrower, &pool_id, &amount, &100);
+
+        let result = pool.flash_loan(
+            &borrower,
+            &FlashLoan {
+                amount,
+                asset: asset.clone(),
+                contract: receiver_id.clone(),
+            },
+            &vec![
+                &env,
+                Request {
+                    address: asset.clone(),
+                    amount,
+                    request_type: ACTION_REPAY,
+                },
+            ],
+        );
+        assert!(result.liabilities.is_empty());
+        let expected_flash_event = FlashLoanExecuted {
+            asset: asset.clone(),
+            owner: borrower.clone(),
+            receiver: receiver_id.clone(),
+            amount,
+            position_delta: amount,
+        };
+        let expected_topics: Vec<Val> = (
+            Symbol::new(&env, "flash_loan"),
+            asset.clone(),
+            borrower.clone(),
+            receiver_id.clone(),
+        )
+            .into_val(&env);
+        let actual_data = Vec::<i128>::from_val(&env, &expected_flash_event.data(&env));
+        assert_eq!(expected_flash_event.topics(&env), expected_topics);
+        assert_eq!(actual_data, vec![&env, amount, amount]);
+        assert!(env
+            .events()
+            .all()
+            .filter_by_contract(&pool_id)
+            .events()
+            .contains(&expected_flash_event.to_xdr(&env, &pool_id)));
+        assert_eq!(receiver.calls(), 1);
+        assert_eq!(
+            receiver.last_call(),
+            (borrower.clone(), asset.clone(), amount, 0)
+        );
+        assert_eq!(asset_token.balance(&receiver_id), amount);
+        assert_eq!(asset_token.balance(&pool_id), 1_000 * lending::SCALAR_7);
+        assert_eq!(pool.reserve(&asset).data.d_supply, 0);
+
+        receiver.set_fail(&true);
+        asset_admin.mint(&borrower, &amount);
+        asset_token.approve(&borrower, &pool_id, &amount, &100);
+        let pool_balance_before = asset_token.balance(&pool_id);
+        let receiver_balance_before = asset_token.balance(&receiver_id);
+        assert!(pool
+            .try_flash_loan(
+                &borrower,
+                &FlashLoan {
+                    amount,
+                    asset: asset.clone(),
+                    contract: receiver_id.clone(),
+                },
+                &vec![
+                    &env,
+                    Request {
+                        address: asset.clone(),
+                        amount,
+                        request_type: ACTION_REPAY,
+                    },
+                ],
+            )
+            .is_err());
+        assert_eq!(asset_token.balance(&pool_id), pool_balance_before);
+        assert_eq!(asset_token.balance(&receiver_id), receiver_balance_before);
+        assert_eq!(pool.reserve(&asset).data.d_supply, 0);
+        assert!(pool.positions(&borrower).liabilities.is_empty());
+        assert_eq!(receiver.calls(), 1);
+
+        receiver.set_fail(&false);
+        asset_token.approve(&borrower, &pool_id, &0, &100);
+        let pool_balance_before = asset_token.balance(&pool_id);
+        let receiver_balance_before = asset_token.balance(&receiver_id);
+        let positions_before = pool.positions(&borrower);
+        let reserve_before = pool.reserve(&asset);
+        let events_before = env.events().all();
+        assert!(pool
+            .try_flash_loan(
+                &borrower,
+                &FlashLoan {
+                    amount,
+                    asset: asset.clone(),
+                    contract: receiver_id.clone(),
+                },
+                &vec![
+                    &env,
+                    Request {
+                        address: asset.clone(),
+                        amount,
+                        request_type: ACTION_REPAY,
+                    },
+                ],
+            )
+            .is_err());
+        assert_eq!(env.events().all().events(), events_before.events());
+        assert_eq!(asset_token.balance(&pool_id), pool_balance_before);
+        assert_eq!(asset_token.balance(&receiver_id), receiver_balance_before);
+        assert_eq!(pool.positions(&borrower), positions_before);
+        assert_eq!(pool.reserve(&asset), reserve_before);
+        assert_eq!(receiver.calls(), 1);
+
+        asset_admin.mint(&borrower, &(200 * lending::SCALAR_7));
+        pool.submit(
+            &borrower,
+            &borrower,
+            &borrower,
+            &vec![
+                &env,
+                Request {
+                    address: asset.clone(),
+                    amount: 200 * lending::SCALAR_7,
+                    request_type: ACTION_SUPPLY_COLLATERAL,
+                },
+            ],
+        );
+        let retained = pool.flash_loan(
+            &borrower,
+            &FlashLoan {
+                amount,
+                asset: asset.clone(),
+                contract: receiver_id.clone(),
+            },
+            &Vec::new(&env),
+        );
+        assert_eq!(retained.liabilities.get(0), Some(amount));
+        assert!(pool.position_health(&borrower).healthy);
+        assert_eq!(pool.reserve(&asset).data.d_supply, amount);
+        assert_eq!(receiver.calls(), 2);
+        assert_eq!(asset_token.balance(&pool_id), 1_100 * lending::SCALAR_7);
     }
 
     #[test]
@@ -4059,13 +4602,15 @@ mod tests {
     }
 
     #[test]
-    fn emission_configuration_rejects_empty_duplicate_and_invalid_token_ids() {
+    fn emission_configuration_accepts_v2_empty_and_last_duplicate_weight() {
         let env = Env::default();
         env.mock_all_auths();
         let asset = Address::generate(&env);
+        let backstop_id = env.register(MockBackstop, ());
+        let backstop = MockBackstopClient::new(&env, &backstop_id);
         let pool_id = register_custom_lending_pool(
             &env,
-            &Address::generate(&env),
+            &backstop_id,
             &Address::generate(&env),
             &LendingConfig {
                 backstop_take_rate: 0,
@@ -4077,22 +4622,35 @@ mod tests {
             &vec![&env, reserve_config(&asset, 0)],
         );
         let pool = PoolContractClient::new(&env, &pool_id);
-        assert!(pool.try_set_emissions_config(&Vec::new(&env)).is_err());
-        assert!(pool
-            .try_set_emissions_config(&vec![
-                &env,
-                ReserveEmissionMetadata {
-                    res_index: 0,
-                    res_type: 1,
-                    share: 1,
-                },
-                ReserveEmissionMetadata {
-                    res_index: 0,
-                    res_type: 1,
-                    share: 2,
-                },
-            ])
-            .is_err());
+        pool.set_emissions_config(&Vec::new(&env));
+        assert!(pool.emissions_config().is_empty());
+        backstop.set_pool_emission_amount(&lending::SCALAR_7);
+        assert!(pool.try_gulp_emissions().is_err());
+        // Gulp rejected the empty configuration before invoking the backstop.
+        pool.set_emissions_config(&vec![
+            &env,
+            ReserveEmissionMetadata {
+                res_index: 0,
+                res_type: 1,
+                share: 1,
+            },
+            ReserveEmissionMetadata {
+                res_index: 0,
+                res_type: 1,
+                share: 2,
+            },
+        ]);
+        assert_eq!(pool.emissions_config().get(1), Some(2));
+        assert_eq!(pool.gulp_emissions(), lending::SCALAR_7);
+        let mut oversized = Vec::new(&env);
+        for share in 1..=61 {
+            oversized.push_back(ReserveEmissionMetadata {
+                res_index: 0,
+                res_type: 1,
+                share,
+            });
+        }
+        assert!(pool.try_set_emissions_config(&oversized).is_err());
         for invalid in [
             ReserveEmissionMetadata {
                 res_index: 0,
@@ -4282,7 +4840,7 @@ mod tests {
     }
 
     #[test]
-    fn lending_submit_requires_spender_and_position_owner_authorization() {
+    fn lending_submissions_require_inherited_authorization() {
         let env = Env::default();
         let backstop = Address::generate(&env);
         let operator = Address::generate(&env);
@@ -4294,6 +4852,7 @@ mod tests {
         let from = Address::generate(&env);
         let spender = Address::generate(&env);
         let to = Address::generate(&env);
+        let empty = Vec::new(&env);
         let requests = vec![
             &env,
             Request {
@@ -4303,6 +4862,10 @@ mod tests {
             },
         ];
 
+        assert!(pool.try_submit(&from, &spender, &to, &empty).is_err());
+        assert!(pool
+            .try_submit_with_allowance(&from, &spender, &to, &empty)
+            .is_err());
         assert!(pool.try_submit(&from, &spender, &to, &requests).is_err());
         assert!(pool
             .mock_auths(&[MockAuth {
@@ -4315,6 +4878,34 @@ mod tests {
                 },
             }])
             .try_submit(&from, &spender, &to, &requests)
+            .is_err());
+
+        assert!(pool
+            .try_submit_with_allowance(&from, &spender, &to, &requests)
+            .is_err());
+        assert!(pool
+            .mock_auths(&[MockAuth {
+                address: &spender,
+                invoke: &MockAuthInvoke {
+                    contract: &pool_id,
+                    fn_name: "submit_with_allowance",
+                    args: (&from, &spender, &to, requests.clone()).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .try_submit_with_allowance(&from, &spender, &to, &requests)
+            .is_err());
+
+        assert!(pool
+            .try_flash_loan(
+                &from,
+                &FlashLoan {
+                    amount: 1,
+                    asset: Address::generate(&env),
+                    contract: Address::generate(&env),
+                },
+                &Vec::new(&env),
+            )
             .is_err());
     }
 
@@ -4412,8 +5003,10 @@ mod tests {
             .is_err());
         assert!(transfer_pool.positions(&user).supply.is_empty());
         assert_eq!(transfer_pool.reserve(&asset).data.b_supply, 0);
+        let over_boundary_user = Address::generate(&env);
+        asset_admin.mint(&over_boundary_user, &61);
         let mut too_many_requests = Vec::new(&env);
-        for _ in 0..=60 {
+        for _ in 0..=lending::MAX_REQUESTS {
             too_many_requests.push_back(Request {
                 address: asset.clone(),
                 amount: 1,
@@ -4421,9 +5014,17 @@ mod tests {
             });
         }
         assert!(transfer_pool
-            .try_submit(&user, &user, &user, &too_many_requests)
+            .try_submit(
+                &over_boundary_user,
+                &over_boundary_user,
+                &over_boundary_user,
+                &too_many_requests
+            )
             .is_err());
-        assert!(transfer_pool.positions(&user).supply.is_empty());
+        assert!(transfer_pool
+            .positions(&over_boundary_user)
+            .supply
+            .is_empty());
 
         let fee_token_id = env.register(MockFeeToken, ());
         let fee_token = MockFeeTokenClient::new(&env, &fee_token_id);

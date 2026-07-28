@@ -67,6 +67,16 @@ trait LegacyEmitter {
 #[contract]
 struct MockPoolFactory;
 
+#[contract]
+struct MockFlashLoanReceiver;
+
+#[contractimpl]
+impl MockFlashLoanReceiver {
+    pub fn exec_op(_env: Env, _caller: Address, _token: Address, _amount: i128, fee: i128) {
+        assert_eq!(fee, 0);
+    }
+}
+
 #[derive(Clone)]
 #[contracttype]
 enum MockPoolFactoryKey {
@@ -1457,6 +1467,46 @@ fn deployed_v3_pool_provides_the_backstop_withdrawal_safety_boundary() {
         ],
     );
     assert_eq!(reduced_supply.supply.get(1), Some(990 * SCALAR_7));
+
+    let next_token_client = TokenClient::new(&env, &next_token_id);
+    next_token_client.approve(&user, &pool_id, &SCALAR_7, &1_000);
+    let allowance_repaid = pool.submit_with_allowance(
+        &user,
+        &user,
+        &user,
+        &soroban_sdk::vec![
+            &env,
+            v3_pool::Request {
+                address: next_token_id.clone(),
+                amount: SCALAR_7,
+                request_type: 5,
+            }
+        ],
+    );
+    assert_eq!(allowance_repaid.liabilities.get(1), Some(14 * SCALAR_7));
+
+    let flash_borrower = Address::generate(&env);
+    let flash_receiver_id = env.register(MockFlashLoanReceiver, ());
+    next_token.mint(&flash_borrower, &SCALAR_7);
+    next_token_client.approve(&flash_borrower, &pool_id, &SCALAR_7, &1_000);
+    let flash_result = pool.flash_loan(
+        &flash_borrower,
+        &v3_pool::FlashLoan {
+            amount: SCALAR_7,
+            asset: next_token_id.clone(),
+            contract: flash_receiver_id.clone(),
+        },
+        &soroban_sdk::vec![
+            &env,
+            v3_pool::Request {
+                address: next_token_id.clone(),
+                amount: SCALAR_7,
+                request_type: 5,
+            }
+        ],
+    );
+    assert!(flash_result.liabilities.is_empty());
+    assert_eq!(next_token_client.balance(&flash_receiver_id), SCALAR_7);
 
     candidate.queue_blnd_usdc_withdrawal(&user, &pool_id, &(6_250 * SCALAR_7));
     assert_eq!(pool.update_pool_status(), 3);

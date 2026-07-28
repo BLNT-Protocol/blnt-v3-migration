@@ -96,19 +96,19 @@ MODELED_FIXED_V3_EURC_BORROW=$((100 * SCALAR_7))
 MODELED_ASSET_BALANCE=$((1000000 * SCALAR_7))
 MODELED_POOLS_FIXTURE="${ROOT_DIR}/fixtures/testnet-modeled-pools.json"
 
-V2_FACTORY_WASM="${ROOT_DIR}/target/wasm32-unknown-unknown/optimized/pool_factory.wasm"
-V2_BACKSTOP_WASM="${ROOT_DIR}/target/wasm32-unknown-unknown/optimized/backstop.wasm"
-V2_POOL_WASM="${ROOT_DIR}/target/wasm32-unknown-unknown/optimized/pool.wasm"
+V2_FACTORY_WASM="${ROOT_DIR}/legacy/artifacts/v2-pool-factory.wasm"
+V2_BACKSTOP_WASM="${ROOT_DIR}/legacy/artifacts/v2-backstop.wasm"
+V2_POOL_WASM="${ROOT_DIR}/legacy/artifacts/v2-pool.wasm"
 V3_FACTORY_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_pool_factory.wasm"
 V3_BACKSTOP_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_backstop.wasm"
 V3_POOL_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_pool.wasm"
 V3_TEST_VALUATION_ADAPTER_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_test_valuation_adapter.wasm"
 V3_VALUATION_ADAPTER_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_valuation_adapter.wasm"
 V3_TEST_SEP40_ORACLE_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_test_sep40_oracle.wasm"
-COMET_WASM="${ROOT_DIR}/comet.wasm"
+COMET_WASM="${ROOT_DIR}/legacy/blend-contracts-v2/comet.wasm"
 
 EXPECTED_EMITTER_SHA256="438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89"
-EMITTER_WASM=""
+EMITTER_WASM="${ROOT_DIR}/legacy/artifacts/emitter.wasm"
 RUN_DIR=""
 DOCKER_HOST_URI="${BLEND_LOCALNET_DOCKER_HOST:-}"
 
@@ -118,7 +118,7 @@ Usage: scripts/localnet-migration.sh COMMAND
 
 Commands:
   plan      Describe the deployment and migration phases without mutation.
-  validate  Build artifacts and validate the CLI and published emitter WASM.
+  validate  Build candidate artifacts and verify all frozen legacy WASM.
   start     Start Protocol-27 Quickstart locally; verify RPC on public testnet.
   deploy    Deploy, fund, and begin a new migration on the running network.
   run       Validate, connect or start, deploy, and report status.
@@ -176,27 +176,13 @@ stellar_cli() {
 }
 
 resolve_emitter_wasm() {
-    local candidate actual_hash
-    local cargo_root="${CARGO_HOME:-${HOME}/.cargo}"
-    local candidates=(
-        "${ROOT_DIR}/../blend-contracts/blend-contract-sdk/wasm/emitter.wasm"
-        "${ROOT_DIR}/../blend-utils/wasm_v1/emitter.wasm"
-    )
+    local actual_hash
 
-    for candidate in \
-        "${candidates[@]}" \
-        "${cargo_root}"/registry/src/*/blend-contract-sdk-1.22.0/wasm/emitter.wasm
-    do
-        [[ -f "${candidate}" ]] || continue
-        actual_hash="$(shasum -a 256 "${candidate}")"
-        actual_hash="${actual_hash%% *}"
-        if [[ "${actual_hash}" == "${EXPECTED_EMITTER_SHA256}" ]]; then
-            EMITTER_WASM="${candidate}"
-            return
-        fi
-    done
-
-    die "published emitter WASM with SHA-256 ${EXPECTED_EMITTER_SHA256} was not found"
+    [[ -f "${EMITTER_WASM}" ]] ||
+        die "frozen emitter WASM is missing: ${EMITTER_WASM}"
+    actual_hash="$(sha256_file "${EMITTER_WASM}")"
+    [[ "${actual_hash}" == "${EXPECTED_EMITTER_SHA256}" ]] ||
+        die "frozen emitter WASM has SHA-256 ${actual_hash}; expected ${EXPECTED_EMITTER_SHA256}"
 }
 
 validate_tools() {
@@ -227,10 +213,10 @@ validate_source_provenance() {
 }
 
 build_artifacts() {
-    note "Building frozen SDK-22 and candidate SDK-27 artifacts..."
+    note "Verifying frozen mainnet legacy artifacts and building SDK-27 candidate artifacts..."
     (
         cd "${ROOT_DIR}"
-        make build build-v3
+        make verify-legacy build-v3
     )
 }
 
@@ -258,7 +244,7 @@ validate_artifacts() {
     fi
     [[ -s "${MODELED_POOLS_FIXTURE}" ]] ||
         die "modeled-pool fixture is missing: ${MODELED_POOLS_FIXTURE}"
-    note "Validated SDK-22 incumbent, published emitter, and SDK-27 candidate artifacts."
+    note "Validated frozen deployed incumbent and emitter plus SDK-27 candidate artifacts."
 }
 
 require_docker() {
@@ -1425,8 +1411,8 @@ Network:
   Work directory: ${WORK_DIR}
 
 Artifacts:
-  Frozen incumbent: SDK 22 pool, pool factory, and backstop
-  Legacy emitter: blend-contract-sdk 1.22.0 published WASM
+  Frozen incumbent: exact deployed mainnet v2 pool, pool factory, and backstop WASM
+  Legacy emitter: exact deployed mainnet emitter WASM
   Candidate: SDK 27 pool, pool factory, backstop, ${adapter_description}
 
 Deployment:

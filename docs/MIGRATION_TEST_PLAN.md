@@ -852,19 +852,20 @@ Native tests MUST advance ledger sequence through the 83 days from earliest
 preparation through the two-retry horizon and verify the candidate's 89/90-day
 TTL renewal policy.
 
-The Protocol-27 migration harness MUST load v2 WASM compiled by the frozen
-SDK-22 workspace. It MUST NOT recompile the v2 contracts against SDK 27 merely
-to make them share the v3 crate graph. This verifies the actual compatibility
-boundary: historical contract bytecode executing on a current host and
-interacting with SDK-27 v3 bytecode.
+The Protocol-27 migration harness MUST load the exact deployed v2 WASM recorded
+in `legacy/artifacts/manifest.json`. It MUST NOT substitute a local rebuild or
+recompile v2 against SDK 27 merely to share the v3 crate graph. The pinned
+SDK-22 source workspace MUST be built and tested separately. This verifies the
+actual compatibility boundary: deployed historical bytecode executing on a
+current host and interacting with SDK-27 v3 bytecode.
 
 The compatibility probe MUST invoke at least one v2 backstop entry point
 through SDK-27 WASM. The migration harness MUST also exercise the complete
 legacy-emitter swap into optimized SDK-27 candidate WASM.
 
 The accelerated Protocol-27 harness MUST additionally establish supplier,
-borrower, collateral, debt, and backstop-share positions in the optimized
-SDK-22 v2 pool and backstop WASM before time-traveling through the production
+borrower, collateral, debt, and backstop-share positions in the frozen
+deployed v2 pool and backstop WASM before time-traveling through the production
 31-day queue. Immediately before canonical finalization it MUST snapshot those
 positions and relevant token balances, then prove that finalization changes
 only the emitter's final time-accrued BLND mint to the incumbent. It MUST prove

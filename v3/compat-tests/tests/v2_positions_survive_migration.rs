@@ -1,6 +1,3 @@
-// blend-contract-sdk 1.22.0 embeds the published legacy emitter WASM with
-// SHA-256 438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89.
-use blend_contract_sdk::emitter::WASM as LEGACY_EMITTER_WASM;
 use soroban_sdk::{
     contract, contractclient, contractimpl, contracttype,
     testutils::{Address as _, Ledger},
@@ -8,22 +5,24 @@ use soroban_sdk::{
     Address, BytesN, Env, String, Symbol, Vec,
 };
 
+mod legacy_emitter {
+    soroban_sdk::contractimport!(file = "../../legacy/artifacts/emitter.wasm");
+}
+
+use legacy_emitter::WASM as LEGACY_EMITTER_WASM;
+
 mod v2_backstop {
-    soroban_sdk::contractimport!(
-        file = "../../target/wasm32-unknown-unknown/optimized/backstop.wasm"
-    );
+    soroban_sdk::contractimport!(file = "../../legacy/artifacts/v2-backstop.wasm");
 }
 
 #[allow(clippy::too_many_arguments)]
 mod v2_pool {
-    soroban_sdk::contractimport!(file = "../../target/wasm32-unknown-unknown/optimized/pool.wasm");
+    soroban_sdk::contractimport!(file = "../../legacy/artifacts/v2-pool.wasm");
 }
 
 #[allow(clippy::too_many_arguments)]
 mod v2_pool_factory {
-    soroban_sdk::contractimport!(
-        file = "../../target/wasm32-unknown-unknown/optimized/pool_factory.wasm"
-    );
+    soroban_sdk::contractimport!(file = "../../legacy/artifacts/v2-pool-factory.wasm");
 }
 
 #[allow(clippy::too_many_arguments)]

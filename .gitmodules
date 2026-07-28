@@ -1,0 +1,3 @@
+[submodule "blend-contracts-v2"]
+	path = legacy/blend-contracts-v2
+	url = git@github.com:blend-capital/blend-contracts-v2.git

@@ -37,22 +37,29 @@ a new economic policy.
 
 ## Local source policy
 
-Prefer local source over repeated network fetches:
+Initialize the pinned historical source after cloning:
 
-- `../blend-contracts-v2` is the clean upstream v2 checkout.
-- `../blend-contracts` contains the legacy emitter source and `v1.0.0` tag.
-- `../blend-utils` contains deployment and interaction scripts.
-- `../xycloans` contains the pinned flash-loan dependency source.
-- `vendor/moderc3156` is the reproducible interface used by this workspace.
+```bash
+git submodule update --init
+```
 
-Do not replace a vendored or local dependency with a Git dependency unless the
-change is intentional and documented. Do not modify sibling repositories as a
-side effect of work in this repository.
+- `legacy/blend-contracts-v2` is the authoritative SDK-22 source submodule.
+- `legacy/artifacts` contains exact deployed mainnet WASM compatibility
+  fixtures, verified by `make verify-legacy`.
+- `../blend-utils` remains an optional local deployment-script reference.
+
+The submodule URL uses GitHub SSH. Do not edit the submodule, advance its pinned
+commit, replace frozen artifacts, or fetch a different historical source as an
+incidental part of v3 work. Do not modify sibling repositories as a side
+effect of work in this repository.
 
 ## Baseline architecture
 
-- The repository root is the frozen incumbent v2 workspace. It MUST remain on
-  Rust 1.81 and Soroban SDK 22.0.7.
+- `legacy/blend-contracts-v2` is the frozen incumbent v2 source workspace. It
+  MUST remain on Rust 1.81 and Soroban SDK 22.0.7.
+- `legacy/artifacts` is the authoritative bytecode boundary for compatibility
+  tests and isolated migration deployments. A local source rebuild MUST NOT be
+  silently substituted for those files.
 - New v3 code belongs in the independent `v3/` workspace. It MUST target
   Protocol 27 with Rust 1.91.0, Soroban SDK 27.0.2, and `wasm32v1-none`.
 - Do not add an SDK 26 compatibility lane. Migration compatibility is tested
@@ -191,8 +198,10 @@ emissions.
 - Use `apply_patch` for authored file changes.
 - Do not commit `target/`, generated test snapshots, secrets, private keys, or
   environment files.
-- Keep `Cargo.lock` committed and keep builds reproducible from a fresh clone.
-- Preserve AGPL-3.0 notices and document the provenance of vendored code.
+- Keep both workspace lockfiles committed and keep builds reproducible from a
+  fresh clone with initialized submodules.
+- Preserve AGPL-3.0 notices and document the provenance of imported code and
+  frozen bytecode.
 - Do not describe candidate code as audited, production-ready, or official.
 - Do not commit, push, deploy, tag, publish, or alter external protocol state
   unless the user explicitly requests it.

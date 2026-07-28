@@ -331,6 +331,6 @@ ordinary backstop capital but receives zero migration-backfill weight for that
 queue. A later verified replacement queue permits new deposits to begin earning
 weight again before its unlock; eligibility is never granted retroactively.
 
-The historical v2 contracts remain in the repository root and continue to use
-their SDK-22 toolchain. Do not move v3 code into the root workspace or upgrade
-the root dependency graph.
+Historical v2 source remains pinned in `legacy/blend-contracts-v2` on its
+SDK-22 toolchain, while exact deployed bytecode lives in `legacy/artifacts`.
+Do not edit or advance the submodule as part of v3 work.

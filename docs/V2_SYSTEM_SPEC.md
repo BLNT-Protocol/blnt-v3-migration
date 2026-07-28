@@ -10,10 +10,10 @@ This document records the behavior inherited from the frozen Blend v2
 contracts. It is not a proposal to change deployed v2 and does not grant
 authority to upgrade those contracts.
 
-The repository root contains the normative SDK-22 source and tests. The
-published legacy emitter is an external compatibility boundary. If this
-document differs from that executable behavior, the executable behavior wins
-and this document MUST be corrected.
+The pinned `legacy/blend-contracts-v2` submodule contains the normative SDK-22
+source and tests. Exact deployed bytecode under `legacy/artifacts` is the
+runtime compatibility boundary. If this document differs from that executable
+behavior, the executable behavior wins and this document MUST be corrected.
 
 Normative terms `MUST`, `MUST NOT`, `SHOULD`, and `MAY` describe the behavior a
 v3 candidate inherits unless the v3 specification explicitly overrides it.

@@ -9,21 +9,19 @@ release.
 
 ## Baseline
 
-The initial source baseline is Blend Protocol v2 commit
-`ba22b487b2c5057a4ecc28b05b5193c28e4bd117`.
-
-The original repository is configured as the `upstream` Git remote:
+The historical source baseline is Blend Protocol v2 commit
+`ba22b487b2c5057a4ecc28b05b5193c28e4bd117`, pinned as a Git submodule:
 
 ```bash
-git remote -v
+git submodule update --init
 ```
 
-Reusable Git dependencies are kept beside this repository:
-
-- `../blend-contracts` contains the legacy emitter source and history.
-- `../xycloans` is checked out at the v2-pinned commit for source reference.
-- The pinned `moderc3156` interface is vendored in `vendor/moderc3156` so fresh
-  clones and CI builds do not need to fetch the Git repository.
+The submodule uses the GitHub SSH URL
+`git@github.com:blend-capital/blend-contracts-v2.git`. Exact mainnet emitter,
+v2 backstop, pool-factory, and pool WASMs are checked in under
+`legacy/artifacts/` with their contract IDs and SHA-256 digests. These deployed
+bytes, rather than a local rebuild, are the authoritative compatibility and
+isolated-migration fixtures. Run `make verify-legacy` to verify both inputs.
 
 The emitter migration does not upgrade the deployed v2 contracts or move
 their supplier, borrower, or backstop positions. Immediately before switching
@@ -55,8 +53,8 @@ production-adapter testnet lane is documented in
 
 This repository deliberately maintains two independent Rust workspaces:
 
-- The repository root is the historical v2 baseline, pinned to Rust 1.81,
-  Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
+- `legacy/blend-contracts-v2/` is the historical source baseline, pinned to
+  Rust 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
 - `v3/` is the candidate workspace, pinned to Rust 1.91.0, Soroban SDK 27.0.2,
   Protocol 27 tooling, and `wasm32v1-none`.
 
@@ -96,9 +94,9 @@ Check the v3 workspace with its pinned current toolchain:
 make check-v3
 ```
 
-This builds the historical v2 WASM, the SDK-27 compatibility probe, and the
-SDK-27 candidate contracts, production valuation adapter, and deterministic
-test adapter. The compatibility
+This verifies the exact deployed legacy fixtures and builds the SDK-27
+compatibility probe, candidate contracts, production valuation adapter, and
+deterministic test adapter. The compatibility
 harness verifies both a cross-contract call into the SDK-22 backstop and a
 complete legacy-emitter migration into the v3 candidate on a Protocol-27
 host. The production adapter uses immutable SEP-40 BLND/USDC and XLM/USDC
@@ -172,7 +170,7 @@ make test-all
 Automated tag-triggered releases are intentionally disabled while the v3
 candidate remains experimental and incomplete. Add a v3-specific release
 workflow only after deployable v3 contract packages and their artifact checks
-exist. The repository must not publish the root SDK-22 contracts as v3
+exist. The repository must not publish the historical SDK-22 contracts as v3
 artifacts.
 
 ## Development principles

@@ -1,12 +1,15 @@
-// blend-contract-sdk 1.22.0 embeds the published legacy emitter WASM with
-// SHA-256 438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89.
-use blend_contract_sdk::emitter::WASM as LEGACY_EMITTER_WASM;
 use soroban_sdk::{
     contract, contractclient, contractimpl, contracttype,
     testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
     token::{StellarAssetClient, TokenClient},
     Address, BytesN, Env, IntoVal,
 };
+
+mod legacy_emitter {
+    soroban_sdk::contractimport!(file = "../../legacy/artifacts/emitter.wasm");
+}
+
+use legacy_emitter::WASM as LEGACY_EMITTER_WASM;
 
 #[allow(clippy::too_many_arguments)]
 mod v3_backstop {

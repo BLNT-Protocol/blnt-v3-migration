@@ -10,5 +10,4 @@ publish.workspace = true
 doctest = false
 
 [dev-dependencies]
-blend-contract-sdk = "=1.22.0"
 soroban-sdk = { workspace = true, features = ["testutils"] }

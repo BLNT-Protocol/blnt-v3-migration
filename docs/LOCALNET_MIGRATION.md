@@ -65,10 +65,11 @@ undistributed.
 - Rust 1.81 and 1.91 toolchains configured by the repository
 - `jq`, `make`, and `shasum`
 
-The runner uses the exact published emitter WASM embedded by
-`blend-contract-sdk` 1.22.0 and verifies its SHA-256 digest before deployment.
-It builds the incumbent through the frozen root workspace and the candidate
-through the independent `v3/` workspace. Candidate source documentation is
+The runner verifies and deploys the exact mainnet emitter and incumbent v2
+WASMs recorded in `legacy/artifacts/manifest.json`. The pinned SDK-22 source
+submodule remains a separate build-and-test lane; its rebuilt bytes are not
+substituted into this migration exercise. The candidate builds through the
+independent `v3/` workspace. Candidate source documentation is
 retained for native Rust builds but omitted from the deployed contract-spec
 section to preserve Protocol-27 upload headroom. `make build-v3` rejects an
 optimized backstop above the conservative 120,000-byte deployment guard.

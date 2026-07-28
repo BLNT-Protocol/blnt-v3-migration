@@ -1,14 +1,23 @@
-default: build
+V2_DIR := legacy/blend-contracts-v2
 
 V3_BACKSTOP_MAX_WASM_BYTES := 120000
 
+default: build
+
+verify-legacy:
+	bash scripts/verify-legacy-artifacts.sh
+
 test: build
-	cargo test --all --tests
+	cargo +1.81 test --manifest-path $(V2_DIR)/Cargo.toml --all --tests --locked
 
-test-v2-migration: build
-	cargo test -p test-suites --test test_v2_to_v3_candidate --locked
+test-v2-migration: verify-legacy build-v3
+	cargo +1.91.0 test --manifest-path v3/Cargo.toml \
+		--package blend-v3-compat-tests \
+		--test emitter_migrates_to_v3 \
+		--test v2_positions_survive_migration \
+		--locked
 
-test-v2-positions-survive-migration: build build-v3
+test-v2-positions-survive-migration: verify-legacy build-v3
 	cargo +1.91.0 test --manifest-path v3/Cargo.toml \
 		--package blend-v3-compat-tests \
 		--test v2_positions_survive_migration \
@@ -174,48 +183,49 @@ build-v3:
 		--wasm v3/target/wasm32v1-none/release/blend_v3_valuation_adapter.wasm \
 		--wasm-out v3/target/wasm32v1-none/optimized/blend_v3_valuation_adapter.wasm
 
-check-v3: build build-v3
+check-v3: verify-legacy build-v3
 	cargo +1.91.0 fmt --manifest-path v3/Cargo.toml --all -- --check
 	cargo +1.91.0 check --manifest-path v3/Cargo.toml --all-targets --locked
 	cargo +1.91.0 test --manifest-path v3/Cargo.toml --workspace --locked
 
-build:
-	cargo rustc --manifest-path=pool-factory/Cargo.toml --crate-type=cdylib --target=wasm32-unknown-unknown --release
-	cargo rustc --manifest-path=backstop/Cargo.toml --crate-type=cdylib --target=wasm32-unknown-unknown --release
-	cargo rustc --manifest-path=pool/Cargo.toml --crate-type=cdylib --target=wasm32-unknown-unknown --release
-	
-	mkdir -p target/wasm32-unknown-unknown/optimized
+build: verify-legacy
+	cargo +1.81 rustc --manifest-path=$(V2_DIR)/pool-factory/Cargo.toml --crate-type=cdylib --target=wasm32-unknown-unknown --release --locked
+	cargo +1.81 rustc --manifest-path=$(V2_DIR)/backstop/Cargo.toml --crate-type=cdylib --target=wasm32-unknown-unknown --release --locked
+	cargo +1.81 rustc --manifest-path=$(V2_DIR)/pool/Cargo.toml --crate-type=cdylib --target=wasm32-unknown-unknown --release --locked
+
+	mkdir -p $(V2_DIR)/target/wasm32-unknown-unknown/optimized
 	stellar contract optimize \
-		--wasm target/wasm32-unknown-unknown/release/pool_factory.wasm \
-		--wasm-out target/wasm32-unknown-unknown/optimized/pool_factory.wasm
+		--wasm $(V2_DIR)/target/wasm32-unknown-unknown/release/pool_factory.wasm \
+		--wasm-out $(V2_DIR)/target/wasm32-unknown-unknown/optimized/pool_factory.wasm
 	stellar contract optimize \
-		--wasm target/wasm32-unknown-unknown/release/backstop.wasm \
-		--wasm-out target/wasm32-unknown-unknown/optimized/backstop.wasm
+		--wasm $(V2_DIR)/target/wasm32-unknown-unknown/release/backstop.wasm \
+		--wasm-out $(V2_DIR)/target/wasm32-unknown-unknown/optimized/backstop.wasm
 	stellar contract optimize \
-		--wasm target/wasm32-unknown-unknown/release/pool.wasm \
-		--wasm-out target/wasm32-unknown-unknown/optimized/pool.wasm
-	cd target/wasm32-unknown-unknown/optimized/ && \
+		--wasm $(V2_DIR)/target/wasm32-unknown-unknown/release/pool.wasm \
+		--wasm-out $(V2_DIR)/target/wasm32-unknown-unknown/optimized/pool.wasm
+	cd $(V2_DIR)/target/wasm32-unknown-unknown/optimized/ && \
 		for i in *.wasm ; do \
 			ls -l "$$i"; \
 		done
 
 fmt:
-	cargo fmt --all
+	cargo +1.81 fmt --manifest-path $(V2_DIR)/Cargo.toml --all
+	cargo +1.91.0 fmt --manifest-path v3/Cargo.toml --all
 
 clean:
-	cargo clean
+	cargo +1.81 clean --manifest-path $(V2_DIR)/Cargo.toml
 	cargo +1.91.0 clean --manifest-path v3/Cargo.toml
 
 generate-js:
 	stellar contract bindings typescript --overwrite \
 		--contract-id CBWH54OKUK6U2J2A4J2REJEYB625NEFCHISWXLOPR2D2D6FTN63TJTWN \
-		--wasm ./target/wasm32-unknown-unknown/optimized/backstop.wasm --output-dir ./js/js-backstop/ \
+		--wasm ./legacy/artifacts/v2-backstop.wasm --output-dir ./js/js-backstop/ \
 		--rpc-url http://localhost:8000 --network-passphrase "Standalone Network ; February 2017" --network Standalone
 	stellar contract bindings typescript --overwrite \
 		--contract-id CBWH54OKUK6U2J2A4J2REJEYB625NEFCHISWXLOPR2D2D6FTN63TJTWN \
-		--wasm ./target/wasm32-unknown-unknown/optimized/pool_factory.wasm --output-dir ./js/js-pool-factory/ \
+		--wasm ./legacy/artifacts/v2-pool-factory.wasm --output-dir ./js/js-pool-factory/ \
 		--rpc-url http://localhost:8000 --network-passphrase "Standalone Network ; February 2017" --network Standalone
 	stellar contract bindings typescript --overwrite \
 		--contract-id CBWH54OKUK6U2J2A4J2REJEYB625NEFCHISWXLOPR2D2D6FTN63TJTWN \
-		--wasm ./target/wasm32-unknown-unknown/optimized/pool.wasm --output-dir ./js/js-pool/ \
+		--wasm ./legacy/artifacts/v2-pool.wasm --output-dir ./js/js-pool/ \
 		--rpc-url http://localhost:8000 --network-passphrase "Standalone Network ; February 2017" --network Standalone

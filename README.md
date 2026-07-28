@@ -79,6 +79,13 @@ Run the candidate migration baseline:
 make test-v2-migration
 ```
 
+Run the accelerated Protocol-27 test that proves live SDK-22 v2 lending and
+backstop positions survive the emitter migration unchanged:
+
+```bash
+make test-v2-positions-survive-migration
+```
+
 Check the v3 workspace with its pinned current toolchain:
 
 ```bash

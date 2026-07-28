@@ -832,6 +832,15 @@ The compatibility probe MUST invoke at least one v2 backstop entry point
 through SDK-27 WASM. The migration harness MUST also exercise the complete
 legacy-emitter swap into optimized SDK-27 candidate WASM.
 
+The accelerated Protocol-27 harness MUST additionally establish supplier,
+borrower, collateral, debt, and backstop-share positions in the optimized
+SDK-22 v2 pool and backstop WASM before time-traveling through the production
+31-day queue. Immediately before canonical finalization it MUST snapshot those
+positions and relevant token balances, then prove that finalization changes
+only the emitter's final time-accrued BLND mint to the incumbent. It MUST prove
+that the next positive distribution goes only to v3 and that ordinary v2
+repay, supply, and backstop-deposit operations remain usable afterward.
+
 Public testnet should use independently issued test assets rather than relying
 on the supply of official test BLND or USDC.
 

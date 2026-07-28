@@ -8,6 +8,12 @@ test: build
 test-v2-migration: build
 	cargo test -p test-suites --test test_v2_to_v3_candidate --locked
 
+test-v2-positions-survive-migration: build build-v3
+	cargo +1.91.0 test --manifest-path v3/Cargo.toml \
+		--package blend-v3-compat-tests \
+		--test v2_positions_survive_migration \
+		--locked
+
 test-all: test check-v3
 
 localnet-plan:

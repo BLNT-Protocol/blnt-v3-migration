@@ -1,11 +1,12 @@
-# Blend V3 Candidate
+# Blend V3 Migration
 
-Experimental Blend Protocol v3 candidate implementation for Stellar.
+Experimental migration, compatibility, and deployment harness for the
+transition from Blend Protocol v2 to the v3 candidate on Stellar.
 
-This repository starts from Blend Protocol v2 and is intended to develop and
-test backwards-compatible protocol migration, multi-asset backstops, and
-candidate v3 pool behavior. It is not an official or production-ready Blend
-release.
+This repository pins the frozen v2 baseline and the v3 candidate contracts to
+test emitter migration, cross-version behavior, and network deployments.
+Production v3 contract behavior belongs to the `blend-contracts-v3` submodule.
+This is not an official or production-ready Blend release.
 
 ## Baseline
 
@@ -41,7 +42,7 @@ See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the migration repository
 boundary and [docs/MIGRATION_PROTOCOL_SPEC.md](docs/MIGRATION_PROTOCOL_SPEC.md)
 for the migration protocol. Contract behavior is composed by
 [blend-contracts-v3/docs/SYSTEM_SPEC.md](blend-contracts-v3/docs/SYSTEM_SPEC.md).
-[docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) records
+[docs/MIGRATION_STATUS.md](docs/MIGRATION_STATUS.md) records
 non-normative candidate progress. See
 [docs/BASELINE.md](docs/BASELINE.md) for source and artifact policy, and
 [docs/MIGRATION_TEST_PLAN.md](docs/MIGRATION_TEST_PLAN.md) for the migration
@@ -64,8 +65,8 @@ lanes:
   Rust 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
 - `blend-contracts-v3/` is the production candidate submodule, pinned to Rust
   1.91.1, Soroban SDK 27.0.3, Protocol 27 tooling, and `wasm32v1-none`.
-- `migration/` contains only Protocol-27 cross-version tests and test-only
-  support contracts.
+- `migration-harness/` contains only Protocol-27 cross-version tests and
+  test-only support contracts.
 
 There is no SDK 26 compatibility lane. Compatibility tests span the historical
 SDK-22 implementation and the current v3 candidate.

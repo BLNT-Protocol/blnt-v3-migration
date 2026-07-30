@@ -32,7 +32,7 @@ deployment default, or test expectation.
 4. [ORACLE_DEPLOYMENT.md](ORACLE_DEPLOYMENT.md) defines fail-closed production
    SEP-40 provider qualification and deployment evidence.
 
-[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) records progress but is
+[MIGRATION_STATUS.md](MIGRATION_STATUS.md) records progress but is
 non-normative. Localnet and testnet documents are operational runbooks; they
 must satisfy this specification set but do not authorize protocol behavior.
 
@@ -50,10 +50,10 @@ source. Migration tests and runners MUST build and invoke its artifacts
 directly. They MUST NOT maintain a second production implementation or copy
 contract source into this repository.
 
-Migration-only contracts and cross-version tests live under `migration/`.
-They MAY provide deterministic or controlled fixtures, but those fixtures MUST
-be clearly identified as test-only and MUST NOT be represented as production
-dependencies.
+Migration-only contracts and cross-version tests live under
+`migration-harness/`. They MAY provide deterministic or controlled fixtures,
+but those fixtures MUST be clearly identified as test-only and MUST NOT be
+represented as production dependencies.
 
 ## Conflict resolution
 

@@ -212,7 +212,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "blend-v3-compat-tests"
+name = "blend-v3-migration-tests"
 version = "0.0.0"
 dependencies = [
  "soroban-sdk",

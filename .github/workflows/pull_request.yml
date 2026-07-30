@@ -64,10 +64,10 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           blend-contracts-v3/target
-          migration/target
-        key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('blend-contracts-v3/Cargo.lock', 'migration/Cargo.lock', 'deployed-artifacts/mainnet/manifest.json') }}-${{ github.sha }}
+          migration-harness/target
+        key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('blend-contracts-v3/Cargo.lock', 'migration-harness/Cargo.lock', 'deployed-artifacts/mainnet/manifest.json') }}-${{ github.sha }}
         restore-keys: |
-          cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('blend-contracts-v3/Cargo.lock', 'migration/Cargo.lock', 'deployed-artifacts/mainnet/manifest.json') }}-
+          cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('blend-contracts-v3/Cargo.lock', 'migration-harness/Cargo.lock', 'deployed-artifacts/mainnet/manifest.json') }}-
           cargo-${{ runner.os }}-${{ github.job }}-
     - uses: stellar/stellar-cli@5a7c5fe76530bf4248477ac812fc757146b98cc4 # v27.0.0
       with:

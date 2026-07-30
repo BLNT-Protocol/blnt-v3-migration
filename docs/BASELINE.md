@@ -67,7 +67,8 @@ must not modify the pinned v2 source, its dependency graph, or its lockfile.
 - `v2-pool.wasm`: deployed lending-pool implementation.
 - `v2-pool-factory.wasm`: deployed pool factory.
 - `blend-contracts-v2`: source tests, audit reference, and rebuild lane.
-- `migration/compat-tests`: current-host compatibility and migration tests.
+- `migration-harness/migration-tests`: current-host compatibility and migration
+  tests.
 - `blend-contracts-v3`: pinned production v3 contract source and tests.
 
 Emitter replacement changes only the recipient of future BLND distributions.

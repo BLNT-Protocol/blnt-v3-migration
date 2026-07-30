@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "compat-probe",
-    "compat-tests",
+    "migration-tests",
     "test-sep40-oracle",
     "test-valuation-adapter",
 ]

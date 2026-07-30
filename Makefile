@@ -1,6 +1,6 @@
 V2_DIR := blend-contracts-v2
 V3_DIR := blend-contracts-v3
-MIGRATION_DIR := migration
+MIGRATION_HARNESS_DIR := migration-harness
 
 default: build
 
@@ -11,15 +11,15 @@ test: build
 	cargo +1.81 test --manifest-path $(V2_DIR)/Cargo.toml --all --tests --locked
 
 test-v2-migration: verify-deployed-artifacts build-v3
-	cargo +1.91.1 test --manifest-path $(MIGRATION_DIR)/Cargo.toml \
-		--package blend-v3-compat-tests \
+	cargo +1.91.1 test --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml \
+		--package blend-v3-migration-tests \
 		--test emitter_migrates_to_v3 \
 		--test v2_positions_survive_migration \
 		--locked
 
 test-v2-positions-survive-migration: verify-deployed-artifacts build-v3
-	cargo +1.91.1 test --manifest-path $(MIGRATION_DIR)/Cargo.toml \
-		--package blend-v3-compat-tests \
+	cargo +1.91.1 test --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml \
+		--package blend-v3-migration-tests \
 		--test v2_positions_survive_migration \
 		--locked
 
@@ -153,25 +153,25 @@ oracle-verify:
 
 build-v3:
 	$(MAKE) -C $(V3_DIR) build
-	cargo +1.91.1 build --manifest-path $(MIGRATION_DIR)/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked
-	cargo +1.91.1 build --manifest-path $(MIGRATION_DIR)/Cargo.toml --package blend-v3-test-sep40-oracle --target wasm32v1-none --release --locked
-	cargo +1.91.1 build --manifest-path $(MIGRATION_DIR)/Cargo.toml --package blend-v3-test-valuation-adapter --target wasm32v1-none --release --locked
-	mkdir -p $(MIGRATION_DIR)/target/wasm32v1-none/optimized
+	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked
+	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-test-sep40-oracle --target wasm32v1-none --release --locked
+	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-test-valuation-adapter --target wasm32v1-none --release --locked
+	mkdir -p $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized
 	stellar contract optimize \
-		--wasm $(MIGRATION_DIR)/target/wasm32v1-none/release/blend_v3_compat_probe.wasm \
-		--wasm-out $(MIGRATION_DIR)/target/wasm32v1-none/optimized/blend_v3_compat_probe.wasm
+		--wasm $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/release/blend_v3_compat_probe.wasm \
+		--wasm-out $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized/blend_v3_compat_probe.wasm
 	stellar contract optimize \
-		--wasm $(MIGRATION_DIR)/target/wasm32v1-none/release/blend_v3_test_sep40_oracle.wasm \
-		--wasm-out $(MIGRATION_DIR)/target/wasm32v1-none/optimized/blend_v3_test_sep40_oracle.wasm
+		--wasm $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/release/blend_v3_test_sep40_oracle.wasm \
+		--wasm-out $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized/blend_v3_test_sep40_oracle.wasm
 	stellar contract optimize \
-		--wasm $(MIGRATION_DIR)/target/wasm32v1-none/release/blend_v3_test_valuation_adapter.wasm \
-		--wasm-out $(MIGRATION_DIR)/target/wasm32v1-none/optimized/blend_v3_test_valuation_adapter.wasm
+		--wasm $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/release/blend_v3_test_valuation_adapter.wasm \
+		--wasm-out $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized/blend_v3_test_valuation_adapter.wasm
 
 check-v3: verify-deployed-artifacts build-v3
 	$(MAKE) -C $(V3_DIR) test
-	cargo +1.91.1 fmt --manifest-path $(MIGRATION_DIR)/Cargo.toml --all -- --check
-	cargo +1.91.1 check --manifest-path $(MIGRATION_DIR)/Cargo.toml --all-targets --locked
-	cargo +1.91.1 test --manifest-path $(MIGRATION_DIR)/Cargo.toml --workspace --locked
+	cargo +1.91.1 fmt --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --all -- --check
+	cargo +1.91.1 check --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --all-targets --locked
+	cargo +1.91.1 test --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --workspace --locked
 
 build: verify-deployed-artifacts
 	cargo +1.81 rustc --manifest-path=$(V2_DIR)/pool-factory/Cargo.toml --crate-type=cdylib --target=wasm32-unknown-unknown --release --locked
@@ -196,12 +196,12 @@ build: verify-deployed-artifacts
 fmt:
 	cargo +1.81 fmt --manifest-path $(V2_DIR)/Cargo.toml --all
 	$(MAKE) -C $(V3_DIR) fmt
-	cargo +1.91.1 fmt --manifest-path $(MIGRATION_DIR)/Cargo.toml --all
+	cargo +1.91.1 fmt --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --all
 
 clean:
 	cargo +1.81 clean --manifest-path $(V2_DIR)/Cargo.toml
 	$(MAKE) -C $(V3_DIR) clean
-	cargo +1.91.1 clean --manifest-path $(MIGRATION_DIR)/Cargo.toml
+	cargo +1.91.1 clean --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml
 
 generate-js:
 	stellar contract bindings typescript --overwrite \

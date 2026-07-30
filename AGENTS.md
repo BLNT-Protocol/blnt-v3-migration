@@ -4,9 +4,9 @@ These instructions apply to the entire repository.
 
 ## Mission
 
-Build and evaluate an experimental Blend Protocol v3 candidate without losing
-the ability to demonstrate compatibility with the deployed emitter and the
-incumbent v2 protocol.
+Build and evaluate migration from the incumbent Blend v2 protocol and deployed
+emitter to the experimental v3 candidate while preserving demonstrable
+cross-version compatibility.
 
 Treat deployed v2 behavior as the default specification. V3 behavioral changes
 require an explicit justification tied to the three-tier backstop, emitter
@@ -66,8 +66,8 @@ a side effect of work in this repository.
   silently substituted for those files.
 - New v3 code belongs in the `blend-contracts-v3/` submodule. It MUST target
   Protocol 27 with Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
-- Migration-only tests and fixtures belong in `migration/` and MUST NOT become
-  production contract dependencies.
+- Migration-only tests and fixtures belong in `migration-harness/` and MUST
+  NOT become production contract dependencies.
 - Do not add an SDK 26 compatibility lane. Migration compatibility is tested
   against the SDK-22 v2 contracts and deployed emitter behavior.
 - Keep the incumbent v2 implementation available for side-by-side migration

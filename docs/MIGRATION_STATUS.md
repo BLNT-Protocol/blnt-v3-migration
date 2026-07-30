@@ -1,6 +1,6 @@
-# Blend V3 Candidate Implementation Status
+# Blend V3 Migration Implementation Status
 
-Status: Experimental candidate
+Status: Experimental migration harness
 
 This document records implementation and deployment progress. It is
 non-normative and does not authorize protocol behavior. Normative

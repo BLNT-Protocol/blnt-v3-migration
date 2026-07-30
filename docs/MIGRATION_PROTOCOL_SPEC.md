@@ -2,7 +2,7 @@
 
 This document defines the on-chain emitter-replacement behavior implemented by
 the Blend v3 candidate and the compatibility obligations imposed by the
-deployed Blend v2 contracts and legacy emitter.
+deployed Blend v2 contracts and deployed emitter.
 
 It composes with [SYSTEM_SPEC.md](SYSTEM_SPEC.md). Contract behavior unrelated
 to migration is specified by the pinned `blend-contracts-v3` submodule.
@@ -12,9 +12,9 @@ criteria.
 
 ## 1. Executable authority
 
-The exact deployed legacy-emitter and v2 WASM artifacts under
-`legacy/artifacts` are the runtime compatibility boundary. The pinned
-`legacy/blend-contracts-v2` source records the SDK-22 implementation and tests.
+The exact deployed emitter and v2 WASM artifacts under
+`deployed-artifacts/mainnet` are the runtime compatibility boundary. The pinned
+`blend-contracts-v2` source records the SDK-22 implementation and tests.
 If this document conflicts with that executable behavior, the executable
 behavior wins and this document MUST be corrected.
 
@@ -22,7 +22,7 @@ The candidate implementation is the pinned `blend-contracts-v3` submodule.
 Migration runners and fixtures MUST invoke that implementation directly and
 MUST NOT maintain a second production candidate.
 
-## 2. Legacy-emitter behavior
+## 2. Deployed-emitter behavior
 
 ### MIGRATION-EMITTER-001: Ongoing distribution
 
@@ -91,11 +91,6 @@ Raw BLND:USDC transferred directly to the candidate may affect the emitter
 comparison, but it MUST NOT create tier shares, activation value, loss
 capacity, take-rate eligibility, ongoing-emission weight, or migration
 backfill.
-
-For deployment compatibility, the constructor and compatibility read interface
-retain the name `prefund_token` for plain USDC; `usdc_token` is the canonical
-read name. This name does not make plain USDC part of the emitter balance
-comparison or migration backfill.
 
 ## 5. Lifecycle
 

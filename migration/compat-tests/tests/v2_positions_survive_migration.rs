@@ -5,24 +5,24 @@ use soroban_sdk::{
     Address, BytesN, Env, String, Symbol, Vec,
 };
 
-mod legacy_emitter {
-    soroban_sdk::contractimport!(file = "../../legacy/artifacts/emitter.wasm");
+mod deployed_emitter {
+    soroban_sdk::contractimport!(file = "../../deployed-artifacts/mainnet/emitter.wasm");
 }
 
-use legacy_emitter::WASM as LEGACY_EMITTER_WASM;
+use deployed_emitter::WASM as DEPLOYED_EMITTER_WASM;
 
 mod v2_backstop {
-    soroban_sdk::contractimport!(file = "../../legacy/artifacts/v2-backstop.wasm");
+    soroban_sdk::contractimport!(file = "../../deployed-artifacts/mainnet/v2-backstop.wasm");
 }
 
 #[allow(clippy::too_many_arguments)]
 mod v2_pool {
-    soroban_sdk::contractimport!(file = "../../legacy/artifacts/v2-pool.wasm");
+    soroban_sdk::contractimport!(file = "../../deployed-artifacts/mainnet/v2-pool.wasm");
 }
 
 #[allow(clippy::too_many_arguments)]
 mod v2_pool_factory {
-    soroban_sdk::contractimport!(file = "../../legacy/artifacts/v2-pool-factory.wasm");
+    soroban_sdk::contractimport!(file = "../../deployed-artifacts/mainnet/v2-pool-factory.wasm");
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -49,9 +49,9 @@ struct QueuedSwap {
     unlock_time: u64,
 }
 
-#[contractclient(name = "LegacyEmitterClient")]
+#[contractclient(name = "DeployedEmitterClient")]
 #[allow(dead_code)]
-trait LegacyEmitter {
+trait DeployedEmitter {
     fn initialize(env: Env, blnd_token: Address, backstop: Address, backstop_token: Address);
     fn distribute(env: Env) -> i128;
     fn get_last_distro(env: Env, backstop_id: Address) -> u64;
@@ -351,9 +351,9 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
         .register_stellar_asset_contract_v2(token_admin)
         .address();
 
-    // The legacy 80:20 fixture has enough reserves for the incumbent v2
+    // The BLND:USDC 80:20 fixture has enough reserves for the incumbent v2
     // backstop deposit to clear the real v2 activation threshold.
-    let legacy_lp = env.register(
+    let blnd_usdc_lp = env.register(
         MockComet,
         (
             &blnd,
@@ -367,20 +367,20 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
         MockComet,
         (&blnd, &xlm, &SCALAR_7, &(8 * SCALAR_7), &(2 * SCALAR_7)),
     );
-    let legacy_lp_client = MockCometClient::new(&env, &legacy_lp);
+    let blnd_usdc_lp_client = MockCometClient::new(&env, &blnd_usdc_lp);
 
     let v2_backstop_id = Address::generate(&env);
     let v2_pool_factory_id = Address::generate(&env);
-    let emitter_id = env.register(LEGACY_EMITTER_WASM, ());
-    let emitter = LegacyEmitterClient::new(&env, &emitter_id);
-    emitter.initialize(&blnd, &v2_backstop_id, &legacy_lp);
+    let emitter_id = env.register(DEPLOYED_EMITTER_WASM, ());
+    let emitter = DeployedEmitterClient::new(&env, &emitter_id);
+    emitter.initialize(&blnd, &v2_backstop_id, &blnd_usdc_lp);
     StellarAssetClient::new(&env, &blnd).set_admin(&emitter_id);
 
     env.register_at(
         &v2_backstop_id,
         v2_backstop::WASM,
         (
-            &legacy_lp,
+            &blnd_usdc_lp,
             &emitter_id,
             &blnd,
             &usdc,
@@ -425,7 +425,7 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
 
     let v2_backstop_depositor = Address::generate(&env);
     let incumbent_lp_amount = 55_000 * SCALAR_7;
-    legacy_lp_client.mint(&v2_backstop_depositor, &incumbent_lp_amount);
+    blnd_usdc_lp_client.mint(&v2_backstop_depositor, &incumbent_lp_amount);
     let v2_backstop = v2_backstop::Client::new(&env, &v2_backstop_id);
     assert_eq!(
         v2_backstop.deposit(&v2_backstop_depositor, &v2_pool_id, &incumbent_lp_amount,),
@@ -476,13 +476,13 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
     let adapter_admin = Address::generate(&env);
     let valuation_adapter_id = env.register(
         v3_test_valuation_adapter::WASM,
-        (&adapter_admin, &blnd, &usdc, &legacy_lp, &next_lp),
+        (&adapter_admin, &blnd, &usdc, &blnd_usdc_lp, &next_lp),
     );
     env.register_at(
         &candidate_id,
         v3_backstop::WASM,
         (
-            &legacy_lp,
+            &blnd_usdc_lp,
             &next_lp,
             &emitter_id,
             &blnd,
@@ -496,11 +496,11 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
     MockV3PoolFactoryClient::new(&env, &v3_pool_factory_id).set_pool(&v3_pool_id);
     let candidate_depositor = Address::generate(&env);
     let candidate_lp_amount = incumbent_lp_amount + 1;
-    legacy_lp_client.mint(&candidate_depositor, &candidate_lp_amount);
+    blnd_usdc_lp_client.mint(&candidate_depositor, &candidate_lp_amount);
     candidate.deposit_blnd_usdc(&candidate_depositor, &v3_pool_id, &candidate_lp_amount);
     assert_eq!(
-        legacy_lp_client.balance(&candidate_id),
-        legacy_lp_client.balance(&v2_backstop_id) + 1
+        blnd_usdc_lp_client.balance(&candidate_id),
+        blnd_usdc_lp_client.balance(&v2_backstop_id) + 1
     );
 
     let queue_start = env.ledger().timestamp();
@@ -521,7 +521,7 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
     let v2_backstop_pool_before = v2_backstop.pool_data(&v2_pool_id);
     let v2_pool_xlm_before = TokenClient::new(&env, &xlm).balance(&v2_pool_id);
     let v2_pool_usdc_before = TokenClient::new(&env, &usdc).balance(&v2_pool_id);
-    let v2_backstop_lp_before = legacy_lp_client.balance(&v2_backstop_id);
+    let v2_backstop_lp_before = blnd_usdc_lp_client.balance(&v2_backstop_id);
     let lender_usdc_before = TokenClient::new(&env, &usdc).balance(&lender);
     let borrower_xlm_before = TokenClient::new(&env, &xlm).balance(&borrower);
     let borrower_usdc_before = TokenClient::new(&env, &usdc).balance(&borrower);
@@ -554,7 +554,7 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
         v2_pool_usdc_before
     );
     assert_eq!(
-        legacy_lp_client.balance(&v2_backstop_id),
+        blnd_usdc_lp_client.balance(&v2_backstop_id),
         v2_backstop_lp_before
     );
     assert_eq!(
@@ -633,7 +633,7 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
             > lender_before.supply.get(usdc_index).unwrap()
     );
 
-    legacy_lp_client.mint(&v2_backstop_depositor, &SCALAR_7);
+    blnd_usdc_lp_client.mint(&v2_backstop_depositor, &SCALAR_7);
     assert!(v2_backstop.deposit(&v2_backstop_depositor, &v2_pool_id, &SCALAR_7,) > 0);
     assert!(
         v2_backstop

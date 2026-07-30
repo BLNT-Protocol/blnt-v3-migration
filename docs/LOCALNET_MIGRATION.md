@@ -13,7 +13,7 @@ state and keys remain separate.
 The runner uses independently issued local assets and real Comet contracts:
 
 - `BLND`
-- A BLND:USDC Comet LP, representing the legacy backstop token
+- A BLND:USDC Comet LP, representing the incumbent designated token
 - A BLND:XLM Comet LP, representing the candidate's next designated token and
   second backstop tier
 - `USDC`, representing the plain-USDC third backstop tier
@@ -47,7 +47,7 @@ BLND:USDC LP positions before funding the two backstops and candidate lending
 positions.
 
 The local operator pays for deployment and migration transactions but receives
-no continuing protocol authority. The exercise uses only the legacy emitter's
+no continuing protocol authority. The exercise uses only the deployed emitter's
 permissionless queue and swap mechanism; it deploys no governance, multisig,
 administrator recovery, or alternate upgrade path.
 
@@ -66,7 +66,7 @@ undistributed.
 - `jq`, `make`, and `shasum`
 
 The runner verifies and deploys the exact mainnet emitter and incumbent v2
-WASMs recorded in `legacy/artifacts/manifest.json`. The pinned SDK-22 source
+WASMs recorded in `deployed-artifacts/mainnet/manifest.json`. The pinned SDK-22 source
 submodule remains a separate build-and-test lane; its rebuilt bytes are not
 substituted into this migration exercise. The candidate builds directly from
 the pinned `blend-contracts-v3/` submodule, which also owns the contract
@@ -108,7 +108,7 @@ daily execution is recommended:
 make localnet-keepalive
 ```
 
-This explicitly extends the legacy emitter instance, incumbent distribution
+This explicitly extends the deployed emitter instance, incumbent distribution
 checkpoint, valuation-adapter instance, both Comets, and all three configured
 classic-asset contract instances for ten local days. It also refreshes the queued swap, candidate,
 factory registration, pool, depositor position, and relevant token balances
@@ -152,9 +152,9 @@ verifies:
 - The deployed pool retains its transferable v2-style local admin and remains
   Admin Active.
 - The pool remains registered.
-- The legacy and next designated tokens match the deployment plan.
+- The incumbent and next designated tokens match the deployment plan.
 - Incumbent and candidate balances are conserved.
-- The candidate still holds strictly more legacy backstop tokens.
+- The candidate still holds strictly more incumbent BLND:USDC LP tokens.
 
 Verification can be repeated independently:
 

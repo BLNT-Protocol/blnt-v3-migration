@@ -15,15 +15,15 @@ Initialize both pinned contract-source submodules after cloning:
 git submodule update --init --recursive
 ```
 
-The historical source baseline is Blend Protocol v2 commit
+The deployed v2 source baseline is Blend Protocol v2 commit
 `ba22b487b2c5057a4ecc28b05b5193c28e4bd117`. The source submodules use the
 GitHub SSH URLs `git@github.com:blend-capital/blend-contracts-v2.git` and
 `git@github.com:levinson/blend-contracts-v3.git`.
 
 Exact mainnet emitter, v2 backstop, pool-factory, and pool WASMs are checked in
-under `legacy/artifacts/` with their contract IDs and SHA-256 digests. These
+under `deployed-artifacts/mainnet/` with their contract IDs and SHA-256 digests. These
 deployed bytes, rather than a local rebuild, are the authoritative
-compatibility and isolated-migration fixtures. Run `make verify-legacy` to
+compatibility and isolated-migration fixtures. Run `make verify-deployed-artifacts` to
 verify both inputs.
 
 GitHub Actions requires a fine-grained `SUBMODULES_TOKEN` repository secret
@@ -31,7 +31,7 @@ with read access to the private `blend-contracts-v3` repository.
 
 The emitter migration does not upgrade the deployed v2 contracts or move
 their supplier, borrower, or backstop positions. Immediately before switching
-recipients, the legacy emitter mints its final time-accrued BLND distribution
+recipients, the deployed emitter mints its final time-accrued BLND distribution
 to the incumbent backstop. Subsequent emitter distributions go to v3, while
 existing v2 positions and previously accrued v2 claims remain governed by the
 v2 contracts. This routing lasts while v3 remains the emitter's registered
@@ -60,7 +60,7 @@ production-adapter testnet lane is documented in
 This repository deliberately maintains three independent source and test
 lanes:
 
-- `legacy/blend-contracts-v2/` is the historical source baseline, pinned to
+- `blend-contracts-v2/` is the deployed v2 source baseline, pinned to
   Rust 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
 - `blend-contracts-v3/` is the production candidate submodule, pinned to Rust
   1.91.1, Soroban SDK 27.0.3, Protocol 27 tooling, and `wasm32v1-none`.
@@ -72,13 +72,13 @@ SDK-22 implementation and the current v3 candidate.
 
 ## Build and test
 
-Build the historical v2 contracts:
+Build the deployed v2 contracts:
 
 ```bash
 make
 ```
 
-Run the historical v2 test suite:
+Run the deployed v2 test suite:
 
 ```bash
 make test
@@ -103,11 +103,11 @@ Check the v3 workspace with its pinned current toolchain:
 make check-v3
 ```
 
-This verifies the exact deployed legacy fixtures and builds the SDK-27
+This verifies the exact deployed fixtures and builds the SDK-27
 compatibility probe, candidate contracts, production valuation adapter, and
 deterministic test adapter. The compatibility
 harness verifies both a cross-contract call into the SDK-22 backstop and a
-complete legacy-emitter migration into the v3 candidate on a Protocol-27
+complete deployed-emitter migration into the v3 candidate on a Protocol-27
 host. The production adapter uses immutable SEP-40 BLND/USDC and XLM/USDC
 TWAPs plus conservative 80:20 Comet reserve valuation. The deterministic
 adapter remains a fixture only. The candidate pool persists v2-compatible
@@ -185,7 +185,7 @@ artifacts.
 ## Development principles
 
 - Preserve a passing v2 baseline before introducing behavioral changes.
-- Keep the legacy emitter interface compatible.
+- Keep the deployed emitter interface compatible.
 - Test both native Rust contracts and deployed WASM.
 - Treat activation, loss absorption, emissions, and emitter migration as
   separate protocol mechanisms.

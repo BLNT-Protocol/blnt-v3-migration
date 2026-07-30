@@ -1,5 +1,5 @@
 [submodule "blend-contracts-v2"]
-	path = legacy/blend-contracts-v2
+	path = blend-contracts-v2
 	url = git@github.com:blend-capital/blend-contracts-v2.git
 [submodule "blend-contracts-v3"]
 	path = blend-contracts-v3

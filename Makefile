@@ -1,23 +1,23 @@
-V2_DIR := legacy/blend-contracts-v2
+V2_DIR := blend-contracts-v2
 V3_DIR := blend-contracts-v3
 MIGRATION_DIR := migration
 
 default: build
 
-verify-legacy:
-	bash scripts/verify-legacy-artifacts.sh
+verify-deployed-artifacts:
+	bash scripts/verify-deployed-artifacts.sh
 
 test: build
 	cargo +1.81 test --manifest-path $(V2_DIR)/Cargo.toml --all --tests --locked
 
-test-v2-migration: verify-legacy build-v3
+test-v2-migration: verify-deployed-artifacts build-v3
 	cargo +1.91.1 test --manifest-path $(MIGRATION_DIR)/Cargo.toml \
 		--package blend-v3-compat-tests \
 		--test emitter_migrates_to_v3 \
 		--test v2_positions_survive_migration \
 		--locked
 
-test-v2-positions-survive-migration: verify-legacy build-v3
+test-v2-positions-survive-migration: verify-deployed-artifacts build-v3
 	cargo +1.91.1 test --manifest-path $(MIGRATION_DIR)/Cargo.toml \
 		--package blend-v3-compat-tests \
 		--test v2_positions_survive_migration \
@@ -167,13 +167,13 @@ build-v3:
 		--wasm $(MIGRATION_DIR)/target/wasm32v1-none/release/blend_v3_test_valuation_adapter.wasm \
 		--wasm-out $(MIGRATION_DIR)/target/wasm32v1-none/optimized/blend_v3_test_valuation_adapter.wasm
 
-check-v3: verify-legacy build-v3
+check-v3: verify-deployed-artifacts build-v3
 	$(MAKE) -C $(V3_DIR) test
 	cargo +1.91.1 fmt --manifest-path $(MIGRATION_DIR)/Cargo.toml --all -- --check
 	cargo +1.91.1 check --manifest-path $(MIGRATION_DIR)/Cargo.toml --all-targets --locked
 	cargo +1.91.1 test --manifest-path $(MIGRATION_DIR)/Cargo.toml --workspace --locked
 
-build: verify-legacy
+build: verify-deployed-artifacts
 	cargo +1.81 rustc --manifest-path=$(V2_DIR)/pool-factory/Cargo.toml --crate-type=cdylib --target=wasm32-unknown-unknown --release --locked
 	cargo +1.81 rustc --manifest-path=$(V2_DIR)/backstop/Cargo.toml --crate-type=cdylib --target=wasm32-unknown-unknown --release --locked
 	cargo +1.81 rustc --manifest-path=$(V2_DIR)/pool/Cargo.toml --crate-type=cdylib --target=wasm32-unknown-unknown --release --locked
@@ -206,13 +206,13 @@ clean:
 generate-js:
 	stellar contract bindings typescript --overwrite \
 		--contract-id CBWH54OKUK6U2J2A4J2REJEYB625NEFCHISWXLOPR2D2D6FTN63TJTWN \
-		--wasm ./legacy/artifacts/v2-backstop.wasm --output-dir ./js/js-backstop/ \
+		--wasm ./deployed-artifacts/mainnet/v2-backstop.wasm --output-dir ./js/js-backstop/ \
 		--rpc-url http://localhost:8000 --network-passphrase "Standalone Network ; February 2017" --network Standalone
 	stellar contract bindings typescript --overwrite \
 		--contract-id CBWH54OKUK6U2J2A4J2REJEYB625NEFCHISWXLOPR2D2D6FTN63TJTWN \
-		--wasm ./legacy/artifacts/v2-pool-factory.wasm --output-dir ./js/js-pool-factory/ \
+		--wasm ./deployed-artifacts/mainnet/v2-pool-factory.wasm --output-dir ./js/js-pool-factory/ \
 		--rpc-url http://localhost:8000 --network-passphrase "Standalone Network ; February 2017" --network Standalone
 	stellar contract bindings typescript --overwrite \
 		--contract-id CBWH54OKUK6U2J2A4J2REJEYB625NEFCHISWXLOPR2D2D6FTN63TJTWN \
-		--wasm ./legacy/artifacts/v2-pool.wasm --output-dir ./js/js-pool/ \
+		--wasm ./deployed-artifacts/mainnet/v2-pool.wasm --output-dir ./js/js-pool/ \
 		--rpc-url http://localhost:8000 --network-passphrase "Standalone Network ; February 2017" --network Standalone

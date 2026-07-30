@@ -11,8 +11,8 @@
 - Rust toolchain: `1.81`
 - Soroban SDK: `22.0.7`
 
-The historical source is retained as the pinned
-`legacy/blend-contracts-v2` Git submodule. Its upstream dependency graph and
+The deployed v2 source is retained as the pinned
+`blend-contracts-v2` Git submodule. Its upstream dependency graph and
 lockfile are preserved without modification. Initialize it after cloning:
 
 ```bash
@@ -20,14 +20,14 @@ git submodule update --init
 ```
 
 Exact deployed mainnet emitter, v2 backstop, pool-factory, and pool WASMs are
-retained under `legacy/artifacts`. Their mainnet contract IDs, source
+retained under `deployed-artifacts/mainnet`. Their mainnet contract IDs, source
 provenance, and SHA-256 digests are recorded in
-`legacy/artifacts/manifest.json`. Run `make verify-legacy` before using them.
+`deployed-artifacts/mainnet/manifest.json`. Run `make verify-deployed-artifacts` before using them.
 
 These deployed bytes are authoritative for compatibility tests and isolated
 migration deployments. Locally rebuilt SDK-22 artifacts remain valuable for
 source verification, but build and optimizer differences can change their
-hashes; they MUST NOT silently replace the frozen deployed fixtures.
+hashes; they MUST NOT silently replace the exact deployed fixtures.
 
 ## Baseline policy
 
@@ -40,7 +40,7 @@ or redefine contract behavior.
 
 Before changing protocol behavior:
 
-1. Verify the pinned source and deployed fixtures with `make verify-legacy`.
+1. Verify the pinned source and deployed fixtures with `make verify-deployed-artifacts`.
 2. Run the inherited v2 unit and integration tests with `make test`.
 3. Run the Protocol-27 compatibility harness with
    `make test-v2-migration`.
@@ -66,7 +66,7 @@ must not modify the pinned v2 source, its dependency graph, or its lockfile.
 - `v2-backstop.wasm`: deployed single-tier incumbent backstop.
 - `v2-pool.wasm`: deployed lending-pool implementation.
 - `v2-pool-factory.wasm`: deployed pool factory.
-- `legacy/blend-contracts-v2`: source tests, audit reference, and rebuild lane.
+- `blend-contracts-v2`: source tests, audit reference, and rebuild lane.
 - `migration/compat-tests`: current-host compatibility and migration tests.
 - `blend-contracts-v3`: pinned production v3 contract source and tests.
 

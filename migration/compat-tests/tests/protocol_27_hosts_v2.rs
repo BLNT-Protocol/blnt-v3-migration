@@ -1,7 +1,7 @@
 use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
 
 mod v2_backstop {
-    soroban_sdk::contractimport!(file = "../../legacy/artifacts/v2-backstop.wasm");
+    soroban_sdk::contractimport!(file = "../../deployed-artifacts/mainnet/v2-backstop.wasm");
 }
 
 mod v3_probe {

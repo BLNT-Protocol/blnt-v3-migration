@@ -7,7 +7,7 @@ pub struct CompatibilityProbe;
 
 #[contractimpl]
 impl CompatibilityProbe {
-    /// Read the designated backstop token through the legacy v2 interface.
+    /// Read the designated backstop token through the deployed v2 interface.
     pub fn read_backstop_token(env: Env, backstop: Address) -> Address {
         env.invoke_contract(
             &backstop,

@@ -3,9 +3,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LEGACY_DIR="${ROOT_DIR}/legacy"
-SOURCE_DIR="${LEGACY_DIR}/blend-contracts-v2"
-ARTIFACT_DIR="${LEGACY_DIR}/artifacts"
+SOURCE_DIR="${ROOT_DIR}/blend-contracts-v2"
+ARTIFACT_DIR="${ROOT_DIR}/deployed-artifacts/mainnet"
 MANIFEST="${ARTIFACT_DIR}/manifest.json"
 
 for command in git jq shasum; do
@@ -20,7 +19,7 @@ done
     exit 1
 }
 [[ -f "${MANIFEST}" ]] || {
-    printf 'error: missing legacy artifact manifest: %s\n' "${MANIFEST}" >&2
+    printf 'error: missing deployed artifact manifest: %s\n' "${MANIFEST}" >&2
     exit 1
 }
 
@@ -51,17 +50,17 @@ source_status="$(git -C "${SOURCE_DIR}" status --porcelain)"
 while IFS=$'\t' read -r relative_path expected_hash; do
     artifact="${ARTIFACT_DIR}/${relative_path}"
     [[ -f "${artifact}" ]] || {
-        printf 'error: missing legacy artifact: %s\n' "${artifact}" >&2
+        printf 'error: missing deployed artifact: %s\n' "${artifact}" >&2
         exit 1
     }
     hash_line="$(shasum -a 256 "${artifact}")"
     actual_hash="${hash_line%% *}"
     [[ "${actual_hash}" == "${expected_hash}" ]] || {
-        printf 'error: legacy artifact %s has SHA-256 %s; expected %s\n' \
+        printf 'error: deployed artifact %s has SHA-256 %s; expected %s\n' \
             "${relative_path}" "${actual_hash}" "${expected_hash}" >&2
         exit 1
     }
 done < <(jq -er '.artifacts[] | [.path, .sha256] | @tsv' "${MANIFEST}")
 
-printf 'Verified v2 source %s and %s frozen legacy artifacts.\n' \
+printf 'Verified v2 source %s and %s deployed mainnet artifacts.\n' \
     "${actual_commit}" "$(jq -er '.artifacts | length' "${MANIFEST}")"

@@ -5,8 +5,8 @@ use soroban_sdk::{
     Address, Env,
 };
 
-mod legacy_emitter {
-    soroban_sdk::contractimport!(file = "../../legacy/artifacts/emitter.wasm");
+mod deployed_emitter {
+    soroban_sdk::contractimport!(file = "../../deployed-artifacts/mainnet/emitter.wasm");
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -31,8 +31,8 @@ struct QueuedSwap {
 }
 
 #[allow(dead_code)]
-#[contractclient(name = "LegacyEmitterClient")]
-trait LegacyEmitter {
+#[contractclient(name = "DeployedEmitterClient")]
+trait DeployedEmitter {
     fn initialize(env: Env, blnd_token: Address, backstop: Address, backstop_token: Address);
     fn get_backstop(env: Env) -> Address;
     fn get_queued_swap(env: Env) -> Option<QueuedSwap>;
@@ -73,7 +73,7 @@ fn create_asset(env: &Env, admin: &Address) -> Address {
 }
 
 #[test]
-fn optimized_candidate_migrates_through_the_deployed_legacy_emitter() {
+fn optimized_candidate_migrates_through_the_deployed_emitter() {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set_timestamp(1_000);
@@ -85,9 +85,9 @@ fn optimized_candidate_migrates_through_the_deployed_legacy_emitter() {
     let usdc = create_asset(&env, &token_admin);
 
     let incumbent = Address::generate(&env);
-    let emitter_id = env.register(legacy_emitter::WASM, ());
+    let emitter_id = env.register(deployed_emitter::WASM, ());
     StellarAssetClient::new(&env, &blnd).set_admin(&emitter_id);
-    let emitter = LegacyEmitterClient::new(&env, &emitter_id);
+    let emitter = DeployedEmitterClient::new(&env, &emitter_id);
     emitter.initialize(&blnd, &incumbent, &blnd_usdc);
 
     let candidate_id = Address::generate(&env);
@@ -112,9 +112,9 @@ fn optimized_candidate_migrates_through_the_deployed_legacy_emitter() {
     );
     let candidate = v3_backstop::Client::new(&env, &candidate_id);
 
-    let legacy_token = StellarAssetClient::new(&env, &blnd_usdc);
-    legacy_token.mint(&incumbent, &(100 * SCALAR_7));
-    legacy_token.mint(&candidate_id, &(100 * SCALAR_7 + 1));
+    let blnd_usdc_token = StellarAssetClient::new(&env, &blnd_usdc);
+    blnd_usdc_token.mint(&incumbent, &(100 * SCALAR_7));
+    blnd_usdc_token.mint(&candidate_id, &(100 * SCALAR_7 + 1));
 
     candidate.begin_migration();
     let queued = emitter.get_queued_swap().unwrap();

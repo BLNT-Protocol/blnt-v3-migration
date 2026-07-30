@@ -10,7 +10,7 @@ with the migration requirements in
 The emitter migration and an individual pool's activation rule are independent
 mechanisms. Tests must keep those concepts separate.
 
-## Legacy emitter migration
+## Deployed emitter migration
 
 The test suite must verify:
 
@@ -30,7 +30,7 @@ The test suite must verify:
   backstop share. It invokes no position conversion, transfer, close, or import
   into v3.
 - After finalization and while the candidate remains registered, new
-  legacy-emitter distributions go only to the candidate. BLND already held,
+  deployed-emitter distributions go only to the candidate. BLND already held,
   allocated, or accrued in v2 remains governed by v2 accounting and claim
   rules.
 - Preparation is unavailable until the final seven days before unlock, verifies
@@ -73,7 +73,7 @@ The test suite must verify:
   time rather than from the direct swap transaction, including when the direct
   swap occurs late in the grace period.
 - After a successful direct emitter swap, loss of the candidate's
-  strictly-greater legacy-token balance does not prevent lifecycle
+  strictly-greater incumbent designated-token balance does not prevent lifecycle
   synchronization.
 - Synchronization rejects a replacement queue finalized after cancellation,
   including one that registers an unexpected next designated token.
@@ -826,11 +826,11 @@ open, prepared, and active phases; native and WASM tests remain the accelerated
 time-travel environments.
 
 The local runner MUST use independently issued local assets and verify the
-published legacy emitter WASM digest before deployment. Final verification MUST
+deployed emitter WASM digest before deployment. Final verification MUST
 prove that the emitter points to the active candidate, its queue is cleared,
 the candidate/factory/pool bindings remain consistent, the pool is registered,
 the incumbent and candidate balances are conserved, and the candidate retains
-a strictly greater legacy-token balance.
+a strictly greater incumbent designated-token balance.
 
 Because local Quickstart closes ledgers faster than the five-second cadence
 assumed by incumbent and candidate TTL constants, the runner MUST provide a
@@ -838,13 +838,13 @@ transaction-backed keepalive for the emitter queue, candidate, pool factory
 registration, pool, depositor position, relevant token balances, and BLND
 asset state. The keepalive MUST preserve all economic state and queue
 timestamps, and its cadence MUST remain safely inside the shortest effective
-local TTL. Legacy instance and distribution-checkpoint entries that lack
-read-path TTL renewal MUST be extended explicitly rather than mutated through
-an economic contract entry point. Asset-contract instances whose supported
+local TTL. Deployed emitter instance and distribution-checkpoint entries that
+lack read-path TTL renewal MUST be extended explicitly rather than mutated
+through an economic contract entry point. Asset-contract instances whose supported
 read paths renew less than that cadence MUST also be extended explicitly.
 The keepalive MUST fail unless the live queue still matches the saved
 candidate, next designated token, and unlock time, the candidate retains a
-strict legacy-token balance majority, and every deployed modeled pool and
+strict incumbent designated-token balance majority, and every deployed modeled pool and
 lending oracle is renewed successfully. It MUST record its last-success
 timestamp only after those mandatory renewals complete. Repeated monitoring
 MUST retain earlier results and resource-cost evidence rather than overwrite
@@ -855,7 +855,7 @@ preparation through the two-retry horizon and verify the candidate's 89/90-day
 TTL renewal policy.
 
 The Protocol-27 migration harness MUST load the exact deployed v2 WASM recorded
-in `legacy/artifacts/manifest.json`. It MUST NOT substitute a local rebuild or
+in `deployed-artifacts/mainnet/manifest.json`. It MUST NOT substitute a local rebuild or
 recompile v2 against SDK 27 merely to share the v3 crate graph. The pinned
 SDK-22 source workspace MUST be built and tested separately. This verifies the
 actual compatibility boundary: deployed historical bytecode executing on a
@@ -863,7 +863,7 @@ current host and interacting with SDK-27 v3 bytecode.
 
 The compatibility probe MUST invoke at least one v2 backstop entry point
 through SDK-27 WASM. The migration harness MUST also exercise the complete
-legacy-emitter swap into optimized SDK-27 candidate WASM.
+deployed-emitter swap into optimized SDK-27 candidate WASM.
 
 The accelerated Protocol-27 harness MUST additionally establish supplier,
 borrower, collateral, debt, and backstop-share positions in the frozen

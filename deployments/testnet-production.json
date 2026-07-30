@@ -105,7 +105,7 @@
     }
   },
   "protocol": {
-    "legacy_emitter": {
+    "deployed_emitter": {
       "contract_id": "CDO22NMYBVVSTNQHKISLTVKACELZTWRK4QECYVC4S2OILBGPRUT3ZF4H",
       "deployment_transaction": "83900b4f83776904b3ff2a4eb8b207ecb07cfb017cf0693370950556898073f5"
     },
@@ -261,7 +261,7 @@
     }
   },
   "artifacts": {
-    "legacy_emitter_wasm_sha256": "438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89",
+    "deployed_emitter_wasm_sha256": "438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89",
     "v2_pool_factory_wasm_sha256": "e304170e67184748839dda5fd3b6dd5d8bf1e54055a07b536cede24da072c7a9",
     "v2_backstop_wasm_sha256": "bf6be0f31c2110151b5a4157720626a85242f34c0ac864ff594789c3f777a3d0",
     "v2_pool_wasm_sha256": "7df65d771d34226d3a8d20e27cfb819421449ba1a3c44223cbb868e5beb68bfa",

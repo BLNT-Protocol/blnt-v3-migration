@@ -5,11 +5,11 @@ These instructions apply to the entire repository.
 ## Mission
 
 Build and evaluate an experimental Blend Protocol v3 candidate without losing
-the ability to demonstrate compatibility with the deployed legacy emitter and
-the incumbent v2 protocol.
+the ability to demonstrate compatibility with the deployed emitter and the
+incumbent v2 protocol.
 
 Treat deployed v2 behavior as the default specification. V3 behavioral changes
-require an explicit justification tied to the three-tier backstop, legacy
+require an explicit justification tied to the three-tier backstop, emitter
 migration compatibility, Protocol 27 compatibility, a conservation/safety
 fix, or a separately approved exception recorded in the v3 specification.
 Carrying integer dust forward at the same accounting scope and the
@@ -33,35 +33,35 @@ Read these before changing protocol behavior:
 8. `docs/BASELINE.md`
 9. Existing contract tests and the implementation being changed
 
-If the documents conflict with executable legacy behavior, preserve the legacy
-behavior needed for migration and document the conflict. Do not silently choose
-a new economic policy.
+If the documents conflict with deployed executable behavior, preserve the
+behavior needed for migration and document the conflict. Do not silently
+choose a new economic policy.
 
 ## Local source policy
 
-Initialize the pinned historical source after cloning:
+Initialize the pinned deployed-v2 source after cloning:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-- `legacy/blend-contracts-v2` is the authoritative SDK-22 source submodule.
+- `blend-contracts-v2` is the authoritative SDK-22 source submodule.
 - `blend-contracts-v3` is the sole production v3 contract source submodule.
-- `legacy/artifacts` contains exact deployed mainnet WASM compatibility
-  fixtures, verified by `make verify-legacy`.
+- `deployed-artifacts/mainnet` contains exact deployed mainnet WASM compatibility
+  fixtures, verified by `make verify-deployed-artifacts`.
 - `migration` contains cross-version tests and test-only support contracts.
 - `../blend-utils` remains an optional local deployment-script reference.
 
 The submodule URLs use GitHub SSH. Do not edit a submodule, advance a pinned
-commit, replace frozen artifacts, or fetch a different historical source as
+commit, replace frozen artifacts, or fetch a different v2 source as
 an incidental part of migration work. Do not modify sibling repositories as
 a side effect of work in this repository.
 
 ## Baseline architecture
 
-- `legacy/blend-contracts-v2` is the frozen incumbent v2 source workspace. It
+- `blend-contracts-v2` is the frozen incumbent v2 source workspace. It
   MUST remain on Rust 1.81 and Soroban SDK 22.0.7.
-- `legacy/artifacts` is the authoritative bytecode boundary for compatibility
+- `deployed-artifacts/mainnet` is the authoritative bytecode boundary for compatibility
   tests and isolated migration deployments. A local source rebuild MUST NOT be
   silently substituted for those files.
 - New v3 code belongs in the `blend-contracts-v3/` submodule. It MUST target
@@ -74,7 +74,7 @@ a side effect of work in this repository.
   tests.
 - Prefer new v3 crates or clearly isolated v3 modules over rewriting the only
   copy of an incumbent v2 contract.
-- The legacy emitter is an external compatibility boundary. A candidate may
+- The deployed emitter is an external compatibility boundary. A candidate may
   interact with it but must not assume it can rewrite or upgrade it.
 - Pool activation, reward eligibility, loss absorption, emission allocation,
   and emitter migration are separate mechanisms. Do not conflate their
@@ -120,13 +120,13 @@ a side effect of work in this repository.
   affected reserve and apply Blend v2's ceiling-rounded bToken exchange-rate
   loss with intentional saturation at zero; stale or unavailable valuation
   fails closed.
-- Legacy migration qualification uses the candidate contract's direct balance
+- Emitter migration qualification uses the candidate contract's direct balance
   of the incumbent emitter-designated token and requires a strictly greater
   balance.
 - Do not introduce protocol governance, multisig control, protocol-wide
   administrator recovery, privileged WASM replacement, a protocol-wide
   emergency override, or an alternate upgrade path. Future protocol
-  replacement must use the legacy emitter's permissionless queue and swap
+  replacement must use the deployed emitter's permissionless queue and swap
   mechanism. V2-compatible transferable pool administration is pool-local and
   is not a protocol-upgrade path.
 - A successful migration awards zero discretionary BLND. Any one-time BLND
@@ -163,7 +163,7 @@ a side effect of work in this repository.
   USDC and Q4W positions have zero emission weight.
 - Preserve the v2 action matrix: On-Ice blocks borrowing and auction
   cancellation; Frozen additionally blocks both supply and collateral supply.
-- Never involuntarily swap a depositor's legacy backstop asset. Conversion
+- Never involuntarily swap a depositor's BLND:USDC backstop asset. Conversion
   requires explicit opt-in.
 - Bound loops and ledger footprints. Critical operations must remain executable
   under Soroban transaction resource limits.

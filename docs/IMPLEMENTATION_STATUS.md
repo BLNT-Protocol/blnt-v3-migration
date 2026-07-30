@@ -44,7 +44,7 @@ Milestones 1 through 5, the bounded-Q4W and canonical-loss-state-boundary
 portions of milestone 6, the reproducible local and public-testnet runners for
 the queue-open portion of milestone 7, and milestones 8 and 9 are
 represented by the frozen v2 baseline, isolated Protocol-27 backstop crate,
-cross-version legacy-emitter migration harness, the candidate's
+cross-version deployed-emitter migration harness, the candidate's
 pool-attributed continuous BLND:USDC shares, time-weighted migration
 checkpoints, independent pool-attributed BLND:XLM and plain-USDC share ledgers,
 canonical asset-neutral 12,500-USDC entry and 10,000-USDC maintenance
@@ -87,7 +87,7 @@ testing found that the earlier 126,044-byte artifact exceeded Protocol-27
 testnet CPU limits during upload. A completed wall-clock local run and the
 time-gated completion of both public-testnet exercises remain in progress.
 The deterministic public-testnet lane has completed its queue-open deployment,
-and its unshortened legacy-emitter queue unlocks on 2026-08-27. The separate
+and its unshortened deployed-emitter queue unlocks on 2026-08-27. The separate
 production-adapter public-testnet lane uses native XLM, synthetic BLND and
 USDC, fresh real 80:20 BLND:USDC and BLND:XLM Comets, a bounded test-only
 SEP-40 oracle, and the optimized production valuation adapter. Its two live

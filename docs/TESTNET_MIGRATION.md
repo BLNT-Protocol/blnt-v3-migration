@@ -7,7 +7,7 @@ and fresh 80:20 Comets, is documented in
 
 The public-testnet runner reuses the exact migration transaction assembly used
 by the local Quickstart lane against Stellar testnet. It deploys a frozen
-SDK-22 incumbent, the published legacy emitter, and the optimized SDK-27
+SDK-22 incumbent, the exact deployed emitter, and the optimized SDK-27
 candidate without shortening the production 31-day queue.
 
 All keys, public deployment state, transaction results, and CLI cost reports
@@ -47,7 +47,7 @@ make testnet-validate
 ```
 
 Deploy both stacks, create and Friendbot-fund isolated operator and depositor
-accounts, establish the candidate's strict legacy-token majority, and begin
+accounts, establish the candidate's strict incumbent designated-token majority, and begin
 the exact migration queue:
 
 ```bash

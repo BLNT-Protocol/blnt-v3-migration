@@ -26,7 +26,7 @@ jobs:
         token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
         submodules: recursive
     - run: rustup toolchain install 1.81 --profile minimal --component rustfmt
-    - run: cargo +1.81 fmt --manifest-path legacy/blend-contracts-v2/Cargo.toml --all --check
+    - run: cargo +1.81 fmt --manifest-path blend-contracts-v2/Cargo.toml --all --check
 
   build-and-test-v2:
     runs-on: ubuntu-latest
@@ -40,10 +40,10 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          legacy/blend-contracts-v2/target
-        key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('legacy/blend-contracts-v2/Cargo.lock') }}-${{ github.sha }}
+          blend-contracts-v2/target
+        key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('blend-contracts-v2/Cargo.lock') }}-${{ github.sha }}
         restore-keys: |
-          cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('legacy/blend-contracts-v2/Cargo.lock') }}-
+          cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('blend-contracts-v2/Cargo.lock') }}-
           cargo-${{ runner.os }}-${{ github.job }}-
     - run: rustup toolchain install 1.81 --profile minimal --target wasm32-unknown-unknown
     - uses: stellar/stellar-cli@f4fd838380408dcad3e39f704e8d56d6408c63e2 # v22.6.0
@@ -65,9 +65,9 @@ jobs:
           ~/.cargo/git
           blend-contracts-v3/target
           migration/target
-        key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('blend-contracts-v3/Cargo.lock', 'migration/Cargo.lock', 'legacy/artifacts/manifest.json') }}-${{ github.sha }}
+        key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('blend-contracts-v3/Cargo.lock', 'migration/Cargo.lock', 'deployed-artifacts/mainnet/manifest.json') }}-${{ github.sha }}
         restore-keys: |
-          cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('blend-contracts-v3/Cargo.lock', 'migration/Cargo.lock', 'legacy/artifacts/manifest.json') }}-
+          cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('blend-contracts-v3/Cargo.lock', 'migration/Cargo.lock', 'deployed-artifacts/mainnet/manifest.json') }}-
           cargo-${{ runner.os }}-${{ github.job }}-
     - uses: stellar/stellar-cli@5a7c5fe76530bf4248477ac812fc757146b98cc4 # v27.0.0
     - run: rustup toolchain install 1.91.1 --profile minimal --component rustfmt --target wasm32v1-none

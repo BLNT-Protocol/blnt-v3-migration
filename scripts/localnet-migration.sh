@@ -56,12 +56,12 @@ QUICKSTART_CONTAINER_NAME="stellar-${CONTAINER_NAME}"
 SCALAR_7=10000000
 MODELED_BACKSTOP_LP_BALANCE=$((22000 * SCALAR_7))
 # Every fresh lane uses the modeled Fixed pools. One extra candidate base unit
-# preserves the legacy emitter's strict BLND:USDC majority requirement.
+# preserves the deployed emitter's strict BLND:USDC majority requirement.
 INCUMBENT_BALANCE="${MODELED_BACKSTOP_LP_BALANCE}"
 CANDIDATE_BALANCE=$((INCUMBENT_BALANCE + 1))
 ACTIVATION_USDC_BALANCE=$((12500 * SCALAR_7))
 POOL_SUPPLY_BALANCE=$((1000 * SCALAR_7))
-LEGACY_LP_JOIN_AMOUNT=$((100 * SCALAR_7))
+BLND_USDC_LP_JOIN_AMOUNT=$((100 * SCALAR_7))
 COMET_INITIAL_BLND=$((1000 * SCALAR_7))
 COMET_INITIAL_PAIR_TOKEN=$((25 * SCALAR_7))
 COMET_INITIAL_XLM=$((100 * SCALAR_7))
@@ -77,8 +77,9 @@ FIXTURE_MAX_PRICE_AGE=3600
 PREPARATION_WINDOW_SECONDS=$((7 * 24 * 60 * 60))
 EMISSION_START_DELAY_SECONDS=5
 MULTI_POOL_EMISSION_DELAY_SECONDS=10
-# Explicitly renewed legacy entries get ten wall-clock days of TTL, leaving a
-# two-times safety margin for the documented five-day keepalive cadence.
+# Explicitly renewed deployed-emitter and v2 entries get ten wall-clock days
+# of TTL, leaving a two-times safety margin for the documented five-day
+# keepalive cadence.
 MIGRATION_TTL_EXTENSION_LEDGERS="${BLEND_MIGRATION_TTL_EXTENSION_LEDGERS:-$((10 * 24 * 60 * 60 / LEDGER_SECONDS))}"
 
 INCUMBENT_SALT="0000000000000000000000000000000000000000000000000000000000000011"
@@ -96,19 +97,19 @@ MODELED_FIXED_V3_EURC_BORROW=$((100 * SCALAR_7))
 MODELED_ASSET_BALANCE=$((1000000 * SCALAR_7))
 MODELED_POOLS_FIXTURE="${ROOT_DIR}/fixtures/testnet-modeled-pools.json"
 
-V2_FACTORY_WASM="${ROOT_DIR}/legacy/artifacts/v2-pool-factory.wasm"
-V2_BACKSTOP_WASM="${ROOT_DIR}/legacy/artifacts/v2-backstop.wasm"
-V2_POOL_WASM="${ROOT_DIR}/legacy/artifacts/v2-pool.wasm"
+V2_FACTORY_WASM="${ROOT_DIR}/deployed-artifacts/mainnet/v2-pool-factory.wasm"
+V2_BACKSTOP_WASM="${ROOT_DIR}/deployed-artifacts/mainnet/v2-backstop.wasm"
+V2_POOL_WASM="${ROOT_DIR}/deployed-artifacts/mainnet/v2-pool.wasm"
 V3_FACTORY_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/pool_factory.wasm"
 V3_BACKSTOP_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
 V3_POOL_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/pool.wasm"
 V3_TEST_VALUATION_ADAPTER_WASM="${ROOT_DIR}/migration/target/wasm32v1-none/optimized/blend_v3_test_valuation_adapter.wasm"
-V3_VALUATION_ADAPTER_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/blend_v3_backstop_valuation.wasm"
+V3_BACKSTOP_VALUATION_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/blend_v3_backstop_valuation.wasm"
 V3_TEST_SEP40_ORACLE_WASM="${ROOT_DIR}/migration/target/wasm32v1-none/optimized/blend_v3_test_sep40_oracle.wasm"
-COMET_WASM="${ROOT_DIR}/legacy/blend-contracts-v2/comet.wasm"
+COMET_WASM="${ROOT_DIR}/blend-contracts-v2/comet.wasm"
 
 EXPECTED_EMITTER_SHA256="438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89"
-EMITTER_WASM="${ROOT_DIR}/legacy/artifacts/emitter.wasm"
+EMITTER_WASM="${ROOT_DIR}/deployed-artifacts/mainnet/emitter.wasm"
 RUN_DIR=""
 DOCKER_HOST_URI="${BLEND_LOCALNET_DOCKER_HOST:-}"
 
@@ -118,7 +119,7 @@ Usage: scripts/localnet-migration.sh COMMAND
 
 Commands:
   plan      Describe the deployment and migration phases without mutation.
-  validate  Build candidate artifacts and verify all frozen legacy WASM.
+  validate  Build candidate artifacts and verify all exact deployed WASM.
   start     Start Protocol-27 Quickstart locally; verify RPC on public testnet.
   deploy    Deploy, fund, and begin a new migration on the running network.
   run       Validate, connect or start, deploy, and report status.
@@ -213,10 +214,10 @@ validate_source_provenance() {
 }
 
 build_artifacts() {
-    note "Verifying frozen mainnet legacy artifacts and building SDK-27 candidate artifacts..."
+    note "Verifying deployed mainnet artifacts and building SDK-27 candidate artifacts..."
     (
         cd "${ROOT_DIR}"
-        make verify-legacy build-v3
+        make verify-deployed-artifacts build-v3
     )
 }
 
@@ -239,12 +240,12 @@ validate_artifacts() {
         [[ -s "${artifact}" ]] || die "missing or empty WASM artifact: ${artifact}"
     done
     if [[ "${VALUATION_MODE}" == "production-fixture" ]]; then
-        [[ -s "${V3_VALUATION_ADAPTER_WASM}" ]] ||
-            die "missing or empty WASM artifact: ${V3_VALUATION_ADAPTER_WASM}"
+        [[ -s "${V3_BACKSTOP_VALUATION_WASM}" ]] ||
+            die "missing or empty WASM artifact: ${V3_BACKSTOP_VALUATION_WASM}"
     fi
     [[ -s "${MODELED_POOLS_FIXTURE}" ]] ||
         die "modeled-pool fixture is missing: ${MODELED_POOLS_FIXTURE}"
-    note "Validated frozen deployed incumbent and emitter plus SDK-27 candidate artifacts."
+    note "Validated exact deployed incumbent and emitter plus SDK-27 candidate artifacts."
 }
 
 require_docker() {
@@ -536,6 +537,20 @@ invoke_view() {
         -- "${function_name}" "$@"
 }
 
+invoke_view_as() {
+    local label="$1" source_identity="$2" contract_id="$3" function_name="$4"
+    shift 4
+    capture "${label}" \
+        stellar_cli contract invoke \
+        --id "${contract_id}" \
+        --source-account "${source_identity}" \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" \
+        --send no \
+        --cost \
+        -- "${function_name}" "$@"
+}
+
 invoke_forced_transaction() {
     local label="$1" contract_id="$2" function_name="$3"
     shift 3
@@ -614,18 +629,18 @@ assert_equal() {
 }
 
 assert_queued_swap_matches() {
-    local queued_swap="$1" candidate_id="$2" next_token_id="$3" unlock_time="$4"
-    local queued_candidate queued_next_token queued_unlock
+    local queued_swap="$1" candidate_id="$2" blnd_xlm_token_id="$3" unlock_time="$4"
+    local queued_candidate queued_blnd_xlm_token queued_unlock
 
     [[ "${queued_swap}" != "null" ]] ||
-        die "legacy emitter queue is absent"
+        die "deployed emitter queue is absent"
     queued_candidate="$(printf '%s' "${queued_swap}" | jq -er '.new_backstop')"
-    queued_next_token="$(printf '%s' "${queued_swap}" | jq -er '.new_backstop_token')"
+    queued_blnd_xlm_token="$(printf '%s' "${queued_swap}" | jq -er '.new_backstop_token')"
     queued_unlock="$(printf '%s' "${queued_swap}" | jq -er '.unlock_time | tostring')"
     [[ "${queued_candidate}" == "${candidate_id}" ]] ||
         die "live emitter queue targets ${queued_candidate}, not saved candidate ${candidate_id}"
-    [[ "${queued_next_token}" == "${next_token_id}" ]] ||
-        die "live emitter queue uses ${queued_next_token}, not saved next token ${next_token_id}"
+    [[ "${queued_blnd_xlm_token}" == "${blnd_xlm_token_id}" ]] ||
+        die "live emitter queue uses ${queued_blnd_xlm_token}, not saved next token ${blnd_xlm_token_id}"
     [[ "${queued_unlock}" == "${unlock_time}" ]] ||
         die "live emitter unlock ${queued_unlock} differs from saved unlock ${unlock_time}"
 }
@@ -683,14 +698,14 @@ require_modeled_pool_lane() {
         die "modeled pools are supported only by the isolated production-fixture public-testnet lane"
     [[ -s "${MODELED_POOLS_FIXTURE}" ]] ||
         die "modeled-pool fixture is missing: ${MODELED_POOLS_FIXTURE}"
-    [[ -s "${V3_TEST_VALUATION_ADAPTER_WASM}" ]] ||
-        die "test lending-oracle WASM is missing: ${V3_TEST_VALUATION_ADAPTER_WASM}"
+    [[ -s "${V3_TEST_SEP40_ORACLE_WASM}" ]] ||
+        die "test lending-oracle WASM is missing: ${V3_TEST_SEP40_ORACLE_WASM}"
 }
 
 modeled_asset_state_key() {
     case "$1" in
         XLM) printf '%s\n' "xlm_token" ;;
-        USDC) printf '%s\n' "prefund_token" ;;
+        USDC) printf '%s\n' "usdc_token" ;;
         EURC) printf '%s\n' "modeled_asset_eurc" ;;
         AQUA) printf '%s\n' "modeled_asset_aqua" ;;
         USDGLO) printf '%s\n' "modeled_asset_usdglo" ;;
@@ -746,35 +761,6 @@ modeled_v2_reserve_config() {
         }' "${MODELED_POOLS_FIXTURE}"
 }
 
-modeled_v3_reserves() {
-    local model="$1" result="[]" index=0 asset asset_id config
-
-    while IFS= read -r asset; do
-        asset_id="$(modeled_asset_id "${asset}")"
-        config="$(modeled_v2_reserve_config "${model}" "${index}")"
-        result="$(printf '%s' "${result}" | jq -c \
-            --arg asset "${asset_id}" \
-            --argjson config "${config}" \
-            '. + [($config + {asset: $asset})]')"
-        index=$((index + 1))
-    done < <(jq -r --arg model "${model}" \
-        '.pools[$model].reserves[].asset' "${MODELED_POOLS_FIXTURE}")
-    printf '%s\n' "${result}"
-}
-
-modeled_lending_config() {
-    local model="$1" oracle="$2"
-
-    jq -c --arg model "${model}" --arg oracle "${oracle}" \
-        '.pools[$model] | {
-            backstop_take_rate,
-            max_positions,
-            min_collateral: (.min_collateral | tostring),
-            oracle: $oracle,
-            price_decimals: 7
-        }' "${MODELED_POOLS_FIXTURE}"
-}
-
 ensure_modeled_asset() {
     local asset="$1" operator depositor state_key asset_id balance deficit label
 
@@ -812,7 +798,7 @@ ensure_modeled_asset() {
 }
 
 seed_modeled_sep40_oracle() {
-    local model="$1" oracle="$2" asset asset_id price prices label
+    local version="$1" model="$2" oracle="$3" asset asset_id price prices label
 
     while IFS= read -r asset; do
         label="$(printf '%s' "${asset}" | tr '[:upper:]' '[:lower:]')"
@@ -820,31 +806,10 @@ seed_modeled_sep40_oracle() {
         price="$(jq -er --arg asset "${asset}" \
             '.prices[$asset]' "${MODELED_POOLS_FIXTURE}")"
         prices="$(fixture_price_series "${price}")"
-        invoke_transaction "seed-${model}-v2-oracle-${label}" \
+        invoke_transaction "seed-${model}-${version}-oracle-${label}" \
             "${oracle}" set_prices \
             --asset "{\"Stellar\":\"${asset_id}\"}" \
             --prices "${prices}" >/dev/null
-    done < <(jq -r --arg model "${model}" \
-        '.pools[$model].reserves[].asset' "${MODELED_POOLS_FIXTURE}")
-}
-
-seed_modeled_v3_oracle() {
-    local model="$1" oracle="$2" valid_until asset asset_id price quote label
-
-    valid_until=$(($(date +%s) + 180 * 24 * 60 * 60))
-    while IFS= read -r asset; do
-        label="$(printf '%s' "${asset}" | tr '[:upper:]' '[:lower:]')"
-        asset_id="$(modeled_asset_id "${asset}")"
-        price="$(jq -er --arg asset "${asset}" \
-            '.prices[$asset]' "${MODELED_POOLS_FIXTURE}")"
-        quote="$(jq -nc \
-            --arg price "${price}" \
-            --arg valid_until "${valid_until}" \
-            '{decimals: 7, price: $price, valid_until: ($valid_until | tonumber)}')"
-        invoke_transaction "seed-${model}-v3-oracle-${label}" \
-            "${oracle}" set_price \
-            --asset "${asset_id}" \
-            --quote "${quote}" >/dev/null
     done < <(jq -r --arg model "${model}" \
         '.pools[$model].reserves[].asset' "${MODELED_POOLS_FIXTURE}")
 }
@@ -865,27 +830,28 @@ ensure_modeled_v2_oracle() {
             --resolution "${FIXTURE_ORACLE_RESOLUTION}")"
         state_set "${state_key}" "${oracle}"
     fi
-    seed_modeled_sep40_oracle "${model}" "${oracle}"
+    seed_modeled_sep40_oracle v2 "${model}" "${oracle}"
     printf '%s\n' "${oracle}"
 }
 
 ensure_modeled_v3_oracle() {
-    local model="$1" state_key oracle
+    local model="$1" state_key oracle assets
 
     state_key="$(modeled_oracle_state_key v3 "${model}")"
     oracle="$(state_optional "${state_key}")"
     if [[ -z "${oracle}" ]]; then
+        assets="$(modeled_pool_asset_ids "${model}")"
         oracle="$(deploy_wasm \
             "deploy-${model}-v3-lending-oracle" \
-            "${V3_TEST_VALUATION_ADAPTER_WASM}" "" \
+            "${V3_TEST_SEP40_ORACLE_WASM}" "" \
             --admin "$(state_value operator)" \
-            --blnd "$(state_value blnd_token)" \
-            --usdc "$(state_value prefund_token)" \
-            --blnd_usdc "$(state_value legacy_backstop_token)" \
-            --blnd_xlm "$(state_value next_backstop_token)")"
+            --base '{"Other":"USD"}' \
+            --assets "${assets}" \
+            --decimals 7 \
+            --resolution "${FIXTURE_ORACLE_RESOLUTION}")"
         state_set "${state_key}" "${oracle}"
     fi
-    seed_modeled_v3_oracle "${model}" "${oracle}"
+    seed_modeled_sep40_oracle v3 "${model}" "${oracle}"
     printf '%s\n' "${oracle}"
 }
 
@@ -954,7 +920,7 @@ ensure_modeled_v2_pool() {
         jq -er '.status | tostring')"
     if [[ "${status}" == "6" ]]; then
         # Exit setup before backstop funding. The deployment command activates
-        # the pool only after its legacy threshold balance has been deposited.
+        # the pool only after its v2 activation threshold balance has been deposited.
         invoke_transaction "on-ice-${model}-v2-pool" \
             "${pool}" set_status --pool_status 2 >/dev/null
     fi
@@ -962,24 +928,71 @@ ensure_modeled_v2_pool() {
 }
 
 ensure_modeled_v3_pool() {
-    local model="$1" oracle="$2" state_key pool factory salt raw
-    local reserves lending_config
+    local model="$1" oracle="$2" state_key pool factory salt raw name
+    local take_rate max_positions min_collateral reserve_list asset asset_id metadata
+    local index=0 label status
 
     state_key="$(modeled_pool_state_key v3 "${model}")"
     pool="$(state_optional "${state_key}")"
     if [[ -z "${pool}" ]]; then
         factory="$(state_value v3_pool_factory)"
         salt="$(modeled_pool_salt v3 "${model}")"
-        reserves="$(modeled_v3_reserves "${model}")"
-        lending_config="$(modeled_lending_config "${model}" "${oracle}")"
+        name="$(jq -er --arg model "${model}" \
+            '.pools[$model].name' "${MODELED_POOLS_FIXTURE}")"
+        take_rate="$(jq -er --arg model "${model}" \
+            '.pools[$model].backstop_take_rate' "${MODELED_POOLS_FIXTURE}")"
+        max_positions="$(jq -er --arg model "${model}" \
+            '.pools[$model].max_positions' "${MODELED_POOLS_FIXTURE}")"
+        min_collateral="$(jq -er --arg model "${model}" \
+            '.pools[$model].min_collateral' "${MODELED_POOLS_FIXTURE}")"
         raw="$(invoke_transaction "deploy-${model}-v3-pool" "${factory}" deploy \
             --admin "$(state_value operator)" \
-            --lending_config "${lending_config}" \
-            --reserves "${reserves}" \
-            --salt "${salt}")"
+            --name "${name}" \
+            --salt "${salt}" \
+            --oracle "${oracle}" \
+            --backstop_take_rate "${take_rate}" \
+            --max_positions "${max_positions}" \
+            --min_collateral "${min_collateral}")"
         pool="$(normalize_scalar "${raw}")"
         require_contract_id "${pool}" "${model} v3 pool"
         state_set "${state_key}" "${pool}"
+    fi
+
+    reserve_list="$(invoke_view \
+        "query-${model}-v3-reserves" "${pool}" get_reserve_list)"
+    while IFS= read -r asset; do
+        label="$(printf '%s' "${asset}" | tr '[:upper:]' '[:lower:]')"
+        asset_id="$(modeled_asset_id "${asset}")"
+        if ! printf '%s' "${reserve_list}" | jq -e \
+            --arg asset "${asset_id}" 'index($asset) != null' >/dev/null
+        then
+            metadata="$(modeled_v2_reserve_config "${model}" "${index}")"
+            if invoke_view "probe-${model}-v3-queued-reserve-${label}" \
+                "${pool}" set_reserve --asset "${asset_id}" >/dev/null
+            then
+                invoke_transaction "resume-${model}-v3-reserve-${label}" \
+                    "${pool}" set_reserve --asset "${asset_id}" >/dev/null
+            else
+                invoke_transaction "queue-${model}-v3-reserve-${label}" \
+                    "${pool}" queue_set_reserve \
+                    --asset "${asset_id}" \
+                    --metadata "${metadata}" >/dev/null
+                invoke_transaction "set-${model}-v3-reserve-${label}" \
+                    "${pool}" set_reserve --asset "${asset_id}" >/dev/null
+            fi
+            reserve_list="$(invoke_view \
+                "query-${model}-v3-reserves-${label}" \
+                "${pool}" get_reserve_list)"
+        fi
+        index=$((index + 1))
+    done < <(jq -r --arg model "${model}" \
+        '.pools[$model].reserves[].asset' "${MODELED_POOLS_FIXTURE}")
+
+    status="$(invoke_view "query-${model}-v3-config" "${pool}" get_config |
+        jq -er '.status | tostring')"
+    if [[ "${status}" == "6" ]]; then
+        invoke_transaction "on-ice-${model}-v3-pool" \
+            "${pool}" set_status --pool_status 2 >/dev/null
     fi
     printf '%s\n' "${pool}"
 }
@@ -1051,7 +1064,7 @@ ensure_modeled_v3_backstop_deposit() {
             "${DEPOSITOR_IDENTITY}" "$(state_value candidate_backstop)" \
             "${function_name}" \
             --from "$(state_value depositor)" \
-            --pool "${pool}" \
+            --pool-address "${pool}" \
             --amount "${delta}" >/dev/null
     fi
 }
@@ -1097,7 +1110,7 @@ ensure_modeled_blnd_usdc_lp_capacity() {
     local required="$1" token available deficit max_blnd max_usdc
 
     (( required > 0 )) || return 0
-    token="$(state_value legacy_backstop_token)"
+    token="$(state_value blnd_usdc_token)"
     available="$(normalize_scalar "$(invoke_view \
         "query-modeled-blnd-usdc-lp-available" "${token}" balance \
         --id "$(state_value depositor)")")"
@@ -1112,7 +1125,7 @@ ensure_modeled_blnd_usdc_lp_capacity() {
     max_blnd=$((deficit * 11))
     max_usdc="${deficit}"
     ensure_classic_blnd_balance "${max_blnd}"
-    ensure_token_balance "$(state_value prefund_token)" \
+    ensure_token_balance "$(state_value usdc_token)" \
         "${max_usdc}" "modeled-usdc-lp"
     invoke_transaction_as "join-modeled-blnd-usdc-capacity" \
         "${DEPOSITOR_IDENTITY}" "${token}" join_pool \
@@ -1133,7 +1146,7 @@ modeled_v3_user_supply() {
     local pool="$1" reserve_index="$2"
 
     invoke_view "query-modeled-v3-user-supply" \
-        "${pool}" positions --user "$(state_value depositor)" |
+        "${pool}" get_positions --address "$(state_value depositor)" |
         jq -er --arg index "${reserve_index}" \
             '(.supply[$index] // "0") | tostring'
 }
@@ -1154,51 +1167,27 @@ ensure_modeled_v2_supply() {
             --spender "$(state_value depositor)" \
             --to "$(state_value depositor)" \
             --requests \
-            "[{\"address\":\"$(state_value prefund_token)\",\"amount\":\"${delta}\",\"request_type\":0}]" \
+            "[{\"address\":\"$(state_value usdc_token)\",\"amount\":\"${delta}\",\"request_type\":0}]" \
             >/dev/null
     fi
 }
 
 ensure_modeled_v3_emissions_config() {
-    local model="$1" pool="$2" config desired token_id
+    local model="$1" pool="$2" desired
 
     case "${model}" in
         fixed)
             desired='[{"res_index":2,"res_type":0,"share":1}]'
-            token_id=4
             ;;
         yieldblox)
             desired='[{"res_index":1,"res_type":1,"share":1}]'
-            token_id=3
             ;;
         *) die "unsupported modeled v3 emission profile: ${model}" ;;
     esac
 
-    config="$(invoke_view \
-        "query-${model}-v3-emissions-config" "${pool}" emissions_config)"
-    if printf '%s' "${config}" | jq -e 'length == 0' >/dev/null; then
-        invoke_transaction "configure-${model}-v3-emissions" \
-            "${pool}" set_emissions_config \
-            --metadata "${desired}" >/dev/null
-    elif printf '%s' "${config}" | jq -e \
-        --arg token_id "${token_id}" '
-            length == 1 and (((.[$token_id] // 0) | tonumber) == 1)
-        ' >/dev/null
-    then
-        return
-    elif [[ "${model}" == "fixed" ]] &&
-        printf '%s' "${config}" | jq -e '
-            length == 1 and ((.["3"] | tonumber) == 1)
-        ' >/dev/null
-    then
-        # Migrate the earlier testnet fixture from USDC supply to the selected
-        # Fixed-v3 policy. No v3 stream exists before emitter migration.
-        invoke_transaction "configure-fixed-v3-eurc-borrow-emissions" \
-            "${pool}" set_emissions_config \
-            --metadata "${desired}" >/dev/null
-    else
-        die "${model} v3 has an unexpected emission configuration: ${config}"
-    fi
+    invoke_transaction "configure-${model}-v3-emissions" \
+        "${pool}" set_emissions_config \
+        --res_emission_metadata "${desired}" >/dev/null
 }
 
 ensure_modeled_v3_supply() {
@@ -1208,7 +1197,7 @@ ensure_modeled_v3_supply() {
     [[ "${current}" =~ ^[0-9]+$ ]] ||
         die "invalid ${model} v3 USDC supply shares: ${current}"
     if (( current == 0 )); then
-        ensure_token_balance "$(state_value prefund_token)" \
+        ensure_token_balance "$(state_value usdc_token)" \
             "${POOL_SUPPLY_BALANCE}" "${model}-v3-usdc-supply"
         invoke_transaction_as "seed-${model}-v3-usdc-supply" \
             "${DEPOSITOR_IDENTITY}" "${pool}" submit \
@@ -1216,7 +1205,7 @@ ensure_modeled_v3_supply() {
             --spender "$(state_value depositor)" \
             --to "$(state_value depositor)" \
             --requests \
-            "[{\"address\":\"$(state_value prefund_token)\",\"amount\":\"${POOL_SUPPLY_BALANCE}\",\"request_type\":0}]" \
+            "[{\"address\":\"$(state_value usdc_token)\",\"amount\":\"${POOL_SUPPLY_BALANCE}\",\"request_type\":0}]" \
             >/dev/null
     elif (( current != POOL_SUPPLY_BALANCE )); then
         die "${model} v3 USDC supply is neither empty nor the fixture target: ${current}"
@@ -1228,8 +1217,8 @@ ensure_fixed_v3_eurc_borrow() {
     local usdc eurc
 
     positions="$(invoke_view \
-        "query-fixed-v3-emission-positions" "${pool}" positions \
-        --user "$(state_value depositor)")"
+        "query-fixed-v3-emission-positions" "${pool}" get_positions \
+        --address "$(state_value depositor)")"
     usdc_collateral="$(printf '%s' "${positions}" |
         jq -er '(.collateral["1"] // "0") | tostring')"
     eurc_supply="$(printf '%s' "${positions}" |
@@ -1242,7 +1231,7 @@ ensure_fixed_v3_eurc_borrow() {
     done
 
     if (( usdc_collateral == 0 && eurc_supply == 0 && eurc_borrow == 0 )); then
-        usdc="$(state_value prefund_token)"
+        usdc="$(state_value usdc_token)"
         eurc="$(modeled_asset_id EURC)"
         ensure_token_balance "${usdc}" \
             "${MODELED_FIXED_V3_USDC_COLLATERAL}" \
@@ -1342,7 +1331,7 @@ keepalive_modeled_pools() {
                 invoke_forced_transaction \
                     "${stamp}-${version}-${model}-registration" \
                     "$(state_value v3_pool_factory)" is_pool \
-                    --pool "${pool}" >/dev/null
+                    --pool_id "${pool}" >/dev/null
                 for tier in BlndUsdc BlndXlm Usdc; do
                     invoke_forced_transaction \
                         "${stamp}-${version}-${model}-${tier}-position" \
@@ -1363,15 +1352,11 @@ keepalive_modeled_pools() {
                 else
                     invoke_forced_transaction \
                         "${stamp}-${version}-${model}-${label}-reserve" \
-                        "${pool}" reserve --asset "${asset_id}" >/dev/null
+                        "${pool}" get_reserve --asset "${asset_id}" >/dev/null
                 fi
             done < <(jq -r --arg model "${model}" \
                 '.pools[$model].reserves[].asset' "${MODELED_POOLS_FIXTURE}")
-            if [[ "${version}" == "v2" ]]; then
-                seed_modeled_sep40_oracle "${model}" "${oracle}"
-            else
-                seed_modeled_v3_oracle "${model}" "${oracle}"
-            fi
+            seed_modeled_sep40_oracle "${version}" "${model}" "${oracle}"
         done
     done
 
@@ -1412,13 +1397,13 @@ Network:
 
 Artifacts:
   Frozen incumbent: exact deployed mainnet v2 pool, pool factory, and backstop WASM
-  Legacy emitter: exact deployed mainnet emitter WASM
+  Deployed emitter: exact deployed mainnet emitter WASM
   Candidate: SDK 27 pool, pool factory, backstop, ${adapter_description}
 
 Deployment:
   1. Create and fund isolated issuer/operator and depositor identities.
   2. Provision ${asset_description} and deploy real 80:20 BLND:USDC and BLND:XLM Comet pools.
-  3. Deploy the legacy emitter and a coherent SDK-22 incumbent stack.
+  3. Deploy the exact emitter WASM and a coherent SDK-22 incumbent stack.
   4. Predict the candidate address, bind its immutable factory, and deploy it.
   5. Deploy ${pool_description} with a transferable v2-style admin.
   6. Fund it with ${pool_funding_description}, activate it, add it to the reward zone, and configure its selected reserve-position emissions.
@@ -1468,16 +1453,16 @@ command_start() {
 
 command_deploy() {
     local skip_build="${1:-false}"
-    local operator depositor issuer emitter_id blnd_id xlm_id legacy_token_id next_token_id
-    local prefund_token_id
+    local operator depositor issuer emitter_id blnd_id xlm_id blnd_usdc_token_id blnd_xlm_token_id
+    local usdc_token_id
     local v2_pool_hash incumbent_id v2_factory_id deployed_incumbent_id
-    local oracle_id="" valuation_adapter_id v3_pool_hash candidate_id v3_factory_id
+    local oracle_id="" backstop_valuation_id v3_pool_hash candidate_id v3_factory_id
     local deployed_candidate_id
     local fixed_v2_oracle fixed_v2_pool fixed_v3_oracle
     local pool_id
     local incumbent_balance candidate_balance pool_status begin_raw epoch_start queued_swap unlock_time
-    local queued_candidate queued_next_token
-    local legacy_quote next_quote
+    local queued_candidate queued_blnd_xlm_token
+    local blnd_usdc_quote blnd_xlm_quote
     local comet_xlm_balance="${COMET_INITIAL_PAIR_TOKEN}"
 
     if [[ "${XLM_ASSET_MODE}" == "native" ]]; then
@@ -1514,10 +1499,10 @@ command_deploy() {
     state_set "test_sep40_oracle_wasm_sha256" \
         "$(sha256_file "${V3_TEST_SEP40_ORACLE_WASM}")"
     if [[ "${VALUATION_MODE}" == "production-fixture" ]]; then
-        state_set "valuation_adapter_wasm_sha256" \
-            "$(sha256_file "${V3_VALUATION_ADAPTER_WASM}")"
+        state_set "backstop_valuation_wasm_sha256" \
+            "$(sha256_file "${V3_BACKSTOP_VALUATION_WASM}")"
     else
-        state_set "valuation_adapter_wasm_sha256" \
+        state_set "backstop_valuation_wasm_sha256" \
             "$(sha256_file "${V3_TEST_VALUATION_ADAPTER_WASM}")"
     fi
     state_set "comet_wasm_sha256" "$(sha256_file "${COMET_WASM}")"
@@ -1531,36 +1516,36 @@ command_deploy() {
     depositor="$(stellar_cli keys public-key "${DEPOSITOR_IDENTITY}")"
     state_set "depositor" "${depositor}"
 
-    emitter_id="$(deploy_wasm "deploy-legacy-emitter" "${EMITTER_WASM}" "")"
+    emitter_id="$(deploy_wasm "deploy-deployed-emitter" "${EMITTER_WASM}" "")"
     state_set "emitter" "${emitter_id}"
 
     blnd_id="$(deploy_asset "deploy-asset-blnd" "BLND" "${issuer}")"
-    prefund_token_id="$(deploy_asset "deploy-asset-usdc" "USDC" "${issuer}")"
+    usdc_token_id="$(deploy_asset "deploy-asset-usdc" "USDC" "${issuer}")"
     if [[ "${XLM_ASSET_MODE}" == "native" ]]; then
         xlm_id="$(resolve_native_asset "resolve-asset-native-xlm")"
     else
         xlm_id="$(deploy_asset "deploy-asset-xlm" "XLM" "${issuer}")"
     fi
-    legacy_token_id="$(deploy_wasm "deploy-comet-blnd-usdc" "${COMET_WASM}" "")"
-    next_token_id="$(deploy_wasm "deploy-comet-blnd-xlm" "${COMET_WASM}" "")"
+    blnd_usdc_token_id="$(deploy_wasm "deploy-comet-blnd-usdc" "${COMET_WASM}" "")"
+    blnd_xlm_token_id="$(deploy_wasm "deploy-comet-blnd-xlm" "${COMET_WASM}" "")"
     state_set "blnd_token" "${blnd_id}"
     state_set "xlm_token" "${xlm_id}"
-    state_set "legacy_backstop_token" "${legacy_token_id}"
-    state_set "next_backstop_token" "${next_token_id}"
-    state_set "prefund_token" "${prefund_token_id}"
+    state_set "blnd_usdc_token" "${blnd_usdc_token_id}"
+    state_set "blnd_xlm_token" "${blnd_xlm_token_id}"
+    state_set "usdc_token" "${usdc_token_id}"
     state_set "xlm_asset_mode" "${XLM_ASSET_MODE}"
 
     if [[ "${VALUATION_MODE}" == "deterministic" ]]; then
         # This one-to-one fixture exercises the immutable valuation boundary
         # locally. It is deliberately not a production pricing source.
-        valuation_adapter_id="$(deploy_wasm \
+        backstop_valuation_id="$(deploy_wasm \
             "deploy-test-valuation-adapter" "${V3_TEST_VALUATION_ADAPTER_WASM}" "" \
             --admin "${operator}" \
             --blnd "${blnd_id}" \
-            --usdc "${prefund_token_id}" \
-            --blnd_usdc "${legacy_token_id}" \
-            --blnd_xlm "${next_token_id}")"
-        state_set "valuation_adapter" "${valuation_adapter_id}"
+            --usdc "${usdc_token_id}" \
+            --blnd_usdc "${blnd_usdc_token_id}" \
+            --blnd_xlm "${blnd_xlm_token_id}")"
+        state_set "backstop_valuation" "${backstop_valuation_id}"
     fi
 
     capture "create-depositor-blnd-trustline" \
@@ -1585,29 +1570,29 @@ command_deploy() {
     fi
     invoke_transaction "mint-depositor-blnd" "${blnd_id}" mint \
         --to "${depositor}" --amount "${DEPOSITOR_BLND_MINT}" >/dev/null
-    invoke_transaction "mint-depositor-usdc" "${prefund_token_id}" mint \
+    invoke_transaction "mint-depositor-usdc" "${usdc_token_id}" mint \
         --to "${depositor}" --amount "${DEPOSITOR_USDC_MINT}" >/dev/null
     if [[ "${XLM_ASSET_MODE}" == "issued" ]]; then
         invoke_transaction "mint-depositor-xlm" "${xlm_id}" mint \
             --to "${depositor}" --amount "${DEPOSITOR_XLM_MINT}" >/dev/null
     fi
     invoke_transaction_as "initialize-comet-blnd-usdc" \
-        "${DEPOSITOR_IDENTITY}" "${legacy_token_id}" init \
+        "${DEPOSITOR_IDENTITY}" "${blnd_usdc_token_id}" init \
         --controller "${depositor}" \
-        --tokens "[\"${blnd_id}\",\"${prefund_token_id}\"]" \
+        --tokens "[\"${blnd_id}\",\"${usdc_token_id}\"]" \
         --weights '["8000000","2000000"]' \
         --balances "[\"${COMET_INITIAL_BLND}\",\"${COMET_INITIAL_PAIR_TOKEN}\"]" \
         --swap_fee 30000 >/dev/null
     invoke_transaction_as "initialize-comet-blnd-xlm" \
-        "${DEPOSITOR_IDENTITY}" "${next_token_id}" init \
+        "${DEPOSITOR_IDENTITY}" "${blnd_xlm_token_id}" init \
         --controller "${depositor}" \
         --tokens "[\"${blnd_id}\",\"${xlm_id}\"]" \
         --weights '["8000000","2000000"]' \
         --balances "[\"${COMET_INITIAL_BLND}\",\"${comet_xlm_balance}\"]" \
         --swap_fee 30000 >/dev/null
     invoke_transaction_as "join-comet-blnd-usdc" \
-        "${DEPOSITOR_IDENTITY}" "${legacy_token_id}" join_pool \
-        --pool_amount_out "${LEGACY_LP_JOIN_AMOUNT}" \
+        "${DEPOSITOR_IDENTITY}" "${blnd_usdc_token_id}" join_pool \
+        --pool_amount_out "${BLND_USDC_LP_JOIN_AMOUNT}" \
         --max_amounts_in \
         "[\"$((13000 * SCALAR_7))\",\"$((500 * SCALAR_7))\"]" \
         --user "${depositor}" >/dev/null
@@ -1616,7 +1601,7 @@ command_deploy() {
         oracle_id="$(deploy_wasm \
             "deploy-test-sep40-oracle" "${V3_TEST_SEP40_ORACLE_WASM}" "" \
             --admin "${operator}" \
-            --base "{\"Stellar\":\"${prefund_token_id}\"}" \
+            --base "{\"Stellar\":\"${usdc_token_id}\"}" \
             --assets \
             "[{\"Stellar\":\"${blnd_id}\"},{\"Stellar\":\"${xlm_id}\"}]" \
             --decimals "${FIXTURE_ORACLE_DECIMALS}" \
@@ -1626,34 +1611,34 @@ command_deploy() {
             "seed-test-oracle" "${oracle_id}" "${blnd_id}" "${xlm_id}"
         state_set "oracle_refreshed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-        valuation_adapter_id="$(deploy_wasm \
-            "deploy-production-valuation-adapter" "${V3_VALUATION_ADAPTER_WASM}" "" \
+        backstop_valuation_id="$(deploy_wasm \
+            "deploy-production-valuation-adapter" "${V3_BACKSTOP_VALUATION_WASM}" "" \
             --oracle "${oracle_id}" \
-            --oracle_base "{\"Stellar\":\"${prefund_token_id}\"}" \
+            --oracle_base "{\"Stellar\":\"${usdc_token_id}\"}" \
             --blnd "${blnd_id}" \
-            --usdc "${prefund_token_id}" \
+            --usdc "${usdc_token_id}" \
             --xlm "${xlm_id}" \
-            --blnd_usdc "${legacy_token_id}" \
-            --blnd_xlm "${next_token_id}" \
+            --blnd_usdc "${blnd_usdc_token_id}" \
+            --blnd_xlm "${blnd_xlm_token_id}" \
             --twap_records "${FIXTURE_ORACLE_RECORDS}" \
             --max_price_age "${FIXTURE_MAX_PRICE_AGE}")"
-        state_set "valuation_adapter" "${valuation_adapter_id}"
-        legacy_quote="$(invoke_view \
-            "quote-initial-blnd-usdc-lp" "${valuation_adapter_id}" quote \
-            --token "${legacy_token_id}" --amount "${SCALAR_7}")"
-        next_quote="$(invoke_view \
-            "quote-initial-blnd-xlm-lp" "${valuation_adapter_id}" quote \
-            --token "${next_token_id}" --amount "${SCALAR_7}")"
-        printf '%s' "${legacy_quote}" | jq -e '
+        state_set "backstop_valuation" "${backstop_valuation_id}"
+        blnd_usdc_quote="$(invoke_view \
+            "quote-initial-blnd-usdc-lp" "${backstop_valuation_id}" quote \
+            --token "${blnd_usdc_token_id}" --amount "${SCALAR_7}")"
+        blnd_xlm_quote="$(invoke_view \
+            "quote-initial-blnd-xlm-lp" "${backstop_valuation_id}" quote \
+            --token "${blnd_xlm_token_id}" --amount "${SCALAR_7}")"
+        printf '%s' "${blnd_usdc_quote}" | jq -e '
             (.underlying_blnd | tonumber) > 0 and
             (.usdc_value | tonumber) > 0
         ' >/dev/null || die "production adapter returned an invalid BLND:USDC quote"
-        printf '%s' "${next_quote}" | jq -e '
+        printf '%s' "${blnd_xlm_quote}" | jq -e '
             (.underlying_blnd | tonumber) > 0 and
             (.usdc_value | tonumber) > 0
         ' >/dev/null || die "production adapter returned an invalid BLND:XLM quote"
-        state_set "initial_blnd_usdc_lp_quote" "${legacy_quote}"
-        state_set "initial_blnd_xlm_lp_quote" "${next_quote}"
+        state_set "initial_blnd_usdc_lp_quote" "${blnd_usdc_quote}"
+        state_set "initial_blnd_xlm_lp_quote" "${blnd_xlm_quote}"
     fi
 
     invoke_transaction "set-emitter-as-blnd-admin" "${blnd_id}" set_admin \
@@ -1673,19 +1658,19 @@ command_deploy() {
 
     deployed_incumbent_id="$(deploy_wasm \
         "deploy-v2-backstop" "${V2_BACKSTOP_WASM}" "${INCUMBENT_SALT}" \
-        --backstop_token "${legacy_token_id}" \
+        --backstop_token "${blnd_usdc_token_id}" \
         --emitter "${emitter_id}" \
         --blnd_token "${blnd_id}" \
-        --usdc_token "${prefund_token_id}" \
+        --usdc_token "${usdc_token_id}" \
         --pool_factory "${v2_factory_id}" \
         --drop_list "[]")"
     assert_equal "${incumbent_id}" "${deployed_incumbent_id}" \
         "incumbent deterministic address"
 
-    invoke_transaction "initialize-legacy-emitter" "${emitter_id}" initialize \
+    invoke_transaction "initialize-deployed-emitter" "${emitter_id}" initialize \
         --blnd_token "${blnd_id}" \
         --backstop "${incumbent_id}" \
-        --backstop_token "${legacy_token_id}" >/dev/null
+        --backstop_token "${blnd_usdc_token_id}" >/dev/null
 
     v3_pool_hash="$(upload_wasm "upload-v3-pool" "${V3_POOL_WASM}")"
     state_set "v3_pool_wasm_hash" "${v3_pool_hash}"
@@ -1695,8 +1680,8 @@ command_deploy() {
 
     v3_factory_id="$(deploy_wasm \
         "deploy-v3-pool-factory" "${V3_FACTORY_WASM}" "" \
-        --backstop "${candidate_id}" \
-        --pool_wasm_hash "${v3_pool_hash}")"
+        --pool_init_meta \
+        "{\"backstop\":\"${candidate_id}\",\"blnd_id\":\"${blnd_id}\",\"pool_hash\":\"${v3_pool_hash}\"}")"
     state_set "v3_pool_factory" "${v3_factory_id}"
 
     deployed_candidate_id="$(deploy_wasm \
@@ -1704,36 +1689,36 @@ command_deploy() {
         --emitter "${emitter_id}" \
         --blnd_token "${blnd_id}" \
         --pool_factory "${v3_factory_id}" \
-        --legacy_backstop_token "${legacy_token_id}" \
-        --next_backstop_token "${next_token_id}" \
-        --prefund_token "${prefund_token_id}" \
-        --valuation_adapter "${valuation_adapter_id}")"
+        --blnd_usdc_token "${blnd_usdc_token_id}" \
+        --blnd_xlm_token "${blnd_xlm_token_id}" \
+        --usdc_token "${usdc_token_id}" \
+        --backstop_valuation "${backstop_valuation_id}")"
     assert_equal "${candidate_id}" "${deployed_candidate_id}" \
         "candidate deterministic address"
 
     # Every lane uses the modeled Fixed pair as its incumbent/candidate lending
-    # topology. The candidate's valuation adapter remains independent from the
+    # topology. The candidate's backstop valuation remains independent from the
     # test-only lending oracles used by these pools.
     ensure_modeled_asset EURC
     state_set "modeled_pools_fixture_sha256" \
         "$(sha256_file "${MODELED_POOLS_FIXTURE}")"
     state_set "modeled_v3_lending_oracle_wasm_sha256" \
-        "$(sha256_file "${V3_TEST_VALUATION_ADAPTER_WASM}")"
+        "$(sha256_file "${V3_TEST_SEP40_ORACLE_WASM}")"
     fixed_v2_oracle="$(ensure_modeled_v2_oracle fixed)"
     fixed_v3_oracle="$(ensure_modeled_v3_oracle fixed)"
     fixed_v2_pool="$(ensure_modeled_v2_pool fixed "${fixed_v2_oracle}")"
     pool_id="$(ensure_modeled_v3_pool fixed "${fixed_v3_oracle}")"
     state_set "v3_pool" "${pool_id}"
-    state_set "primary_pool_supply_asset" "${prefund_token_id}"
+    state_set "primary_pool_supply_asset" "${usdc_token_id}"
     state_set "primary_pool_emission_reserve_token_id" "4"
     state_set "modeled_v3_fixed_blnd_usdc_target" "${CANDIDATE_BALANCE}"
 
     ensure_modeled_blnd_usdc_lp_capacity \
         "$((INCUMBENT_BALANCE + CANDIDATE_BALANCE))"
-    invoke_transaction_as "deposit-candidate-legacy-token" \
+    invoke_transaction_as "deposit-candidate-blnd-usdc-lp" \
         "${DEPOSITOR_IDENTITY}" "${candidate_id}" deposit_blnd_usdc \
         --from "${depositor}" \
-        --pool "${pool_id}" \
+        --pool-address "${pool_id}" \
         --amount "${CANDIDATE_BALANCE}" >/dev/null
     ensure_modeled_v2_backstop_deposit fixed "${fixed_v2_pool}"
     invoke_transaction "activate-fixed-v2-primary-pool" \
@@ -1741,16 +1726,19 @@ command_deploy() {
     invoke_transaction_as "deposit-candidate-usdc" \
         "${DEPOSITOR_IDENTITY}" "${candidate_id}" deposit_usdc \
         --from "${depositor}" \
-        --pool "${pool_id}" \
+        --pool-address "${pool_id}" \
         --amount "${ACTIVATION_USDC_BALANCE}" >/dev/null
-    pool_status="$(normalize_scalar "$(invoke_transaction \
-        "activate-v3-pool" "${pool_id}" set_pool_status --requested_status 0)")"
+    invoke_transaction \
+        "activate-v3-pool" "${pool_id}" set_status --pool_status 0 >/dev/null
+    pool_status="$(invoke_view \
+        "query-active-v3-pool" "${pool_id}" get_config |
+        jq -er '.status | tostring')"
     assert_equal "0" "${pool_status}" "activated pool status"
     invoke_transaction "add-v3-pool-to-reward-zone" "${candidate_id}" add_reward \
         --to_add "${pool_id}" \
         --to_remove null >/dev/null
     invoke_transaction "configure-v3-pool-emissions" "${pool_id}" set_emissions_config \
-        --metadata \
+        --res_emission_metadata \
         '[{"res_index":2,"res_type":0,"share":1}]' \
         >/dev/null
     invoke_transaction_as "seed-v3-pool-supply" \
@@ -1758,17 +1746,17 @@ command_deploy() {
         --from "${depositor}" \
         --spender "${depositor}" \
         --to "${depositor}" \
-        --requests "[{\"address\":\"${prefund_token_id}\",\"amount\":\"${POOL_SUPPLY_BALANCE}\",\"request_type\":0}]" >/dev/null
+        --requests "[{\"address\":\"${usdc_token_id}\",\"amount\":\"${POOL_SUPPLY_BALANCE}\",\"request_type\":0}]" >/dev/null
     ensure_fixed_v3_eurc_borrow "${pool_id}"
 
     incumbent_balance="$(normalize_scalar "$(invoke_view \
-        "query-incumbent-legacy-balance" "${legacy_token_id}" balance --id "${incumbent_id}")")"
+        "query-incumbent-blnd-usdc-balance" "${blnd_usdc_token_id}" balance --id "${incumbent_id}")")"
     candidate_balance="$(normalize_scalar "$(invoke_view \
-        "query-candidate-legacy-balance" "${legacy_token_id}" balance --id "${candidate_id}")")"
+        "query-candidate-blnd-usdc-balance" "${blnd_usdc_token_id}" balance --id "${candidate_id}")")"
     assert_equal "${INCUMBENT_BALANCE}" "${incumbent_balance}" "incumbent balance"
     assert_equal "${CANDIDATE_BALANCE}" "${candidate_balance}" "candidate balance"
     (( candidate_balance > incumbent_balance )) ||
-        die "candidate does not strictly exceed the incumbent legacy-token balance"
+        die "candidate does not strictly exceed the incumbent BLND:USDC LP balance"
 
     begin_raw="$(invoke_transaction "begin-migration" "${candidate_id}" begin_migration)"
     epoch_start="$(normalize_scalar "${begin_raw}")"
@@ -1778,10 +1766,10 @@ command_deploy() {
         "query-open-emitter-queue" "${emitter_id}" get_queued_swap)"
     unlock_time="$(printf '%s' "${queued_swap}" | jq -er '.unlock_time')"
     queued_candidate="$(printf '%s' "${queued_swap}" | jq -er '.new_backstop')"
-    queued_next_token="$(printf '%s' "${queued_swap}" | jq -er '.new_backstop_token')"
+    queued_blnd_xlm_token="$(printf '%s' "${queued_swap}" | jq -er '.new_backstop_token')"
     [[ "${unlock_time}" =~ ^[0-9]+$ ]] || die "invalid migration unlock time: ${unlock_time}"
     assert_equal "${candidate_id}" "${queued_candidate}" "queued candidate"
-    assert_equal "${next_token_id}" "${queued_next_token}" "queued next designated token"
+    assert_equal "${blnd_xlm_token_id}" "${queued_blnd_xlm_token}" "queued next designated token"
     state_set "migration_epoch_start" "${epoch_start}"
     state_set "unlock_time" "${unlock_time}"
     state_set "prepare_not_before" "$((unlock_time - PREPARATION_WINDOW_SECONDS))"
@@ -1821,7 +1809,7 @@ command_deploy_modeled_pools() {
     state_set "modeled_pools_fixture_sha256" \
         "$(sha256_file "${MODELED_POOLS_FIXTURE}")"
     state_set "modeled_v3_lending_oracle_wasm_sha256" \
-        "$(sha256_file "${V3_TEST_VALUATION_ADAPTER_WASM}")"
+        "$(sha256_file "${V3_TEST_SEP40_ORACLE_WASM}")"
 
     for asset in EURC AQUA USDGLO USTRY CETES PYUSD; do
         ensure_modeled_asset "${asset}"
@@ -1865,7 +1853,7 @@ command_deploy_modeled_pools() {
     ensure_modeled_blnd_usdc_lp_capacity "${lp_required}"
 
     # Fund candidate BLND:USDC first for each matched pair, so the candidate
-    # never loses its strict legacy-token majority while the v2 side is funded.
+    # never loses its strict BLND:USDC LP majority while the v2 side is funded.
     ensure_modeled_v3_backstop_deposit \
         fixed "${fixed_v3_pool}" BlndUsdc \
         "${fixed_v3_target}" deposit_blnd_usdc
@@ -1893,7 +1881,7 @@ command_deploy_modeled_pools() {
     ))
     (( usdc_required >= 0 )) ||
         die "modeled v3 USDC shares exceed their fixture targets"
-    ensure_token_balance "$(state_value prefund_token)" \
+    ensure_token_balance "$(state_value usdc_token)" \
         "${usdc_required}" "modeled-usdc"
     ensure_modeled_v3_backstop_deposit \
         fixed "${fixed_v3_pool}" Usdc \
@@ -1904,12 +1892,16 @@ command_deploy_modeled_pools() {
 
     refresh_fixture_oracle_from_state "modeled-pools-activation-oracle"
     for pool in "${fixed_v3_pool}" "${yield_v3_pool}"; do
-        pool_status="$(normalize_scalar "$(invoke_view \
-            "query-modeled-v3-status" "${pool}" status)")"
-        if [[ "${pool_status}" == "6" ]]; then
-            pool_status="$(normalize_scalar "$(invoke_transaction \
-                "activate-modeled-v3-pool" "${pool}" set_pool_status \
-                --requested_status 0)")"
+        pool_status="$(invoke_view \
+            "query-modeled-v3-status" "${pool}" get_config |
+            jq -er '.status | tostring')"
+        if [[ "${pool_status}" != "0" && "${pool_status}" != "1" ]]; then
+            invoke_transaction \
+                "activate-modeled-v3-pool" \
+                "${pool}" set_status --pool_status 0 >/dev/null
+            pool_status="$(invoke_view \
+                "query-active-modeled-v3-pool" "${pool}" get_config |
+                jq -er '.status | tostring')"
         fi
         [[ "${pool_status}" == "0" || "${pool_status}" == "1" ]] ||
             die "modeled v3 pool did not activate: ${pool} status ${pool_status}"
@@ -1955,7 +1947,7 @@ command_deploy_modeled_pools() {
     ))
     (( usdc_required >= 0 )) ||
         die "modeled v2 USDC supply exceeds its fixture target"
-    ensure_token_balance "$(state_value prefund_token)" \
+    ensure_token_balance "$(state_value usdc_token)" \
         "${usdc_required}" "modeled-v2-usdc-supply"
     ensure_modeled_v2_supply fixed "${fixed_v2_pool}"
     ensure_modeled_v2_supply yieldblox "${yield_v2_pool}"
@@ -2013,14 +2005,14 @@ command_deploy_modeled_pools() {
 
     incumbent_balance="$(normalize_scalar "$(invoke_view \
         "modeled-pools-incumbent-balance" \
-        "$(state_value legacy_backstop_token)" balance \
+        "$(state_value blnd_usdc_token)" balance \
         --id "$(state_value incumbent_backstop)")")"
     candidate_balance="$(normalize_scalar "$(invoke_view \
         "modeled-pools-candidate-balance" \
-        "$(state_value legacy_backstop_token)" balance \
+        "$(state_value blnd_usdc_token)" balance \
         --id "$(state_value candidate_backstop)")")"
     (( candidate_balance > incumbent_balance )) ||
-        die "modeled pool funding broke the candidate's strict legacy-token majority"
+        die "modeled pool funding broke the candidate's strict BLND:USDC LP majority"
 
     state_set "modeled_v2_emissions_started_at" \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -2052,10 +2044,9 @@ verify_modeled_pool_reserves() {
                 "${pool}" get_reserve --asset "${asset_id}" |
                 jq -c '.config')"
         else
-            expected="$(modeled_v2_reserve_config "${model}" "${index}" |
-                jq -c --arg asset "${asset_id}" '. + {asset: $asset}')"
+            expected="$(modeled_v2_reserve_config "${model}" "${index}")"
             actual="$(invoke_view "verify-${model}-v3-reserve-${index}" \
-                "${pool}" reserve --asset "${asset_id}" |
+                "${pool}" get_reserve --asset "${asset_id}" |
                 jq -c '.config')"
         fi
         assert_json_equal "${expected}" "${actual}" \
@@ -2069,7 +2060,7 @@ verify_modeled_pool_reserves() {
             "${pool}" get_reserve_list)"
     else
         actual_list="$(invoke_view "verify-${model}-v3-reserve-list" \
-            "${pool}" reserve_list)"
+            "${pool}" get_reserve_list)"
     fi
     assert_json_equal "${expected_list}" "${actual_list}" \
         "${version} ${model} reserve list"
@@ -2080,8 +2071,8 @@ command_verify_modeled_pools() {
     local status v2_shares blnd_usdc_shares blnd_xlm_shares usdc_shares
     local incumbent_balance candidate_balance reward_zone stream supply
     local fixed_v3_target yield_v3_target now
-    local emissions_config oracle_admin
-    local emission_token_id positions usdc_collateral eurc_supply eurc_borrow
+    local oracle_admin
+    local positions usdc_collateral eurc_supply eurc_borrow
 
     validate_tools
     require_network
@@ -2115,15 +2106,24 @@ command_verify_modeled_pools() {
                 factory="$(state_value v3_pool_factory)"
                 registered="$(normalize_scalar "$(invoke_view \
                     "verify-${model}-v3-registration" "${factory}" is_pool \
-                    --pool "${pool}")")"
+                    --pool_id "${pool}")")"
                 oracle_admin="$(normalize_scalar "$(invoke_view \
                     "verify-${model}-v3-oracle-admin" \
                     "${oracle}" admin)")"
                 assert_equal "$(state_value operator)" "${oracle_admin}" \
                     "${version} ${model} lending-oracle admin"
                 config="$(invoke_view "verify-${model}-v3-config" \
-                    "${pool}" lending_config)"
-                expected_config="$(modeled_lending_config "${model}" "${oracle}")"
+                    "${pool}" get_config)"
+                expected_config="$(jq -c \
+                    --arg model "${model}" \
+                    --arg oracle "${oracle}" \
+                    '.pools[$model] | {
+                        bstop_rate: .backstop_take_rate,
+                        max_positions,
+                        min_collateral: (.min_collateral | tostring),
+                        oracle: $oracle,
+                        status: 0
+                    }' "${MODELED_POOLS_FIXTURE}")"
             fi
             assert_equal "true" "${registered}" \
                 "${version} ${model} factory registration"
@@ -2150,8 +2150,9 @@ command_verify_modeled_pools() {
             die "${model} v2 USDC supply emission stream is missing or expired"
 
         pool="$(state_value "$(modeled_pool_state_key v3 "${model}")")"
-        status="$(normalize_scalar "$(invoke_view \
-            "verify-${model}-v3-status" "${pool}" status)")"
+        status="$(invoke_view \
+            "verify-${model}-v3-status" "${pool}" get_config |
+            jq -er '.status | tostring')"
         [[ "${status}" == "0" || "${status}" == "1" ]] ||
             die "${model} v3 pool is not active: status ${status}"
         blnd_usdc_shares="$(modeled_v3_user_shares "${pool}" BlndUsdc)"
@@ -2171,24 +2172,12 @@ command_verify_modeled_pools() {
         supply="$(modeled_v3_user_supply "${pool}" 1)"
         assert_equal "${POOL_SUPPLY_BALANCE}" "${supply}" \
             "${model} v3 USDC supply"
-        if [[ "${model}" == "fixed" ]]; then
-            emission_token_id=4
-        else
-            emission_token_id=3
-        fi
-        emissions_config="$(invoke_view \
-            "verify-${model}-v3-emissions-config" "${pool}" emissions_config)"
-        printf '%s' "${emissions_config}" | jq -e \
-            --arg token_id "${emission_token_id}" '
-            length == 1 and ((.[$token_id] | tonumber) == 1)
-        ' >/dev/null ||
-            die "${model} v3 has an invalid emission configuration: ${emissions_config}"
     done
 
     pool="$(state_value modeled_v3_fixed_pool)"
     positions="$(invoke_view \
-        "verify-fixed-v3-emission-positions" "${pool}" positions \
-        --user "$(state_value depositor)")"
+        "verify-fixed-v3-emission-positions" "${pool}" get_positions \
+        --address "$(state_value depositor)")"
     usdc_collateral="$(printf '%s' "${positions}" |
         jq -er '(.collateral["1"] // "0") | tostring')"
     eurc_supply="$(printf '%s' "${positions}" |
@@ -2215,14 +2204,14 @@ command_verify_modeled_pools() {
     done
     incumbent_balance="$(normalize_scalar "$(invoke_view \
         "verify-modeled-incumbent-balance" \
-        "$(state_value legacy_backstop_token)" balance \
+        "$(state_value blnd_usdc_token)" balance \
         --id "$(state_value incumbent_backstop)")")"
     candidate_balance="$(normalize_scalar "$(invoke_view \
         "verify-modeled-candidate-balance" \
-        "$(state_value legacy_backstop_token)" balance \
+        "$(state_value blnd_usdc_token)" balance \
         --id "$(state_value candidate_backstop)")")"
     (( candidate_balance > incumbent_balance )) ||
-        die "candidate no longer strictly exceeds the incumbent legacy-token balance"
+        die "candidate no longer strictly exceeds the incumbent BLND:USDC LP balance"
 
     reward_zone="$(invoke_view "verify-modeled-v2-reward-zone" \
         "$(state_value incumbent_backstop)" reward_zone)"
@@ -2248,7 +2237,7 @@ EOF
 }
 
 command_status() {
-    local emitter_id incumbent_id candidate_id pool_id next_token_id legacy_token_id
+    local emitter_id incumbent_id candidate_id pool_id blnd_xlm_token_id blnd_usdc_token_id
     local unlock_time prepare_not_before phase
     local emitter_backstop incumbent_balance candidate_balance queued_swap migration_status
     local pool_operator pool_status now expiration
@@ -2260,8 +2249,8 @@ command_status() {
     incumbent_id="$(state_value incumbent_backstop)"
     candidate_id="$(state_value candidate_backstop)"
     pool_id="$(state_value v3_pool)"
-    next_token_id="$(state_value next_backstop_token)"
-    legacy_token_id="$(state_value legacy_backstop_token)"
+    blnd_xlm_token_id="$(state_value blnd_xlm_token)"
+    blnd_usdc_token_id="$(state_value blnd_usdc_token)"
     unlock_time="$(state_value unlock_time)"
     prepare_not_before="$(state_value prepare_not_before)"
     phase="$(state_value phase)"
@@ -2269,26 +2258,27 @@ command_status() {
     emitter_backstop="$(normalize_scalar "$(invoke_view \
         "status-emitter-backstop" "${emitter_id}" get_backstop)")"
     incumbent_balance="$(normalize_scalar "$(invoke_view \
-        "status-incumbent-balance" "${legacy_token_id}" balance --id "${incumbent_id}")")"
+        "status-incumbent-balance" "${blnd_usdc_token_id}" balance --id "${incumbent_id}")")"
     candidate_balance="$(normalize_scalar "$(invoke_view \
-        "status-candidate-balance" "${legacy_token_id}" balance --id "${candidate_id}")")"
+        "status-candidate-balance" "${blnd_usdc_token_id}" balance --id "${candidate_id}")")"
     queued_swap="$(invoke_view "status-emitter-queue" "${emitter_id}" get_queued_swap)"
     migration_status="$(invoke_view "status-candidate-migration" "${candidate_id}" migration_status)"
     pool_operator="$(normalize_scalar "$(invoke_view \
-        "status-pool-admin" "${pool_id}" admin)")"
-    pool_status="$(normalize_scalar "$(invoke_view \
-        "status-pool-status" "${pool_id}" status)")"
+        "status-pool-admin" "${pool_id}" get_admin)")"
+    pool_status="$(invoke_view \
+        "status-pool-status" "${pool_id}" get_config |
+        jq -er '.status | tostring')"
     now="$(date +%s)"
 
     if [[ "${queued_swap}" != "null" ]]; then
         assert_queued_swap_matches \
-            "${queued_swap}" "${candidate_id}" "${next_token_id}" "${unlock_time}"
+            "${queued_swap}" "${candidate_id}" "${blnd_xlm_token_id}" "${unlock_time}"
     elif [[ "${phase}" != "active" &&
         "${phase}" != "verified" &&
         "${phase}" != "emissions_streaming" &&
         "${phase}" != "emissions_claimed" ]]
     then
-        die "legacy emitter queue is absent while saved phase is ${phase}"
+        die "deployed emitter queue is absent while saved phase is ${phase}"
     fi
 
     cat <<EOF
@@ -2350,10 +2340,11 @@ command_refresh_oracle() {
 }
 
 command_keepalive() {
-    local emitter_id incumbent_id candidate_id factory_id pool_id valuation_adapter_id depositor
-    local blnd_id xlm_id legacy_token_id next_token_id prefund_token_id unlock_time
+    local emitter_id incumbent_id candidate_id factory_id pool_id backstop_valuation_id depositor
+    local blnd_id xlm_id blnd_usdc_token_id blnd_xlm_token_id usdc_token_id unlock_time
     local stamp prefix last_distro_key blnd_admin queued_swap emitter_backstop
     local incumbent_balance candidate_balance primary_pool_supply_asset
+    local primary_pool_emission_reserve_token_id
 
     validate_tools
     require_network
@@ -2363,14 +2354,17 @@ command_keepalive() {
     candidate_id="$(state_value candidate_backstop)"
     factory_id="$(state_value v3_pool_factory)"
     pool_id="$(state_value v3_pool)"
-    valuation_adapter_id="$(state_value valuation_adapter)"
+    backstop_valuation_id="$(state_value backstop_valuation)"
     depositor="$(state_value depositor)"
     blnd_id="$(state_value blnd_token)"
     xlm_id="$(state_value xlm_token)"
-    legacy_token_id="$(state_value legacy_backstop_token)"
-    next_token_id="$(state_value next_backstop_token)"
-    prefund_token_id="$(state_value prefund_token)"
+    blnd_usdc_token_id="$(state_value blnd_usdc_token)"
+    blnd_xlm_token_id="$(state_value blnd_xlm_token)"
+    usdc_token_id="$(state_value usdc_token)"
     primary_pool_supply_asset="$(state_value primary_pool_supply_asset)"
+    primary_pool_emission_reserve_token_id="$(
+        state_value primary_pool_emission_reserve_token_id
+    )"
     unlock_time="$(state_value unlock_time)"
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
     prefix="keepalive-${stamp}"
@@ -2386,7 +2380,7 @@ command_keepalive() {
         "${prefix}-emitter-backstop" "${emitter_id}" get_backstop)")"
     if [[ "${queued_swap}" != "null" ]]; then
         assert_queued_swap_matches \
-            "${queued_swap}" "${candidate_id}" "${next_token_id}" "${unlock_time}"
+            "${queued_swap}" "${candidate_id}" "${blnd_xlm_token_id}" "${unlock_time}"
     else
         assert_equal "${candidate_id}" "${emitter_backstop}" \
             "post-migration emitter backstop"
@@ -2396,13 +2390,14 @@ command_keepalive() {
     invoke_forced_transaction "${prefix}-candidate" \
         "${candidate_id}" migration_status >/dev/null
     invoke_forced_transaction "${prefix}-factory" \
-        "${factory_id}" is_pool --pool "${pool_id}" >/dev/null
+        "${factory_id}" is_pool --pool_id "${pool_id}" >/dev/null
     invoke_forced_transaction "${prefix}-pool" \
-        "${pool_id}" backstop >/dev/null
-    extend_contract_instance "${prefix}-valuation-adapter" \
-        "${valuation_adapter_id}" >/dev/null
+        "${pool_id}" get_config >/dev/null
+    extend_contract_instance "${prefix}-backstop-valuation" \
+        "${backstop_valuation_id}" >/dev/null
     invoke_forced_transaction "${prefix}-position" \
-        "${candidate_id}" blnd_usdc_shares \
+        "${candidate_id}" tier_shares \
+        --tier BlndUsdc \
         --user "${depositor}" \
         --pool "${pool_id}" >/dev/null
     invoke_forced_transaction "${prefix}-usdc-position" \
@@ -2410,7 +2405,7 @@ command_keepalive() {
         --tier Usdc \
         --user "${depositor}" \
         --pool "${pool_id}" >/dev/null
-    invoke_forced_transaction "${prefix}-legacy-tier-state" \
+    invoke_forced_transaction "${prefix}-blnd-usdc-tier-state" \
         "${candidate_id}" pool_tier_state \
         --tier BlndUsdc \
         --pool "${pool_id}" >/dev/null
@@ -2421,36 +2416,37 @@ command_keepalive() {
     invoke_forced_transaction "${prefix}-reward-zone" \
         "${candidate_id}" reward_zone >/dev/null
     invoke_forced_transaction "${prefix}-pool-reserves" \
-        "${pool_id}" reserve_list >/dev/null
+        "${pool_id}" get_reserve_list >/dev/null
     invoke_forced_transaction "${prefix}-pool-reserve" \
-        "${pool_id}" reserve --asset "${primary_pool_supply_asset}" >/dev/null
+        "${pool_id}" get_reserve --asset "${primary_pool_supply_asset}" >/dev/null
     invoke_forced_transaction "${prefix}-pool-position" \
-        "${pool_id}" positions --user "${depositor}" >/dev/null
-    invoke_forced_transaction "${prefix}-pool-emissions-config" \
-        "${pool_id}" emissions_config >/dev/null
-    extend_contract_instance "${prefix}-legacy-token-instance" \
-        "${legacy_token_id}" >/dev/null
-    invoke_forced_transaction "${prefix}-legacy-token-supply" \
-        "${legacy_token_id}" get_total_supply >/dev/null
-    invoke_forced_transaction "${prefix}-legacy-token-list" \
-        "${legacy_token_id}" get_tokens >/dev/null
-    invoke_forced_transaction "${prefix}-legacy-token-blnd-reserve" \
-        "${legacy_token_id}" get_balance --token "${blnd_id}" >/dev/null
-    invoke_forced_transaction "${prefix}-legacy-token-usdc-reserve" \
-        "${legacy_token_id}" get_balance --token "${prefund_token_id}" >/dev/null
+        "${pool_id}" get_positions --address "${depositor}" >/dev/null
+    invoke_forced_transaction "${prefix}-pool-emissions" \
+        "${pool_id}" get_reserve_emissions \
+        --reserve_token_index "${primary_pool_emission_reserve_token_id}" >/dev/null
+    extend_contract_instance "${prefix}-blnd-usdc-lp-instance" \
+        "${blnd_usdc_token_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-blnd-usdc-lp-supply" \
+        "${blnd_usdc_token_id}" get_total_supply >/dev/null
+    invoke_forced_transaction "${prefix}-blnd-usdc-lp-list" \
+        "${blnd_usdc_token_id}" get_tokens >/dev/null
+    invoke_forced_transaction "${prefix}-blnd-usdc-lp-blnd-reserve" \
+        "${blnd_usdc_token_id}" get_balance --token "${blnd_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-blnd-usdc-lp-usdc-reserve" \
+        "${blnd_usdc_token_id}" get_balance --token "${usdc_token_id}" >/dev/null
     incumbent_balance="$(normalize_scalar "$(invoke_forced_transaction \
         "${prefix}-incumbent-balance" \
-        "${legacy_token_id}" balance --id "${incumbent_id}")")"
+        "${blnd_usdc_token_id}" balance --id "${incumbent_id}")")"
     candidate_balance="$(normalize_scalar "$(invoke_forced_transaction \
         "${prefix}-candidate-balance" \
-        "${legacy_token_id}" balance --id "${candidate_id}")")"
+        "${blnd_usdc_token_id}" balance --id "${candidate_id}")")"
     [[ "${incumbent_balance}" =~ ^[0-9]+$ ]] ||
-        die "invalid incumbent legacy-token balance: ${incumbent_balance}"
+        die "invalid incumbent BLND:USDC LP balance: ${incumbent_balance}"
     [[ "${candidate_balance}" =~ ^[0-9]+$ ]] ||
-        die "invalid candidate legacy-token balance: ${candidate_balance}"
+        die "invalid candidate BLND:USDC LP balance: ${candidate_balance}"
     if [[ "${emitter_backstop}" != "${candidate_id}" ]]; then
         (( candidate_balance > incumbent_balance )) ||
-            die "candidate no longer strictly exceeds incumbent legacy-token balance"
+            die "candidate no longer strictly exceeds incumbent BLND:USDC LP balance"
     fi
     invoke_forced_transaction "${prefix}-pool-token-balance" \
         "${primary_pool_supply_asset}" balance --id "${pool_id}" >/dev/null
@@ -2458,28 +2454,28 @@ command_keepalive() {
         "${blnd_id}" >/dev/null
     extend_contract_instance "${prefix}-xlm-instance" \
         "${xlm_id}" >/dev/null
-    extend_contract_instance "${prefix}-next-token-instance" \
-        "${next_token_id}" >/dev/null
-    invoke_forced_transaction "${prefix}-next-token-supply" \
-        "${next_token_id}" get_total_supply >/dev/null
-    invoke_forced_transaction "${prefix}-next-token-list" \
-        "${next_token_id}" get_tokens >/dev/null
-    invoke_forced_transaction "${prefix}-next-token-blnd-reserve" \
-        "${next_token_id}" get_balance --token "${blnd_id}" >/dev/null
-    invoke_forced_transaction "${prefix}-next-token-xlm-reserve" \
-        "${next_token_id}" get_balance --token "${xlm_id}" >/dev/null
-    extend_contract_instance "${prefix}-prefund-token-instance" \
-        "${prefund_token_id}" >/dev/null
+    extend_contract_instance "${prefix}-blnd-xlm-lp-instance" \
+        "${blnd_xlm_token_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-blnd-xlm-lp-supply" \
+        "${blnd_xlm_token_id}" get_total_supply >/dev/null
+    invoke_forced_transaction "${prefix}-blnd-xlm-lp-list" \
+        "${blnd_xlm_token_id}" get_tokens >/dev/null
+    invoke_forced_transaction "${prefix}-blnd-xlm-lp-blnd-reserve" \
+        "${blnd_xlm_token_id}" get_balance --token "${blnd_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-blnd-xlm-lp-xlm-reserve" \
+        "${blnd_xlm_token_id}" get_balance --token "${xlm_id}" >/dev/null
+    extend_contract_instance "${prefix}-usdc-token-instance" \
+        "${usdc_token_id}" >/dev/null
     invoke_forced_transaction "${prefix}-candidate-usdc-balance" \
-        "${prefund_token_id}" balance --id "${candidate_id}" >/dev/null
-    invoke_forced_transaction "${prefix}-legacy-comet-blnd-balance" \
-        "${blnd_id}" balance --id "${legacy_token_id}" >/dev/null
+        "${usdc_token_id}" balance --id "${candidate_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-blnd-usdc-comet-blnd-balance" \
+        "${blnd_id}" balance --id "${blnd_usdc_token_id}" >/dev/null
     invoke_forced_transaction "${prefix}-next-comet-blnd-balance" \
-        "${blnd_id}" balance --id "${next_token_id}" >/dev/null
-    invoke_forced_transaction "${prefix}-legacy-comet-usdc-balance" \
-        "${prefund_token_id}" balance --id "${legacy_token_id}" >/dev/null
+        "${blnd_id}" balance --id "${blnd_xlm_token_id}" >/dev/null
+    invoke_forced_transaction "${prefix}-blnd-usdc-comet-usdc-balance" \
+        "${usdc_token_id}" balance --id "${blnd_usdc_token_id}" >/dev/null
     invoke_forced_transaction "${prefix}-next-comet-xlm-balance" \
-        "${xlm_id}" balance --id "${next_token_id}" >/dev/null
+        "${xlm_id}" balance --id "${blnd_xlm_token_id}" >/dev/null
     blnd_admin="$(normalize_scalar "$(invoke_view \
         "${prefix}-blnd-admin" "${blnd_id}" admin)")"
     assert_equal "${emitter_id}" "${blnd_admin}" "BLND administrator"
@@ -2554,9 +2550,9 @@ command_finalize() {
 
 command_verify() {
     local operator emitter_id incumbent_id candidate_id factory_id pool_id
-    local valuation_adapter_id legacy_token_id next_token_id emitter_backstop
-    local candidate_legacy_token candidate_next_token candidate_valuation_adapter
-    local factory_backstop pool_backstop pool_operator pool_registered pool_status
+    local backstop_valuation_id blnd_usdc_token_id blnd_xlm_token_id emitter_backstop
+    local candidate_blnd_usdc_token candidate_blnd_xlm_token candidate_backstop_valuation
+    local factory_backstop pool_operator pool_registered pool_status
     local incumbent_balance candidate_balance queued_swap migration_status activated_at saved_phase
 
     validate_tools
@@ -2568,33 +2564,35 @@ command_verify() {
     candidate_id="$(state_value candidate_backstop)"
     factory_id="$(state_value v3_pool_factory)"
     pool_id="$(state_value v3_pool)"
-    valuation_adapter_id="$(state_value valuation_adapter)"
-    legacy_token_id="$(state_value legacy_backstop_token)"
-    next_token_id="$(state_value next_backstop_token)"
+    backstop_valuation_id="$(state_value backstop_valuation)"
+    blnd_usdc_token_id="$(state_value blnd_usdc_token)"
+    blnd_xlm_token_id="$(state_value blnd_xlm_token)"
     saved_phase="$(state_value phase)"
 
     emitter_backstop="$(normalize_scalar "$(invoke_view \
         "verify-emitter-backstop" "${emitter_id}" get_backstop)")"
-    candidate_legacy_token="$(normalize_scalar "$(invoke_view \
-        "verify-candidate-legacy-token" "${candidate_id}" backstop_token)")"
-    candidate_next_token="$(normalize_scalar "$(invoke_view \
-        "verify-candidate-next-token" "${candidate_id}" next_backstop_token)")"
-    candidate_valuation_adapter="$(normalize_scalar "$(invoke_view \
-        "verify-candidate-valuation-adapter" "${candidate_id}" valuation_adapter)")"
+    candidate_blnd_usdc_token="$(normalize_scalar "$(invoke_view \
+        "verify-candidate-blnd-usdc-lp" "${candidate_id}" backstop_token)")"
+    candidate_blnd_xlm_token="$(normalize_scalar "$(invoke_view \
+        "verify-candidate-blnd-xlm-lp" "${candidate_id}" tier_token \
+        --tier BlndXlm)")"
+    candidate_backstop_valuation="$(normalize_scalar "$(invoke_view \
+        "verify-candidate-backstop-valuation" \
+        "${candidate_id}" backstop_valuation)")"
     factory_backstop="$(normalize_scalar "$(invoke_view \
         "verify-factory-backstop" "${factory_id}" backstop)")"
-    pool_backstop="$(normalize_scalar "$(invoke_view \
-        "verify-pool-backstop" "${pool_id}" backstop)")"
     pool_operator="$(normalize_scalar "$(invoke_view \
-        "verify-pool-admin" "${pool_id}" admin)")"
-    pool_status="$(normalize_scalar "$(invoke_view \
-        "verify-pool-status" "${pool_id}" status)")"
+        "verify-pool-admin" "${pool_id}" get_admin)")"
+    pool_status="$(invoke_view \
+        "verify-pool-status" "${pool_id}" get_config |
+        jq -er '.status | tostring')"
     pool_registered="$(normalize_scalar "$(invoke_view \
-        "verify-pool-registration" "${factory_id}" is_pool --pool "${pool_id}")")"
+        "verify-pool-registration" "${factory_id}" is_pool \
+        --pool_id "${pool_id}")")"
     incumbent_balance="$(normalize_scalar "$(invoke_view \
-        "verify-incumbent-balance" "${legacy_token_id}" balance --id "${incumbent_id}")")"
+        "verify-incumbent-balance" "${blnd_usdc_token_id}" balance --id "${incumbent_id}")")"
     candidate_balance="$(normalize_scalar "$(invoke_view \
-        "verify-candidate-balance" "${legacy_token_id}" balance --id "${candidate_id}")")"
+        "verify-candidate-balance" "${blnd_usdc_token_id}" balance --id "${candidate_id}")")"
     queued_swap="$(invoke_view "verify-emitter-queue" "${emitter_id}" get_queued_swap)"
     migration_status="$(invoke_view \
         "verify-candidate-migration" "${candidate_id}" migration_status)"
@@ -2602,25 +2600,25 @@ command_verify() {
         "verify-candidate-activation" "${candidate_id}" activated_at)")"
 
     assert_equal "${candidate_id}" "${emitter_backstop}" "emitter backstop"
-    assert_equal "${legacy_token_id}" "${candidate_legacy_token}" "candidate legacy token"
-    assert_equal "${next_token_id}" "${candidate_next_token}" "candidate next token"
-    assert_equal "${valuation_adapter_id}" "${candidate_valuation_adapter}" \
-        "candidate valuation adapter"
+    assert_equal "${blnd_usdc_token_id}" "${candidate_blnd_usdc_token}" "candidate BLND:USDC LP token"
+    assert_equal "${blnd_xlm_token_id}" "${candidate_blnd_xlm_token}" \
+        "candidate BLND:XLM LP token"
+    assert_equal "${backstop_valuation_id}" "${candidate_backstop_valuation}" \
+        "candidate backstop valuation"
     assert_equal "${candidate_id}" "${factory_backstop}" "v3 factory binding"
-    assert_equal "${candidate_id}" "${pool_backstop}" "v3 pool binding"
     assert_equal "${operator}" "${pool_operator}" "v3 pool admin"
     assert_equal "0" "${pool_status}" "active v3 pool status"
     assert_equal "true" "${pool_registered}" "v3 pool registration"
     [[ "${incumbent_balance}" =~ ^[0-9]+$ ]] ||
-        die "invalid post-migration incumbent legacy-token balance"
+        die "invalid post-migration incumbent BLND:USDC LP balance"
     [[ "${candidate_balance}" =~ ^[0-9]+$ ]] ||
-        die "invalid post-migration candidate legacy-token balance"
-    # The emitter's successful transition proves the strict legacy-token
+        die "invalid post-migration candidate BLND:USDC LP balance"
+    # The emitter's successful transition proves the strict BLND:USDC LP
     # comparison passed. That old designated-token majority is intentionally
     # no longer required after migration, when ordinary tier withdrawals may
     # reduce the candidate's BLND:USDC balance.
     printf '%s' "${queued_swap}" | jq -e '. == null' >/dev/null ||
-        die "legacy emitter queue was not cleared: ${queued_swap}"
+        die "deployed emitter queue was not cleared: ${queued_swap}"
     printf '%s' "${migration_status}" | jq -e '
         . == "Active" or
         (type == "object" and (has("Active") or .tag? == "Active"))
@@ -2641,13 +2639,13 @@ command_verify() {
 ${NETWORK_LABEL} migration verified
   operator: ${operator}
   incumbent SDK-22 backstop: ${incumbent_id}
-  legacy emitter: ${emitter_id}
+  deployed emitter: ${emitter_id}
   candidate SDK-27 backstop: ${candidate_id}
   candidate pool factory: ${factory_id}
   candidate pool: ${pool_id}
   candidate pool admin: ${pool_operator}
   candidate pool status: ${pool_status}
-  candidate valuation adapter: ${valuation_adapter_id}
+  candidate valuation adapter: ${backstop_valuation_id}
   activation timestamp: ${activated_at}
   evidence directory: ${RUN_DIR}
 EOF
@@ -2806,8 +2804,8 @@ command_emissions() {
         die "pool did not gulp at least one BLND: ${pool_gulped}"
     fi
     stream="$(invoke_view \
-        "query-pool-emission-stream" "${pool_id}" reserve_emission \
-        --reserve_token_id "${emission_reserve_token_id}")"
+        "query-pool-emission-stream" "${pool_id}" get_reserve_emissions \
+        --reserve_token_index "${emission_reserve_token_id}")"
     expiration="$(printf '%s' "${stream}" | jq -er '.expiration | tostring')"
     [[ "${expiration}" =~ ^[0-9]+$ ]] ||
         die "pool emission stream has no expiration: ${stream}"
@@ -2825,8 +2823,8 @@ command_emissions() {
         fi
         yield_stream="$(invoke_view \
             "query-yieldblox-pool-emission-stream" \
-            "${yield_pool}" reserve_emission \
-            --reserve_token_id 3)"
+            "${yield_pool}" get_reserve_emissions \
+            --reserve_token_index 3)"
         yield_expiration="$(printf '%s' "${yield_stream}" |
             jq -er '.expiration | tostring')"
         [[ "${yield_expiration}" =~ ^[0-9]+$ ]] ||
@@ -2887,11 +2885,12 @@ claim_pool_emissions_resumable() {
     expected="$(state_optional "${expected_key}")"
     balance_before="$(state_optional "${balance_key}")"
     if [[ -z "${expected}" || -z "${balance_before}" ]]; then
-        expected="$(invoke_view \
-            "preview-${label}-pool-emission-claim" "${pool_id}" user_emission \
-            --user "${depositor}" \
-            --reserve_token_id "${reserve_token_id}" |
-            jq -er '.accrued | tostring')"
+        expected="$(normalize_scalar "$(invoke_view_as \
+            "preview-${label}-pool-emission-claim" \
+            "${DEPOSITOR_IDENTITY}" "${pool_id}" claim \
+            --from "${depositor}" \
+            --reserve_token_ids "[${reserve_token_id}]" \
+            --to "${depositor}")")"
         if [[ ! "${expected}" =~ ^[0-9]+$ ]] || (( expected <= 0 )); then
             die "${label} pool has no positive completed BLND claim: ${expected}"
         fi
@@ -2929,9 +2928,9 @@ claim_pool_emissions_resumable() {
     claimed="$(normalize_scalar "$(invoke_transaction_as \
         "claim-${label}-pool-ongoing-blnd" \
         "${DEPOSITOR_IDENTITY}" "${pool_id}" claim \
-        --user "${depositor}" \
+        --from "${depositor}" \
         --reserve_token_ids "[${reserve_token_id}]" \
-        --recipient "${depositor}")")"
+        --to "${depositor}")")"
     assert_equal "${expected}" "${claimed}" "${label} pool claim return"
     balance_after="$(normalize_scalar "$(invoke_view \
         "query-${label}-claim-balance-after" "${blnd_id}" balance \

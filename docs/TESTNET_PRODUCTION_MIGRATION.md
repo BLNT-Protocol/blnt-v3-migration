@@ -13,7 +13,7 @@ local Stellar configuration.
 
 The runner creates:
 
-- a fresh deployment of the exact published legacy emitter WASM;
+- a fresh deployment of the exact deployed emitter WASM;
 - synthetic test-only BLND and USDC Stellar assets;
 - the native XLM Stellar asset contract, with transaction accounts funded by
   Friendbot;
@@ -42,7 +42,7 @@ make testnet-production-validate
 ```
 
 Deploy the complete incumbent and candidate stacks, create both Comets, and
-begin the unshortened 31-day legacy-emitter queue:
+begin the unshortened 31-day deployed-emitter queue:
 
 ```bash
 make testnet-production-run
@@ -118,10 +118,10 @@ BLND:USDC → BLND:XLM → USDC waterfall. Each matched v2/v3 pool receives
 base unit to preserve the strict aggregate migration majority. Each v3 pool
 also receives 10 BLND:XLM LP and 12,500 USDC.
 
-The v2 balance exceeds the legacy activation formula at the controlled Comet
+The v2 balance exceeds the v2 activation formula at the controlled Comet
 ratio. The runner sets both v2 pools to Admin Active, configures their 30% pool
 tranche for USDC suppliers, seeds 1,000 USDC of supply per pool, adds both to
-the incumbent reward zone, advances the legacy emitter, and starts the
+the incumbent reward zone, advances the deployed emitter, and starts the
 seven-day emission streams. The large synthetic BLND issuance used to create
 the activation LP is test-only setup capital, not an emitter distribution.
 Rerunning the deployment command renews a missing or expired stream; standalone
@@ -163,7 +163,7 @@ one-base-unit strict lead over the incumbent's 44,000 BLND:USDC LP.
 
 | Component | Contract |
 | --- | --- |
-| Legacy emitter | `CDO22NMYBVVSTNQHKISLTVKACELZTWRK4QECYVC4S2OILBGPRUT3ZF4H` |
+| Deployed emitter | `CDO22NMYBVVSTNQHKISLTVKACELZTWRK4QECYVC4S2OILBGPRUT3ZF4H` |
 | BLND:USDC Comet | `CAOMBYZORSCE7MTUTBUWSYHISB636C7OKWOYDKA6FGMLSK5GBISX47GE` |
 | BLND:XLM Comet | `CD6SY5AKEBDPW4HGTLSRESEC7ENFSN4E7RU45XJX53OPKTL3MTEFBH2V` |
 | Test SEP-40 oracle | `CCAS657JNYS5M4DTDDGI7MM5UJCQH3QQKUWJG5MYZKPCIILS5T43ESGM` |

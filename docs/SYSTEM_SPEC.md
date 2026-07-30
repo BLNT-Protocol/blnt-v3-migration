@@ -41,8 +41,8 @@ in the normative migration documents are acceptance criteria.
 
 ## Source and artifact authority
 
-The exact deployed v2 and legacy-emitter WASMs under `legacy/artifacts` are the
-runtime migration boundary. The pinned `legacy/blend-contracts-v2` submodule
+The exact deployed v2 and deployed-emitter WASMs under `deployed-artifacts/mainnet` are the
+runtime migration boundary. The pinned `blend-contracts-v2` submodule
 provides the frozen SDK-22 source and test baseline.
 
 The pinned `blend-contracts-v3` submodule is the sole production v3 contract
@@ -59,7 +59,7 @@ dependencies.
 
 Apply the following order:
 
-1. Deployed v2 and legacy-emitter bytecode governs compatibility facts.
+1. Deployed v2 and deployed-emitter bytecode governs compatibility facts.
 2. This migration specification governs emitter replacement, migration
    accounting, backfill, recovery, orchestration, evidence, and acceptance.
 3. The contract repository's composed specification governs all other v3

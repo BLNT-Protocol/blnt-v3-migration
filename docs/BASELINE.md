@@ -31,12 +31,12 @@ hashes; they MUST NOT silently replace the frozen deployed fixtures.
 
 ## Baseline policy
 
-The frozen executable behavior is documented normatively in
-[V2_SYSTEM_SPEC.md](V2_SYSTEM_SPEC.md). Candidate-only changes are documented
-in [V3_SYSTEM_SPEC.md](V3_SYSTEM_SPEC.md), with the production pricing boundary
-specified in [VALUATION_ADAPTER.md](VALUATION_ADAPTER.md). They compose under
-[SYSTEM_SPEC.md](SYSTEM_SPEC.md). Candidate specifications MUST NOT silently
-restate or redefine an inherited v2 rule.
+The frozen executable behavior and candidate-only changes are documented by
+the contract submodule's
+[composed specification](../blend-contracts-v3/docs/SYSTEM_SPEC.md).
+Migration requirements compose separately under
+[SYSTEM_SPEC.md](SYSTEM_SPEC.md). Migration fixtures MUST NOT silently restate
+or redefine contract behavior.
 
 Before changing protocol behavior:
 
@@ -44,18 +44,18 @@ Before changing protocol behavior:
 2. Run the inherited v2 unit and integration tests with `make test`.
 3. Run the Protocol-27 compatibility harness with
    `make test-v2-migration`.
-4. Record every intentional compatibility change in `V3_SYSTEM_SPEC.md` and
-   cross-reference it in `V2_PARITY.md`.
+4. Record every intentional compatibility change in
+   `blend-contracts-v3/docs/V3_SYSTEM_SPEC.md`.
 5. Add a regression test before changing an existing invariant.
 
 Do not upgrade or edit the inherited v2 source submodule. It remains frozen on
 Rust 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
 
-New v3 implementation work belongs in the independent `v3/` workspace, which
-targets Protocol 27 using Rust 1.91.0, Soroban SDK 27.0.2, and
+New v3 implementation work belongs in the `blend-contracts-v3` submodule,
+which targets Protocol 27 using Rust 1.91.1, Soroban SDK 27.0.3, and
 `wasm32v1-none`. There is intentionally no SDK 26 compatibility lane.
 Compatibility is defined by the exact deployed v2 and emitter bytecode running
-on the current host and interacting with the v3 candidate.
+on the current host and interacting with the pinned v3 contracts.
 
 Updating the v3 SDK or protocol target is an explicit maintenance change and
 must not modify the pinned v2 source, its dependency graph, or its lockfile.
@@ -67,7 +67,8 @@ must not modify the pinned v2 source, its dependency graph, or its lockfile.
 - `v2-pool.wasm`: deployed lending-pool implementation.
 - `v2-pool-factory.wasm`: deployed pool factory.
 - `legacy/blend-contracts-v2`: source tests, audit reference, and rebuild lane.
-- `v3/compat-tests`: current-host compatibility and migration tests.
+- `migration/compat-tests`: current-host compatibility and migration tests.
+- `blend-contracts-v3`: pinned production v3 contract source and tests.
 
 Emitter replacement changes only the recipient of future BLND distributions.
 It does not migrate or mutate incumbent v2 supplier, borrower, or backstop

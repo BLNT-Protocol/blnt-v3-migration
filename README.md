@@ -9,19 +9,25 @@ release.
 
 ## Baseline
 
-The historical source baseline is Blend Protocol v2 commit
-`ba22b487b2c5057a4ecc28b05b5193c28e4bd117`, pinned as a Git submodule:
+Initialize both pinned contract-source submodules after cloning:
 
 ```bash
-git submodule update --init
+git submodule update --init --recursive
 ```
 
-The submodule uses the GitHub SSH URL
-`git@github.com:blend-capital/blend-contracts-v2.git`. Exact mainnet emitter,
-v2 backstop, pool-factory, and pool WASMs are checked in under
-`legacy/artifacts/` with their contract IDs and SHA-256 digests. These deployed
-bytes, rather than a local rebuild, are the authoritative compatibility and
-isolated-migration fixtures. Run `make verify-legacy` to verify both inputs.
+The historical source baseline is Blend Protocol v2 commit
+`ba22b487b2c5057a4ecc28b05b5193c28e4bd117`. The source submodules use the
+GitHub SSH URLs `git@github.com:blend-capital/blend-contracts-v2.git` and
+`git@github.com:levinson/blend-contracts-v3.git`.
+
+Exact mainnet emitter, v2 backstop, pool-factory, and pool WASMs are checked in
+under `legacy/artifacts/` with their contract IDs and SHA-256 digests. These
+deployed bytes, rather than a local rebuild, are the authoritative
+compatibility and isolated-migration fixtures. Run `make verify-legacy` to
+verify both inputs.
+
+GitHub Actions requires a fine-grained `SUBMODULES_TOKEN` repository secret
+with read access to the private `blend-contracts-v3` repository.
 
 The emitter migration does not upgrade the deployed v2 contracts or move
 their supplier, borrower, or backstop positions. Immediately before switching
@@ -31,17 +37,17 @@ existing v2 positions and previously accrued v2 claims remain governed by the
 v2 contracts. This routing lasts while v3 remains the emitter's registered
 backstop.
 
-See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the specification index and
-composition rules, [docs/V2_SYSTEM_SPEC.md](docs/V2_SYSTEM_SPEC.md) for the
-frozen v2 baseline, [docs/V3_SYSTEM_SPEC.md](docs/V3_SYSTEM_SPEC.md) for the
-v3 specification, [docs/V2_PARITY.md](docs/V2_PARITY.md) for the cross-reference
-matrix, [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for
-non-normative candidate progress,
-[docs/BASELINE.md](docs/BASELINE.md) for the baseline policy, and
+See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the migration repository
+boundary and [docs/MIGRATION_PROTOCOL_SPEC.md](docs/MIGRATION_PROTOCOL_SPEC.md)
+for the migration protocol. Contract behavior is composed by
+[blend-contracts-v3/docs/SYSTEM_SPEC.md](blend-contracts-v3/docs/SYSTEM_SPEC.md).
+[docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) records
+non-normative candidate progress. See
+[docs/BASELINE.md](docs/BASELINE.md) for source and artifact policy, and
 [docs/MIGRATION_TEST_PLAN.md](docs/MIGRATION_TEST_PLAN.md) for the migration
-test requirements. The normative production LP-pricing specification is
-[docs/VALUATION_ADAPTER.md](docs/VALUATION_ADAPTER.md), with the fail-closed
-provider qualification and deployment process in
+test requirements. The contract submodule owns the normative production
+LP-pricing specification, while the fail-closed provider qualification and
+deployment process remains in
 [docs/ORACLE_DEPLOYMENT.md](docs/ORACLE_DEPLOYMENT.md). Operational instructions
 live in
 [docs/LOCALNET_MIGRATION.md](docs/LOCALNET_MIGRATION.md) and
@@ -51,12 +57,15 @@ production-adapter testnet lane is documented in
 
 ## Toolchain lanes
 
-This repository deliberately maintains two independent Rust workspaces:
+This repository deliberately maintains three independent source and test
+lanes:
 
 - `legacy/blend-contracts-v2/` is the historical source baseline, pinned to
   Rust 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
-- `v3/` is the candidate workspace, pinned to Rust 1.91.0, Soroban SDK 27.0.2,
-  Protocol 27 tooling, and `wasm32v1-none`.
+- `blend-contracts-v3/` is the production candidate submodule, pinned to Rust
+  1.91.1, Soroban SDK 27.0.3, Protocol 27 tooling, and `wasm32v1-none`.
+- `migration/` contains only Protocol-27 cross-version tests and test-only
+  support contracts.
 
 There is no SDK 26 compatibility lane. Compatibility tests span the historical
 SDK-22 implementation and the current v3 candidate.

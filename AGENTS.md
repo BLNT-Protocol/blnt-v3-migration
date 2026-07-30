@@ -24,12 +24,14 @@ implicit assumptions.
 Read these before changing protocol behavior:
 
 1. `docs/SYSTEM_SPEC.md`
-2. `docs/V2_SYSTEM_SPEC.md`
-3. `docs/V3_SYSTEM_SPEC.md`
-4. `docs/VALUATION_ADAPTER.md`
-5. `docs/MIGRATION_TEST_PLAN.md`
-6. `docs/BASELINE.md`
-7. Existing contract tests and the implementation being changed
+2. `docs/MIGRATION_PROTOCOL_SPEC.md`
+3. `blend-contracts-v3/docs/SYSTEM_SPEC.md`
+4. `blend-contracts-v3/docs/V2_SYSTEM_SPEC.md`
+5. `blend-contracts-v3/docs/V3_SYSTEM_SPEC.md`
+6. `blend-contracts-v3/docs/VALUATION_ADAPTER.md`
+7. `docs/MIGRATION_TEST_PLAN.md`
+8. `docs/BASELINE.md`
+9. Existing contract tests and the implementation being changed
 
 If the documents conflict with executable legacy behavior, preserve the legacy
 behavior needed for migration and document the conflict. Do not silently choose
@@ -40,18 +42,20 @@ a new economic policy.
 Initialize the pinned historical source after cloning:
 
 ```bash
-git submodule update --init
+git submodule update --init --recursive
 ```
 
 - `legacy/blend-contracts-v2` is the authoritative SDK-22 source submodule.
+- `blend-contracts-v3` is the sole production v3 contract source submodule.
 - `legacy/artifacts` contains exact deployed mainnet WASM compatibility
   fixtures, verified by `make verify-legacy`.
+- `migration` contains cross-version tests and test-only support contracts.
 - `../blend-utils` remains an optional local deployment-script reference.
 
-The submodule URL uses GitHub SSH. Do not edit the submodule, advance its pinned
-commit, replace frozen artifacts, or fetch a different historical source as an
-incidental part of v3 work. Do not modify sibling repositories as a side
-effect of work in this repository.
+The submodule URLs use GitHub SSH. Do not edit a submodule, advance a pinned
+commit, replace frozen artifacts, or fetch a different historical source as
+an incidental part of migration work. Do not modify sibling repositories as
+a side effect of work in this repository.
 
 ## Baseline architecture
 
@@ -60,8 +64,10 @@ effect of work in this repository.
 - `legacy/artifacts` is the authoritative bytecode boundary for compatibility
   tests and isolated migration deployments. A local source rebuild MUST NOT be
   silently substituted for those files.
-- New v3 code belongs in the independent `v3/` workspace. It MUST target
-  Protocol 27 with Rust 1.91.0, Soroban SDK 27.0.2, and `wasm32v1-none`.
+- New v3 code belongs in the `blend-contracts-v3/` submodule. It MUST target
+  Protocol 27 with Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
+- Migration-only tests and fixtures belong in `migration/` and MUST NOT become
+  production contract dependencies.
 - Do not add an SDK 26 compatibility lane. Migration compatibility is tested
   against the SDK-22 v2 contracts and deployed emitter behavior.
 - Keep the incumbent v2 implementation available for side-by-side migration
@@ -198,7 +204,7 @@ emissions.
 - Use `apply_patch` for authored file changes.
 - Do not commit `target/`, generated test snapshots, secrets, private keys, or
   environment files.
-- Keep both workspace lockfiles committed and keep builds reproducible from a
+- Keep every workspace lockfile committed and keep builds reproducible from a
   fresh clone with initialized submodules.
 - Preserve AGPL-3.0 notices and document the provenance of imported code and
   frozen bytecode.
@@ -209,7 +215,8 @@ emissions.
 ## Specification discipline
 
 Requirements marked `MUST` in the normative specifications listed by
-`docs/SYSTEM_SPEC.md` are acceptance criteria under its composition rules.
+`docs/SYSTEM_SPEC.md` and `blend-contracts-v3/docs/SYSTEM_SPEC.md` are
+acceptance criteria under their respective composition rules.
 Items listed under “Open decisions” are not implementation authorization.
 When an open decision blocks safe implementation, update the specification or
 ask for a decision before encoding policy.

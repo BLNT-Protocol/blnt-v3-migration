@@ -1,57 +1,74 @@
-# Blend System Specification Index
+# Blend V3 Migration System Specification
 
-This index defines how the frozen Blend v2 behavioral baseline and the
-experimental Blend v3 candidate specification compose into one normative system
-specification.
+This document defines the scope and authority of the Blend v2-to-v3 migration,
+compatibility, deployment, and evidence repository.
 
-## Specification set
+## Repository boundary
 
-1. [V2_SYSTEM_SPEC.md](V2_SYSTEM_SPEC.md) defines the inherited behavior of
-   the frozen SDK-22 Blend v2 contracts and deployed legacy emitter boundary.
-2. [V3_SYSTEM_SPEC.md](V3_SYSTEM_SPEC.md) defines only the v3 additions,
-   replacements, extensions, approved exceptions, and safety fixes.
-3. [VALUATION_ADAPTER.md](VALUATION_ADAPTER.md) is the normative component
-   specification for the immutable v3 production LP-valuation boundary.
-4. [V2_PARITY.md](V2_PARITY.md) is the concise cross-reference matrix. It does
-   not replace the normative specifications.
-5. [MIGRATION_TEST_PLAN.md](MIGRATION_TEST_PLAN.md) is the normative executable
-   acceptance matrix for the composed specification.
+This repository owns:
 
-[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) records current progress
-but is non-normative and cannot authorize a protocol change.
+- the pinned frozen v2 source and deployed-WASM compatibility fixtures;
+- the pinned `blend-contracts-v3` production-contract submodule;
+- cross-version compatibility and migration-only test contracts;
+- localnet and public-testnet migration orchestration;
+- production-oracle qualification tooling; and
+- reproducible deployment manifests and resource evidence.
 
-Declarative behavioral requirements and the terms `MUST`, `MUST NOT`,
-`SHOULD`, and `MAY` in the normative specifications are acceptance criteria.
+Contract behavior and economic policy are owned by the contract specification
+set composed by
+[`blend-contracts-v3/docs/SYSTEM_SPEC.md`](../blend-contracts-v3/docs/SYSTEM_SPEC.md).
+This repository MUST NOT redefine that behavior through a script, fixture,
+deployment default, or test expectation.
 
-## Inheritance rule
+## Migration specification set
 
-Blend v3 inherits every requirement and executable behavior in the frozen v2
-baseline unless `V3_SYSTEM_SPEC.md` explicitly classifies a requirement as:
+1. [MIGRATION_PROTOCOL_SPEC.md](MIGRATION_PROTOCOL_SPEC.md) defines the
+   normative emitter-replacement lifecycle, candidate migration accounting,
+   backfill, incumbent isolation, and recovery behavior.
+2. [BASELINE.md](BASELINE.md) defines the frozen v2 source, deployed artifacts,
+   toolchain separation, and submodule provenance.
+3. [MIGRATION_TEST_PLAN.md](MIGRATION_TEST_PLAN.md) defines the normative
+   cross-version and network acceptance matrix.
+4. [ORACLE_DEPLOYMENT.md](ORACLE_DEPLOYMENT.md) defines fail-closed production
+   SEP-40 provider qualification and deployment evidence.
 
-- **Added:** behavior with no v2 equivalent.
-- **Replaced:** v3 behavior that supersedes a named v2 rule.
-- **Extended:** a v2 rule generalized only as stated for v3.
-- **Safety fix:** an intentional, approved deviation from v2.
-- **Approved exception:** an intentional economic or administrative deviation
-  approved in the v3 specification.
+[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) records progress but is
+non-normative. Localnet and testnet documents are operational runbooks; they
+must satisfy this specification set but do not authorize protocol behavior.
 
-Omission from the v3 specification means inheritance, not unspecified behavior.
-Restating an inherited rule for context does not create a v3 difference.
+Declarative requirements and the terms `MUST`, `MUST NOT`, `SHOULD`, and `MAY`
+in the normative migration documents are acceptance criteria.
 
-## Authority and conflict resolution
+## Source and artifact authority
+
+The exact deployed v2 and legacy-emitter WASMs under `legacy/artifacts` are the
+runtime migration boundary. The pinned `legacy/blend-contracts-v2` submodule
+provides the frozen SDK-22 source and test baseline.
+
+The pinned `blend-contracts-v3` submodule is the sole production v3 contract
+source. Migration tests and runners MUST build and invoke its artifacts
+directly. They MUST NOT maintain a second production implementation or copy
+contract source into this repository.
+
+Migration-only contracts and cross-version tests live under `migration/`.
+They MAY provide deterministic or controlled fixtures, but those fixtures MUST
+be clearly identified as test-only and MUST NOT be represented as production
+dependencies.
+
+## Conflict resolution
 
 Apply the following order:
 
-1. An explicit v3 addition or override, including a component requirement
-   incorporated by `V3_SYSTEM_SPEC.md`, governs the v3 candidate.
-2. Otherwise, the frozen v2 executable behavior governs.
-3. `V2_SYSTEM_SPEC.md` documents that executable baseline.
+1. Deployed v2 and legacy-emitter bytecode governs compatibility facts.
+2. This migration specification governs emitter replacement, migration
+   accounting, backfill, recovery, orchestration, evidence, and acceptance.
+3. The contract repository's composed specification governs all other v3
+   contract behavior.
 
-If the written v2 specification conflicts with the frozen SDK-22 contracts,
-tests, or deployed legacy-emitter behavior, the executable baseline wins and
-the document MUST be corrected. A conflict MUST NOT be resolved by silently
-creating a new v3 policy.
+If a migration test conflicts with either executable boundary, correct the
+test or document a specification conflict. Do not silently change production
+contract behavior or substitute rebuilt v2 bytecode.
 
-The frozen source provenance and toolchains are recorded in
-[BASELINE.md](BASELINE.md). New economic behavior still requires a separately
-approved v3 change.
+Updating either submodule pin, a frozen artifact, a network assumption, or an
+oracle provider is an explicit reviewed change. Successful testnet execution
+is evidence, not production approval.

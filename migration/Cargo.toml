@@ -1,24 +1,20 @@
 [workspace]
 resolver = "2"
 members = [
-    "backstop",
     "compat-probe",
     "compat-tests",
-    "pool",
-    "pool-factory",
     "test-sep40-oracle",
     "test-valuation-adapter",
-    "valuation-adapter",
 ]
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.91.0"
+rust-version = "1.91.1"
 license = "AGPL-3.0"
 publish = false
 
 [workspace.dependencies.soroban-sdk]
-version = "=27.0.2"
+version = "=27.0.3"
 
 [profile.release]
 opt-level = "z"

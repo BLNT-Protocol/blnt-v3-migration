@@ -33,7 +33,7 @@ esac
 WORK_DIR="${BLEND_ORACLE_WORK_DIR:-${ROOT_DIR}/.oracle-validation/${NETWORK_MODE}}"
 CONFIG_DIR="${BLEND_ORACLE_CONFIG_DIR:-${WORK_DIR}/stellar-config}"
 STATE_FILE="${WORK_DIR}/state.json"
-ADAPTER_WASM="${ROOT_DIR}/v3/target/wasm32v1-none/optimized/blend_v3_valuation_adapter.wasm"
+ADAPTER_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/blend_v3_backstop_valuation.wasm"
 
 BLND_CLASSIC_ASSET="${BLEND_ORACLE_BLND_CLASSIC_ASSET:-${BLND_CLASSIC_ASSET_DEFAULT}}"
 USDC_CLASSIC_ASSET="${BLEND_ORACLE_USDC_CLASSIC_ASSET:-${USDC_CLASSIC_ASSET_DEFAULT}}"

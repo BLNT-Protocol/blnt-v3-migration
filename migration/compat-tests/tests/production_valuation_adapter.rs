@@ -7,13 +7,15 @@ use soroban_sdk::{
 #[allow(clippy::too_many_arguments)]
 mod adapter {
     soroban_sdk::contractimport!(
-        file = "../target/wasm32v1-none/optimized/blend_v3_valuation_adapter.wasm"
+        file = "../../blend-contracts-v3/target/wasm32v1-none/optimized/blend_v3_backstop_valuation.wasm"
     );
 }
 
 #[allow(clippy::too_many_arguments)]
 mod backstop {
-    soroban_sdk::contractimport!(file = "../target/wasm32v1-none/optimized/blend_v3_backstop.wasm");
+    soroban_sdk::contractimport!(
+        file = "../../blend-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
+    );
 }
 
 const SCALAR_7: i128 = 10_000_000;
@@ -248,11 +250,19 @@ impl MockPool {
 #[contract]
 struct MockEmitter;
 
+#[derive(Clone)]
+#[contracttype]
+struct EmitterSwap {
+    new_backstop: Address,
+    new_backstop_token: Address,
+    unlock_time: u64,
+}
+
 #[contractimpl]
 impl MockEmitter {
     pub fn __constructor(_env: Env) {}
 
-    pub fn get_queued_swap(_env: Env) -> Option<backstop::EmitterSwap> {
+    pub fn get_queued_swap(_env: Env) -> Option<EmitterSwap> {
         None
     }
 
@@ -416,12 +426,12 @@ fn optimized_candidate_values_four_quotes_with_separate_tick_headroom() {
         &candidate_id,
         backstop::WASM,
         (
-            &emitter_id,
-            &blnd,
-            &factory_id,
             &blnd_usdc,
             &blnd_xlm,
+            &emitter_id,
+            &blnd,
             &usdc,
+            &factory_id,
             &adapter_id,
         ),
     );

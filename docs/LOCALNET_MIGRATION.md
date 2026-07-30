@@ -62,17 +62,16 @@ undistributed.
 
 - Stellar CLI 27
 - Docker with a running daemon
-- Rust 1.81 and 1.91 toolchains configured by the repository
+- Rust 1.81 and 1.91.1 toolchains configured by the repository
 - `jq`, `make`, and `shasum`
 
 The runner verifies and deploys the exact mainnet emitter and incumbent v2
 WASMs recorded in `legacy/artifacts/manifest.json`. The pinned SDK-22 source
 submodule remains a separate build-and-test lane; its rebuilt bytes are not
-substituted into this migration exercise. The candidate builds through the
-independent `v3/` workspace. Candidate source documentation is
-retained for native Rust builds but omitted from the deployed contract-spec
-section to preserve Protocol-27 upload headroom. `make build-v3` rejects an
-optimized backstop above the conservative 120,000-byte deployment guard.
+substituted into this migration exercise. The candidate builds directly from
+the pinned `blend-contracts-v3/` submodule, which also owns the contract
+specifications. Its build rejects an optimized backstop above the conservative
+120,000-byte deployment guard.
 
 ## Commands
 

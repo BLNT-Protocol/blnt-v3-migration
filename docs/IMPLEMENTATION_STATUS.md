@@ -4,7 +4,9 @@ Status: Experimental candidate
 
 This document records implementation and deployment progress. It is
 non-normative and does not authorize protocol behavior. Normative
-requirements are the specification set indexed by
+contract requirements are composed by the
+[contract specification](../blend-contracts-v3/docs/SYSTEM_SPEC.md), while
+migration and deployment requirements are composed by
 [SYSTEM_SPEC.md](SYSTEM_SPEC.md).
 
 ## Initial implementation milestones

@@ -27,7 +27,9 @@ mod v2_pool_factory {
 
 #[allow(clippy::too_many_arguments)]
 mod v3_backstop {
-    soroban_sdk::contractimport!(file = "../target/wasm32v1-none/optimized/blend_v3_backstop.wasm");
+    soroban_sdk::contractimport!(
+        file = "../../blend-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
+    );
 }
 
 mod v3_test_valuation_adapter {
@@ -480,12 +482,12 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
         &candidate_id,
         v3_backstop::WASM,
         (
-            &emitter_id,
-            &blnd,
-            &v3_pool_factory_id,
             &legacy_lp,
             &next_lp,
+            &emitter_id,
+            &blnd,
             &usdc,
+            &v3_pool_factory_id,
             &valuation_adapter_id,
         ),
     );

@@ -1,9 +1,11 @@
 # V2 to V3 Migration Test Plan
 
-This plan validates the frozen
-[v2 baseline](V2_SYSTEM_SPEC.md), [v3 specification](V3_SYSTEM_SPEC.md), and
-[valuation adapter](VALUATION_ADAPTER.md) as composed by the
-[specification index](SYSTEM_SPEC.md).
+This plan validates the contract submodule's
+[v2 baseline](../blend-contracts-v3/docs/V2_SYSTEM_SPEC.md),
+[v3 specification](../blend-contracts-v3/docs/V3_SYSTEM_SPEC.md), and
+[valuation adapter](../blend-contracts-v3/docs/VALUATION_ADAPTER.md), together
+with the migration requirements in
+[MIGRATION_PROTOCOL_SPEC.md](MIGRATION_PROTOCOL_SPEC.md).
 
 The emitter migration and an individual pool's activation rule are independent
 mechanisms. Tests must keep those concepts separate.

@@ -86,7 +86,7 @@ token balances. Immediately afterward it MUST prove that:
 
 The suite MUST prove that accounted BLND:USDC is one continuous candidate
 backstop position before and after migration. The same custody and shares
-provide first-loss capital and the direct balance used by the emitter; no
+provide second-loss capital and the direct balance used by the emitter; no
 temporary migration-only shares or involuntary conversion may exist.
 
 It MUST additionally verify:

@@ -99,7 +99,7 @@ a side effect of work in this repository.
 - Assets counted as backstop capital must be available to the specified loss
   waterfall.
 - Bad-debt auctions use at most one backstop tier at a time in strict
-  BLND:USDC, BLND:XLM, then plain-USDC order. A tier is auction-eligible only
+  BLND:XLM, BLND:USDC, then plain-USDC order. A tier is auction-eligible only
   when its available capital has at least 200 USDC of verified value; equality
   qualifies and there is no exception for a smaller tier that could cover the
   current debt. A successfully valued smaller tier is skipped, but a failed or
@@ -156,7 +156,8 @@ a side effect of work in this repository.
   lifecycle. The current admin may update the v2-compatible pool parameters,
   queue or cancel reserve configuration, and set relative supply/borrow
   emission weights. The admin cannot change the three backstop tiers,
-  activation thresholds, `5:5:4` take-rate weighting, loss waterfall, migration
+  activation thresholds, `4:3:2` take-rate weighting in loss order, loss
+  waterfall, migration
   policy, 70/30 emission split, contract WASM, or any protocol-wide rule.
 - Preserve the v2-compatible reward-zone shape: at most 30 pools,
   permissionless threshold-qualified entry/removal/replacement, and no

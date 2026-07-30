@@ -113,7 +113,7 @@ avoids v2's rejection of a duplicate queued reserve after an interrupted run.
 
 The completed fixture has two SDK-22 v2 pools against the incumbent single
 BLND:USDC backstop, plus equivalent SDK-27 v3 pools against the candidate's
-BLND:USDC → BLND:XLM → USDC waterfall. Each matched v2/v3 pool receives
+BLND:XLM → BLND:USDC → USDC waterfall. Each matched v2/v3 pool receives
 22,000 BLND:USDC LP. On a fresh deployment, Fixed v3 receives one additional
 base unit to preserve the strict aggregate migration majority. Each v3 pool
 also receives 10 BLND:XLM LP and 12,500 USDC.

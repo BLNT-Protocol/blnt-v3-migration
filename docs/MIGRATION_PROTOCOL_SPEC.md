@@ -75,7 +75,7 @@ through their ordinary v2 entry points after replacement.
 
 The candidate uses the incumbent BLND:USDC Comet LP as both:
 
-- its first-loss BLND:USDC backstop tier; and
+- its second-loss BLND:USDC backstop tier; and
 - the direct-balance capital used to qualify for emitter replacement.
 
 These are one continuous accounted position, not separate temporary and
@@ -163,7 +163,7 @@ backfill nor ongoing BLND weight.
 
 ## 6. Continuous BLND:USDC migration accounting
 
-An accounted BLND:USDC deposit is ordinary first-loss tier capital from the
+An accounted BLND:USDC deposit is ordinary second-loss tier capital from the
 moment it is accepted, before or after migration.
 
 Before migration succeeds, the same shares additionally:
@@ -190,13 +190,15 @@ time basis.
 
 Migration freezes only temporary backfill weight. It MUST NOT redeem, convert,
 reissue, or change ownership of BLND:USDC tier shares. Activation value,
-first-loss capacity, take-rate eligibility, withdrawal restrictions, and
+second-loss capacity, take-rate eligibility, withdrawal restrictions, and
 underlying-BLND ongoing-emission weight continue to use the ordinary tier
 position.
 
 The pre-migration loss waterfall applies only to liabilities of candidate v3
 pools connected to this backstop. Candidate capital does not absorb incumbent
 v2 pool losses merely because it also qualifies the emitter replacement.
+The immutable BLND:XLM, BLND:USDC, then plain-USDC waterfall applies before
+and after migration; finalization does not reorder tiers or swap their assets.
 
 BLND:XLM and plain USDC MAY be deposited before migration but receive no
 migration backfill and do not enter the incumbent balance comparison.

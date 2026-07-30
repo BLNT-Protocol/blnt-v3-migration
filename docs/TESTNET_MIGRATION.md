@@ -1,8 +1,8 @@
 # Public-Testnet Migration Exercise
 
 This lane uses the deterministic valuation adapter and the ignored `.testnet/`
-state directory. The independent production-adapter lane, including native XLM
-and fresh 80:20 Comets, is documented in
+state directory. The independent production backstop-valuation lane, including
+native XLM and fresh 80:20 Comets, is documented in
 [`TESTNET_PRODUCTION_MIGRATION.md`](TESTNET_PRODUCTION_MIGRATION.md).
 
 The public-testnet runner reuses the exact migration transaction assembly used

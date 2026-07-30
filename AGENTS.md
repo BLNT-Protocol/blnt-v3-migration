@@ -28,8 +28,8 @@ Read these before changing protocol behavior:
 3. `blend-contracts-v3/docs/SYSTEM_SPEC.md`
 4. `blend-contracts-v3/docs/V2_SYSTEM_SPEC.md`
 5. `blend-contracts-v3/docs/V3_SYSTEM_SPEC.md`
-6. `blend-contracts-v3/docs/VALUATION_ADAPTER.md`
-7. `docs/MIGRATION_TEST_PLAN.md`
+6. `blend-contracts-v3/docs/BACKSTOP_VALUATION.md`
+7. `docs/MIGRATION_ACCEPTANCE.md`
 8. `docs/BASELINE.md`
 9. Existing contract tests and the implementation being changed
 
@@ -49,7 +49,8 @@ git submodule update --init --recursive
 - `blend-contracts-v3` is the sole production v3 contract source submodule.
 - `deployed-artifacts/mainnet` contains exact deployed mainnet WASM compatibility
   fixtures, verified by `make verify-deployed-artifacts`.
-- `migration` contains cross-version tests and test-only support contracts.
+- `migration-harness` contains cross-version tests and test-only support
+  contracts.
 - `../blend-utils` remains an optional local deployment-script reference.
 
 The submodule URLs use GitHub SSH. Do not edit a submodule, advance a pinned
@@ -135,15 +136,16 @@ a side effect of work in this repository.
 - Pool-status and reward-zone threshold decisions must use the same canonical
   activation valuation. Stored pool status is not an additional reward-zone
   eligibility gate.
-- Production LP value uses the immutable SEP-40 USDC-base TWAP adapter and the
-  lower of the 80%-BLND and 20%-paired-reserve implied Comet totals. Spot Comet
-  BLND composition remains canonical only for ongoing-emission weight. Do not
-  replace the production adapter with caller-supplied values or the
-  deterministic test fixture.
-- Candidate construction must match the valuation adapter's immutable BLND,
-  plain-USDC, BLND:USDC, and BLND:XLM binding exactly. Generic resource tests
-  must model independent oracle tick storage; the selected provider's exact
-  WASM and initialized layout still require predeployment simulation.
+- Production LP value uses the immutable SEP-40 USDC-base TWAP backstop
+  valuation and the lower of the 80%-BLND and 20%-paired-reserve implied Comet
+  totals. Spot Comet BLND composition remains canonical only for
+  ongoing-emission weight. Do not replace production backstop valuation with
+  caller-supplied values or the deterministic test fixture.
+- Candidate construction must match the backstop-valuation contract's
+  immutable BLND, plain-USDC, BLND:USDC, and BLND:XLM binding exactly. Generic
+  resource tests must model independent oracle tick storage; the selected
+  provider's exact WASM and initialized layout still require predeployment
+  simulation.
 - Pool status preserves v2 codes and hard Q4W thresholds: normal On-Ice at
   30%, Admin Active On-Ice at 50%, normal Frozen at 60%, and Admin On-Ice
   Frozen at 75%. The transferable pool admin may select statuses 0, 2, and 4

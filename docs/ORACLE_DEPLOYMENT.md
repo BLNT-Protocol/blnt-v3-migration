@@ -1,8 +1,10 @@
 # Production Oracle Qualification
 
-The production valuation adapter cannot be deployed safely until one concrete
-SEP-40 feed passes every immutable constructor and runtime assumption. The
-isolated qualification runner makes that decision reproducible:
+The production
+[backstop-valuation contract](../blend-contracts-v3/docs/BACKSTOP_VALUATION.md)
+cannot be deployed safely until one concrete SEP-40 feed passes every
+immutable constructor and runtime assumption. The isolated qualification
+runner makes that decision reproducible:
 
 ```bash
 make oracle-plan
@@ -38,52 +40,38 @@ footprint, minimum resource fee, ledger, and result beside the decoded output.
 Stellar RPC currently reports zero for the optional diagnostic CPU and memory
 fields on these read-only simulations; the encoded transaction footprint and
 fee are still retained. These provider reads do not replace the required
-post-deployment four-quote adapter simulation.
+post-deployment four-quote valuation simulation.
 
 An incompatible check exits nonzero. `make oracle-deploy` reruns the same gates
 and refuses to submit a deployment transaction if any gate fails.
 
-## Reflector assessment on 2026-07-27
+## Deployment review
 
-The defaults below are the Reflector addresses published by
-[Stellar's oracle-provider documentation](https://developers.stellar.org/docs/data/oracles/oracle-providers).
-This assessment is a point-in-time compatibility check, not an audit or an
-endorsement.
+Before a public deployment:
 
-| Property | Testnet mainnet-DEX mirror | Mainnet Stellar-DEX feed |
-| --- | --- | --- |
-| Contract | `CAVLP5DH2GJPZMVO7IJY4CVOD5MWEFTJFVPD2YY2FQXOQHRGHK4D6HLP` | `CALI2BYU2JE6WVRUFYTS6MSBNEHGJ35P4AVCZYF3B6QOE3QKOB2PLE6M` |
-| Version | 6 | 6 |
-| Decimals | 14 | 14 |
-| Resolution | 300 seconds | 300 seconds |
-| Base | projected USDC SAC | mainnet USDC SAC |
-| Advertised assets | 9 | 49 |
-| Exact BLND | missing | missing |
-| Exact native XLM | missing | present |
-| BLND history | unavailable | unavailable |
-| `prices(XLM, 7)` | unavailable | returned 8 observations |
-| WASM SHA-256 | `8ecd1857496df2c15aaab4d18d2d7689542a62814245e9b2c613c609b86bd11c` | `7944a96d512f6e51532687811cc0c932505b0c051be9d351f5332739d70f753c` |
-| Admin | `GCLA2E3LQDPAPJLHYDMB5R65ASGLNXWGJCX4TX7XA75C7VTJ7Y2OTZXA` | `GC2M2UTZ57GSENZBTPMLPB6QSAL2USIPHMXSUCT2I3V24GYWF3EI6RFA` |
-| Candidate verdict | incompatible | incompatible |
+1. Independently review the concrete SEP-40 contract, publisher trust model,
+   upgrade controls, outage behavior, USDC base, assets, precision, and
+   resolution.
+2. Select and disclose a record count and maximum age satisfying the on-chain
+   bounds.
+3. Verify the exact classic-asset contracts and both production Comets against
+   independent sources.
+4. Reproduce the generic optimized-WASM resource test and then repeat the
+   maximum-record, four-quote measurement against the selected oracle's exact
+   WASM and initialized storage. Record contract digests, constructor
+   arguments, and measurements.
+5. Exercise fresh, stale, unavailable, malformed, and imbalanced-market cases
+   on the target network.
 
-The production adapter intentionally requires an exact history length. The
-observed eight-element response to `prices(XLM, 7)` therefore fails even
-though its timestamps are otherwise uniform and fresh. This behavior must be
-resolved with the selected provider; the adapter must not silently discard an
-extra observation because that would make the configured averaging window
-ambiguous.
+Reviewing the backstop-valuation contract cannot make an untrusted or
+compromised feed trustworthy. Feed selection remains a deployment security
+decision and must be disclosed to depositors.
 
-Reflector documents a distributed publisher network and regular five-minute
-updates, but both checked contracts also expose an administrator. Selecting
-one therefore trusts the provider's publisher consensus, administrator and
-upgrade process, availability, and market methodology. The adapter rechecks
-base, decimals, and resolution on every quote, but it cannot prove that an
-external contract at the same address retained the previously reviewed WASM.
+## Recorded assessments
 
-No production provider has been approved and no production adapter was
-deployed by this assessment. A custom Reflector feed or another independently
-reviewed SEP-40 deployment must first provide the exact USDC base, BLND and
-native-XLM membership, and the configured history semantics.
+The dated
+[Reflector assessment from 2026-07-27](evidence/REFLECTOR_ASSESSMENT_2026-07-27.md)
+is historical evidence, not a current provider endorsement or approval.
 
 ## Deployment after a provider qualifies
 
@@ -103,9 +91,10 @@ An identity alias must exist in the isolated Stellar CLI configuration under
 secret may be supplied directly, but doing so can expose it through shell
 history and is not recommended.
 
-The deploy command qualifies the provider, builds the optimized adapter, and
-then repeats qualification immediately before submission. A changed provider
-WASM or any second-check failure prevents submission.
+The deploy command qualifies the provider, builds the optimized
+backstop-valuation contract, and then repeats qualification immediately before
+submission. A changed provider WASM or any second-check failure prevents
+submission.
 
 The default policy requests seven observations from a five-minute feed, a
 30-minute first-to-last span, and a 600-second maximum age. Override it only
@@ -128,9 +117,10 @@ make oracle-verify
 ```
 
 Verification reloads the saved asset and TWAP policy, rechecks the provider,
-asserts the deployed adapter's complete immutable binding and version, rejects
-a provider- or adapter-WASM digest change, and simulates the active and queued
-quote shape for each Comet. The four quote calls are recorded separately so
-failures are attributable. Before a production candidate is accepted, also
-simulate the candidate's single atomic canonical-valuation call against the
-exact deployed adapter, Comets, feed WASM, and initialized provider storage.
+asserts the deployed valuation contract's complete immutable binding and
+version, rejects a provider- or valuation-WASM digest change, and simulates the
+active and queued quote shape for each Comet. The four quote calls are recorded
+separately so failures are attributable. Before a production candidate is
+accepted, also simulate its single atomic canonical-valuation call against the
+exact deployed valuation contract, Comets, feed WASM, and initialized provider
+storage.

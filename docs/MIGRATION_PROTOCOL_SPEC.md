@@ -336,4 +336,4 @@ A migration-ready candidate MUST:
 6. conserve candidate tier capital, backfill, and ongoing BLND through every
    lifecycle transition; and
 7. pass the cross-version and network matrix in
-   [MIGRATION_TEST_PLAN.md](MIGRATION_TEST_PLAN.md).
+   [MIGRATION_ACCEPTANCE.md](MIGRATION_ACCEPTANCE.md).

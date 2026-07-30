@@ -42,18 +42,16 @@ See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the migration repository
 boundary and [docs/MIGRATION_PROTOCOL_SPEC.md](docs/MIGRATION_PROTOCOL_SPEC.md)
 for the migration protocol. Contract behavior is composed by
 [blend-contracts-v3/docs/SYSTEM_SPEC.md](blend-contracts-v3/docs/SYSTEM_SPEC.md).
-[docs/MIGRATION_STATUS.md](docs/MIGRATION_STATUS.md) records
-non-normative candidate progress. See
-[docs/BASELINE.md](docs/BASELINE.md) for source and artifact policy, and
-[docs/MIGRATION_TEST_PLAN.md](docs/MIGRATION_TEST_PLAN.md) for the migration
-test requirements. The contract submodule owns the normative production
-LP-pricing specification, while the fail-closed provider qualification and
-deployment process remains in
+[docs/BASELINE.md](docs/BASELINE.md) defines source and artifact policy, and
+[docs/MIGRATION_ACCEPTANCE.md](docs/MIGRATION_ACCEPTANCE.md) defines
+cross-version migration acceptance. The contract submodule owns the normative
+[backstop-valuation specification](blend-contracts-v3/docs/BACKSTOP_VALUATION.md),
+while the fail-closed provider qualification and deployment process remains in
 [docs/ORACLE_DEPLOYMENT.md](docs/ORACLE_DEPLOYMENT.md). Operational instructions
 live in
 [docs/LOCALNET_MIGRATION.md](docs/LOCALNET_MIGRATION.md) and
-[docs/TESTNET_MIGRATION.md](docs/TESTNET_MIGRATION.md). The isolated
-production-adapter testnet lane is documented in
+[docs/TESTNET_MIGRATION.md](docs/TESTNET_MIGRATION.md). The isolated production
+backstop-valuation testnet lane is documented in
 [docs/TESTNET_PRODUCTION_MIGRATION.md](docs/TESTNET_PRODUCTION_MIGRATION.md).
 
 ## Toolchain lanes
@@ -105,69 +103,11 @@ make check-v3
 ```
 
 This verifies the exact deployed fixtures and builds the SDK-27
-compatibility probe, candidate contracts, production valuation adapter, and
-deterministic test adapter. The compatibility
-harness verifies both a cross-contract call into the SDK-22 backstop and a
-complete deployed-emitter migration into the v3 candidate on a Protocol-27
-host. The production adapter uses immutable SEP-40 BLND/USDC and XLM/USDC
-TWAPs plus conservative 80:20 Comet reserve valuation. The deterministic
-adapter remains a fixture only. The candidate pool persists v2-compatible
-status transitions using that canonical boundary and a transferable v2-style
-pool admin. Its SDK-27 lending core executes the six non-auction v2 request
-types with v2-compatible mutable pool parameters and timelocked reserve
-configuration, checked interest, share, health, authorization, and
-token-transfer accounting. The pool also supports
-permissionless v2-compatible user-liquidation auctions. Completion of an
-auction that exhausts the liquidatee's collateral atomically transfers all
-residual dToken liabilities to the configured backstop and its canonical loss
-records, without changing reserve dToken supply. It can
-prepare and atomically fill one pool-authorized, single-tier, 120%-of-debt
-backstop auction by selecting the first tier with at least $200 of verified
-value in strict BLND:USDC LP, BLND:XLM LP, then plain-USDC order. An
-authenticated healthy filler assumes the time-scaled dToken bid and receives
-the time-scaled tier token directly. The three-tier backstop impairs its
-pool-local asset/share exchange rate only by the amount actually transferred,
-so active and queued shares absorb the loss proportionally. After an auction
-ends, any caller can continue the waterfall in a separate bounded transaction.
-The pool prepares the next strict-priority tier auction while one qualifies;
-only a verified no-eligible-tier quote defaults all residual backstop
-liabilities to suppliers using Blend v2's bToken exchange-rate reduction.
-An existing bad-debt auction remains unchanged when a later user liquidation
-adds liabilities; permissionless continuation handles those residual
-liabilities after the auction clears.
-
-The candidate also fixes ongoing BLND at the inherited 70% backstop-depositor
-and 30% pool supply/borrow split, with deterministic top-level carry. Its
-emission quote boundary derives underlying BLND directly from the current
-BLND reserve and total supply of the BLND:USDC and BLND:XLM Comet contracts.
-That same-invocation composition is an intentional spot policy and therefore
-accepts reserve-ratio manipulation risk at a checkpoint. Permissionless,
-maximum-30 reward-zone membership, threshold entry/removal, and spot-BLND
-replacement are implemented. USDC alone can activate a pool, but reward-zone
-entry requires positive eligible underlying BLND; a zero-BLND member can be
-removed without a checkpoint so it cannot block distribution. After migration,
-the permissionless distributor verifies the configured BLND token through
-either exact-delta backfill funding or an exact delta around the first positive
-ongoing emitter call. The latter keeps ongoing distribution available when a
-direct-transfer-only migration has zero eligible backfill weight. The
-distributor then reconciles the candidate's actual unaccounted BLND balance,
-excludes the segregated backfill reserve, allocates both tranches across the
-bounded reward zone by current eligible underlying BLND, carries each floor
-remainder at its own scope, and writes the production distribution checkpoint
-only after the complete allocation succeeds. Active BLND-tier deposits, Q4W
-changes, withdrawals, losses, and gains require that completed checkpoint to be
-no more than five seconds old before changing pool weight, bounding the
-unresolved allocation window to one ledger. The 70% pool allocation is frozen
-into scaled BLND:USDC and BLND:XLM per-share indexes in that same distribution;
-user checkpoints exclude late deposits and queued shares, preserve scoped
-rounding carry, and support owner-authorized BLND claims to a selected
-recipient. For the 30% tranche, the pool admin configures v2-compatible
-supply/debt-token weights. A pool-authorized once-daily gulp reserves the
-allocation without moving BLND out of candidate custody, then seven-day
-reserve-token streams checkpoint every balance mutation and carry integer dust
-at pool, reserve, and user scope. Owner-authorized claims over selected
-reserve-token identifiers are paid directly by the candidate to the chosen
-recipient.
+compatibility probe, candidate contracts, production backstop-valuation
+contract, and deterministic test fixture. It then runs the contract suites and
+the deployed-WASM cross-version migration harness. Exact behavioral
+requirements remain in the contract and migration specifications rather than
+being restated here.
 
 Run both lanes:
 

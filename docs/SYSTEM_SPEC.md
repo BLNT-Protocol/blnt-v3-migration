@@ -27,14 +27,13 @@ deployment default, or test expectation.
    backfill, incumbent isolation, and recovery behavior.
 2. [BASELINE.md](BASELINE.md) defines the frozen v2 source, deployed artifacts,
    toolchain separation, and submodule provenance.
-3. [MIGRATION_TEST_PLAN.md](MIGRATION_TEST_PLAN.md) defines the normative
-   cross-version and network acceptance matrix.
+3. [MIGRATION_ACCEPTANCE.md](MIGRATION_ACCEPTANCE.md) defines the normative
+   cross-version and network acceptance criteria.
 4. [ORACLE_DEPLOYMENT.md](ORACLE_DEPLOYMENT.md) defines fail-closed production
    SEP-40 provider qualification and deployment evidence.
 
-[MIGRATION_STATUS.md](MIGRATION_STATUS.md) records progress but is
-non-normative. Localnet and testnet documents are operational runbooks; they
-must satisfy this specification set but do not authorize protocol behavior.
+Localnet and testnet documents are operational runbooks; they must satisfy
+this specification set but do not authorize protocol behavior.
 
 Declarative requirements and the terms `MUST`, `MUST NOT`, `SHOULD`, and `MAY`
 in the normative migration documents are acceptance criteria.
@@ -72,3 +71,14 @@ contract behavior or substitute rebuilt v2 bytecode.
 Updating either submodule pin, a frozen artifact, a network assumption, or an
 oracle provider is an explicit reviewed change. Successful testnet execution
 is evidence, not production approval.
+
+## Open deployment decisions
+
+The following production-readiness decisions do not authorize contract or
+economic-policy changes:
+
+- Select and qualify a concrete SEP-40 provider, then complete the exact-WASM
+  and initialized-storage resource simulation required by
+  [ORACLE_DEPLOYMENT.md](ORACLE_DEPLOYMENT.md).
+- Define the production lending-reserve admission policy for issuer controls,
+  clawback, deauthorization, rebasing, and other nonstandard token behavior.

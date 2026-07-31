@@ -4,8 +4,6 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error, Address, Env,
 };
 
-const ADAPTER_VERSION: u32 = 1;
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct AssetValuation {
@@ -73,10 +71,6 @@ impl TestValuationAdapter {
         env.storage().instance().set(&DataKey::Usdc, &usdc);
         env.storage().instance().set(&DataKey::BlndUsdc, &blnd_usdc);
         env.storage().instance().set(&DataKey::BlndXlm, &blnd_xlm);
-    }
-
-    pub fn version(_env: Env) -> u32 {
-        ADAPTER_VERSION
     }
 
     pub fn binding(env: Env) -> AdapterBinding {

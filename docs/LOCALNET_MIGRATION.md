@@ -15,7 +15,7 @@ The runner uses independently issued local assets and real Comet contracts:
 - `BLND`
 - A BLND:USDC Comet LP, representing the incumbent designated token
 - A BLND:XLM Comet LP, representing the candidate's next designated token and
-  second backstop tier
+  first-loss backstop tier
 - `USDC`, representing the plain-USDC third backstop tier
 - `XLM`, representing the isolated pair asset for the next Comet LP
 
@@ -27,24 +27,22 @@ not represent production market pricing or liquidity.
 The runner also deploys a test-only valuation adapter with immutable asset
 bindings. It values each configured LP token one-for-one in both USDC and
 underlying BLND so the canonical valuation call path can be exercised
-deterministically, and exposes the same one-USDC fixture price through the
-lending-oracle interface. Its mutable fixture setters require authorization
-from the isolated runner operator bound at construction. This fixture is not a
-production oracle and MUST NOT be used as a production pricing source.
+deterministically. Separate authenticated SEP-40 fixtures provide the modeled
+pools' deterministic reserve prices. None of these fixtures is a production
+pricing source.
 
-The migration runner deploys matched Fixed-pool models against the incumbent
-and candidate, each with `XLM`, `USDC`, and `EURC` reserves. The candidate pool
-receives enough plain USDC to cross the $12,500 activation threshold, retains
-positive BLND:USDC weight, moves to Admin Active, enters the reward zone, and
-routes its pool emission tranche to EURC borrowing. The incumbent Fixed pool
-holds the comparison-side BLND:USDC backstop balance used by the emitter's
-migration qualification.
+The migration runner deploys matched Fixed and YieldBlox models against the
+incumbent and candidate before opening the emitter queue. Both v3 pools receive
+all three backstop tiers, cross the activation threshold, enter the reward
+zone, and retain positive BLND:USDC and BLND:XLM emission weight. Fixed v3
+routes its pool tranche to EURC borrowing, while YieldBlox v3 routes it to USDC
+supply. Both incumbent pools receive BLND:USDC backstop capital and enter the
+v2 reward zone.
 
 The classic-asset issuer/operator and candidate depositor use separate local
-identities. The runner creates the depositor's `BLND`, `USDC`, `XLM`, and
-`EURC` trustlines explicitly, initializes both Comet pools, and mints the
-BLND:USDC LP positions before funding the two backstops and candidate lending
-positions.
+identities. The runner creates the required modeled-asset trustlines,
+initializes both Comet pools, and mints the LP positions before funding the two
+backstops and lending positions.
 
 The local operator pays for deployment and migration transactions but receives
 no continuing protocol authority. The exercise uses only the deployed emitter's
@@ -108,16 +106,15 @@ daily execution is recommended:
 make localnet-keepalive
 ```
 
-This explicitly extends the deployed emitter instance, incumbent distribution
-checkpoint, valuation-adapter instance, both Comets, and all three configured
-classic-asset contract instances for ten local days. It also refreshes the queued swap, candidate,
-factory registration, pool, depositor position, and relevant token balances
-through their supported access paths. Before reporting success, it verifies
-the saved queue target, next designated token, unlock time, and the candidate's
-strict balance majority. It does not alter queue timestamps, balances, shares,
-pool status, distribution timestamps, or migration eligibility. Each
-keepalive result and resource-cost report is retained in the run evidence
-directory.
+This explicitly extends the deployed emitter, incumbent distribution
+checkpoint, valuation adapter, both Comets, all four modeled pools and their
+lending oracles, configured assets, backstop positions, and relevant token
+balances. It also refreshes each lending-oracle history. Before reporting
+success, it verifies the saved queue target, next designated token, unlock
+time, and the candidate's strict balance majority. It does not alter queue
+timestamps, balances, shares, pool status, distribution timestamps, or
+migration eligibility. Each keepalive result and resource-cost report is
+retained in the run evidence directory.
 
 If the Mac sleeps, the container may remain running while Stellar Core stops
 closing ledgers and the RPC reports stale health. Recover that process and
@@ -169,10 +166,11 @@ emission path:
 make localnet-emissions
 ```
 
-That command waits for a positive emitter interval, invokes the candidate's
+That command waits for positive emitter intervals, invokes the candidate's
 permissionless distribution, verifies positive 70% and 30% allocations,
-claims the backstop-depositor tranche, and gulps the pool tranche into its
-seven-day reserve-token stream. After the reported expiration:
+compounds both pools' BLND:USDC and BLND:XLM backstop accruals into their
+originating tiers, and gulps the two pool tranches into their seven-day
+reserve-token streams. After the reported expiration:
 
 ```bash
 make localnet-claim-emissions

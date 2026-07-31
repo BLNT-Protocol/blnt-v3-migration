@@ -45,10 +45,8 @@ for the migration protocol. Contract behavior is composed by
 [docs/BASELINE.md](docs/BASELINE.md) defines source and artifact policy, and
 [docs/MIGRATION_ACCEPTANCE.md](docs/MIGRATION_ACCEPTANCE.md) defines
 cross-version migration acceptance. The contract submodule owns the normative
-[backstop-valuation specification](blend-contracts-v3/docs/BACKSTOP_VALUATION.md),
-while the fail-closed provider qualification and deployment process remains in
-[docs/ORACLE_DEPLOYMENT.md](docs/ORACLE_DEPLOYMENT.md). Operational instructions
-live in
+[backstop-valuation specification](blend-contracts-v3/docs/BACKSTOP_VALUATION.md).
+Operational instructions live in
 [docs/LOCALNET_MIGRATION.md](docs/LOCALNET_MIGRATION.md) and
 [docs/TESTNET_MIGRATION.md](docs/TESTNET_MIGRATION.md). The isolated production
 backstop-valuation testnet lane is documented in
@@ -103,7 +101,7 @@ make check-v3
 ```
 
 This verifies the exact deployed fixtures and builds the SDK-27
-compatibility probe, candidate contracts, production backstop-valuation
+compatibility probe, candidate contracts, Comet-derived backstop-valuation
 contract, and deterministic test fixture. It then runs the contract suites and
 the deployed-WASM cross-version migration harness. Exact behavioral
 requirements remain in the contract and migration specifications rather than

@@ -134,7 +134,10 @@ invocation exactly once. A failed balance, timestamp, or binding check MUST
 roll back the emitter call and candidate checkpoint atomically.
 
 Ongoing contract allocation is governed and tested by the v3 contract
-specification.
+specification. Optimized-WASM acceptance MUST exercise separate BLND:USDC and
+BLND:XLM backstop claims, verify exact BLND consumption and LP receipt, and
+confirm that each result increases the same user's active shares only in its
+originating pool tier.
 
 ## Execution matrix
 
@@ -145,7 +148,7 @@ specification.
 | Protocol-27 compatibility harness | Exact deployed SDK-22 v2 and emitter WASM interacting with optimized v3 WASM |
 | Local Quickstart | Unshortened production queue, resumability, TTL keepalive, transaction costs, and final invariants |
 | Public testnet | Production-style transaction assembly and wall-clock queue operation using isolated test assets |
-| Production backstop-valuation testnet lane | Real 80:20 Comets and optimized backstop valuation against an explicitly non-production SEP-40 fixture |
+| Production backstop-valuation testnet lane | Real 80:20 Comets and optimized oracle-free backstop valuation from current Comet reserves |
 
 The compatibility harness MUST invoke at least one deployed v2 backstop entry
 point through the Protocol-27 host and complete the deployed-emitter swap into
@@ -160,6 +163,8 @@ TTL policy without shortening production constants.
 Localnet and public-testnet runners MUST:
 
 - use the production migration constants;
+- deploy and prefund matched Fixed and YieldBlox v2/v3 pools before opening
+  the emitter queue;
 - verify source commits and every deployed artifact digest;
 - use independently issued test assets instead of depending on official test
   BLND or USDC supply;
@@ -175,11 +180,10 @@ timestamps, renew every required instance and ledger entry before expiry, and
 record success only after validating the live queue and strict candidate
 balance majority.
 
-The production backstop-valuation testnet lane MAY use an authenticated
-mutable SEP-40 fixture for deterministic histories, but it MUST label that feed
-non-production and MUST NOT count the exercise as provider qualification.
-Fixture administrators must be immutable, isolated runner identities, and
-verification must check those bindings.
+Modeled lending pools MAY use authenticated mutable SEP-40 fixtures for
+deterministic reserve prices, but those feeds MUST be labeled non-production.
+The backstop-valuation contract MUST remain independent of them and bind only
+the configured assets and Comets.
 
 Modeled v2 reserve setup MUST resume safely across the separate
 `queue_set_reserve` and `set_reserve` transactions rather than submitting a

@@ -1,7 +1,5 @@
 use soroban_sdk::{
-    contract, contractimpl, contracttype,
-    testutils::{Address as _, Ledger},
-    vec, Address, Env, Vec,
+    contract, contractimpl, contracttype, testutils::Address as _, vec, Address, Env, Vec,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -21,82 +19,6 @@ mod backstop {
 const SCALAR_7: i128 = 10_000_000;
 const BLND_WEIGHT: i128 = 8_000_000;
 const PAIR_WEIGHT: i128 = 2_000_000;
-
-#[derive(Clone)]
-#[contracttype]
-enum OracleKey {
-    Assets,
-    Base,
-    Decimals,
-    Price(Address, u32),
-    Resolution,
-}
-
-#[contract]
-struct MockOracle;
-
-#[contractimpl]
-impl MockOracle {
-    pub fn __constructor(
-        env: Env,
-        base: adapter::OracleAsset,
-        assets: Vec<adapter::OracleAsset>,
-        resolution: u32,
-    ) {
-        env.storage().instance().set(&OracleKey::Base, &base);
-        env.storage().instance().set(&OracleKey::Assets, &assets);
-        env.storage().instance().set(&OracleKey::Decimals, &7_u32);
-        env.storage()
-            .instance()
-            .set(&OracleKey::Resolution, &resolution);
-    }
-
-    pub fn base(env: Env) -> adapter::OracleAsset {
-        env.storage().instance().get(&OracleKey::Base).unwrap()
-    }
-
-    pub fn assets(env: Env) -> Vec<adapter::OracleAsset> {
-        env.storage().instance().get(&OracleKey::Assets).unwrap()
-    }
-
-    pub fn decimals(env: Env) -> u32 {
-        env.storage().instance().get(&OracleKey::Decimals).unwrap()
-    }
-
-    pub fn resolution(env: Env) -> u32 {
-        env.storage()
-            .instance()
-            .get(&OracleKey::Resolution)
-            .unwrap()
-    }
-
-    pub fn prices(
-        env: Env,
-        asset: adapter::OracleAsset,
-        records: u32,
-    ) -> Option<Vec<adapter::PriceData>> {
-        let adapter::OracleAsset::Stellar(address) = asset else {
-            panic!("unsupported asset")
-        };
-        let mut prices = Vec::new(&env);
-        for index in 0..records {
-            let price = env
-                .storage()
-                .persistent()
-                .get(&OracleKey::Price(address.clone(), index))?;
-            prices.push_back(price);
-        }
-        Some(prices)
-    }
-
-    pub fn set_prices(env: Env, asset: Address, prices: Vec<adapter::PriceData>) {
-        for (index, price) in prices.iter().enumerate() {
-            env.storage()
-                .persistent()
-                .set(&OracleKey::Price(asset.clone(), index as u32), &price);
-        }
-    }
-}
 
 #[derive(Clone)]
 #[contracttype]
@@ -276,21 +198,9 @@ fn register_token(env: &Env) -> Address {
         .address()
 }
 
-fn prices(env: &Env, value: i128) -> Vec<adapter::PriceData> {
-    let mut result = Vec::new(env);
-    for index in 0_u64..25 {
-        result.push_back(adapter::PriceData {
-            price: value,
-            timestamp: index * 150,
-        });
-    }
-    result
-}
-
 #[test]
-fn optimized_production_adapter_quotes_separate_tick_history_with_mainnet_headroom() {
+fn optimized_production_adapter_quotes_comet_reserves_with_mainnet_headroom() {
     let env = Env::default();
-    env.ledger().set_timestamp(3_600);
     let blnd = register_token(&env);
     let usdc = register_token(&env);
     let xlm = register_token(&env);
@@ -314,28 +224,7 @@ fn optimized_production_adapter_quotes_separate_tick_history_with_mainnet_headro
             &(200 * SCALAR_7),
         ),
     );
-    let base = adapter::OracleAsset::Stellar(usdc.clone());
-    let oracle = env.register(
-        MockOracle,
-        (
-            &base,
-            &vec![
-                &env,
-                adapter::OracleAsset::Stellar(blnd.clone()),
-                adapter::OracleAsset::Stellar(xlm.clone()),
-            ],
-            &150_u32,
-        ),
-    );
-    let oracle_client = MockOracleClient::new(&env, &oracle);
-    oracle_client.set_prices(&blnd, &prices(&env, 500_000));
-    oracle_client.set_prices(&xlm, &prices(&env, 1_000_000));
-    let adapter_id = env.register(
-        adapter::WASM,
-        (
-            &oracle, &base, &blnd, &usdc, &xlm, &blnd_usdc, &blnd_xlm, &25_u32, &600_u64,
-        ),
-    );
+    let adapter_id = env.register(adapter::WASM, (&blnd, &usdc, &xlm, &blnd_usdc, &blnd_xlm));
     let client = adapter::Client::new(&env, &adapter_id);
 
     env.cost_estimate().budget().reset_unlimited();
@@ -344,7 +233,7 @@ fn optimized_production_adapter_quotes_separate_tick_history_with_mainnet_headro
         adapter::AssetValuation {
             underlying_blnd: 160 * SCALAR_7,
             usdc_value: 10 * SCALAR_7,
-            valid_until: 4_200,
+            valid_until: u64::MAX,
         }
     );
     assert_eq!(
@@ -352,7 +241,7 @@ fn optimized_production_adapter_quotes_separate_tick_history_with_mainnet_headro
         adapter::AssetValuation {
             underlying_blnd: 160 * SCALAR_7,
             usdc_value: 10 * SCALAR_7,
-            valid_until: 4_200,
+            valid_until: u64::MAX,
         }
     );
     let resources = env.cost_estimate().resources();
@@ -369,10 +258,9 @@ fn optimized_production_adapter_quotes_separate_tick_history_with_mainnet_headro
 }
 
 #[test]
-fn optimized_candidate_values_four_quotes_with_separate_tick_headroom() {
+fn optimized_candidate_values_four_comet_quotes_with_mainnet_headroom() {
     let env = Env::default();
     env.mock_all_auths();
-    env.ledger().set_timestamp(3_600);
     let blnd = register_token(&env);
     let usdc = register_token(&env);
     let xlm = register_token(&env);
@@ -396,28 +284,7 @@ fn optimized_candidate_values_four_quotes_with_separate_tick_headroom() {
             &(200 * SCALAR_7),
         ),
     );
-    let base = adapter::OracleAsset::Stellar(usdc.clone());
-    let oracle = env.register(
-        MockOracle,
-        (
-            &base,
-            &vec![
-                &env,
-                adapter::OracleAsset::Stellar(blnd.clone()),
-                adapter::OracleAsset::Stellar(xlm.clone()),
-            ],
-            &150_u32,
-        ),
-    );
-    let oracle_client = MockOracleClient::new(&env, &oracle);
-    oracle_client.set_prices(&blnd, &prices(&env, 500_000));
-    oracle_client.set_prices(&xlm, &prices(&env, 1_000_000));
-    let adapter_id = env.register(
-        adapter::WASM,
-        (
-            &oracle, &base, &blnd, &usdc, &xlm, &blnd_usdc, &blnd_xlm, &25_u32, &600_u64,
-        ),
-    );
+    let adapter_id = env.register(adapter::WASM, (&blnd, &usdc, &xlm, &blnd_usdc, &blnd_xlm));
 
     let candidate_id = Address::generate(&env);
     let factory_id = env.register(MockPoolFactory, (&candidate_id,));
@@ -486,7 +353,7 @@ fn optimized_candidate_values_four_quotes_with_separate_tick_headroom() {
                 blnd_xlm: 5 * SCALAR_7,
                 usdc: 0,
             },
-            valid_until: 4_200,
+            valid_until: u64::MAX,
         }
     );
     let resources = env.cost_estimate().resources();

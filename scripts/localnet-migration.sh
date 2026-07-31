@@ -55,10 +55,13 @@ QUICKSTART_CONTAINER_NAME="stellar-${CONTAINER_NAME}"
 
 SCALAR_7=10000000
 MODELED_BACKSTOP_LP_BALANCE=$((22000 * SCALAR_7))
-# Every fresh lane uses the modeled Fixed pools. One extra candidate base unit
-# preserves the deployed emitter's strict BLND:USDC majority requirement.
+# Every fresh lane uses the modeled Fixed and YieldBlox pools. The Fixed v3
+# position carries one extra base unit so the candidate retains the deployed
+# emitter's strict aggregate BLND:USDC majority requirement.
 INCUMBENT_BALANCE="${MODELED_BACKSTOP_LP_BALANCE}"
 CANDIDATE_BALANCE=$((INCUMBENT_BALANCE + 1))
+AGGREGATE_INCUMBENT_BALANCE=$((2 * MODELED_BACKSTOP_LP_BALANCE))
+AGGREGATE_CANDIDATE_BALANCE=$((AGGREGATE_INCUMBENT_BALANCE + 1))
 ACTIVATION_USDC_BALANCE=$((12500 * SCALAR_7))
 POOL_SUPPLY_BALANCE=$((1000 * SCALAR_7))
 BLND_USDC_LP_JOIN_AMOUNT=$((100 * SCALAR_7))
@@ -68,12 +71,8 @@ COMET_INITIAL_XLM=$((100 * SCALAR_7))
 DEPOSITOR_BLND_MINT=$((15000 * SCALAR_7))
 DEPOSITOR_USDC_MINT=$((ACTIVATION_USDC_BALANCE + POOL_SUPPLY_BALANCE + 500 * SCALAR_7))
 DEPOSITOR_XLM_MINT=$((COMET_INITIAL_PAIR_TOKEN))
-FIXTURE_BLND_PRICE=10000000000000
-FIXTURE_XLM_PRICE=25000000000000
-FIXTURE_ORACLE_DECIMALS=14
 FIXTURE_ORACLE_RESOLUTION=300
 FIXTURE_ORACLE_RECORDS=7
-FIXTURE_MAX_PRICE_AGE=3600
 PREPARATION_WINDOW_SECONDS=$((7 * 24 * 60 * 60))
 EMISSION_START_DELAY_SECONDS=5
 MULTI_POOL_EMISSION_DELAY_SECONDS=10
@@ -126,10 +125,9 @@ Commands:
   status    Query balances, queue state, candidate state, and the next time gate.
   keepalive Refresh the migration's bounded persistent and instance TTLs.
   refresh-oracle
-            Refresh the isolated production-fixture oracle observations.
+            Refresh every modeled lending-pool oracle.
   deploy-modeled-pools
-            Deploy active Fixed-v2 and YieldBlox-v2 models in both versions,
-            preserve the candidate majority, and start incumbent emissions.
+            Resume or reverify the mandatory Fixed and YieldBlox pool setup.
   verify-modeled-pools
             Verify modeled pool configs, registration, status, and backstops.
   recover   Restart stalled local Stellar Core without replacing state.
@@ -664,38 +662,7 @@ fixture_price_series() {
         ]'
 }
 
-refresh_fixture_oracle() {
-    local label_prefix="$1" oracle_id="$2" blnd_id="$3" xlm_id="$4"
-    local blnd_prices xlm_prices
-
-    [[ "${VALUATION_MODE}" == "production-fixture" ]] ||
-        die "oracle refresh is only available in production-fixture valuation mode"
-    blnd_prices="$(fixture_price_series "${FIXTURE_BLND_PRICE}")"
-    xlm_prices="$(fixture_price_series "${FIXTURE_XLM_PRICE}")"
-    invoke_transaction "${label_prefix}-blnd" "${oracle_id}" set_prices \
-        --asset "{\"Stellar\":\"${blnd_id}\"}" \
-        --prices "${blnd_prices}" >/dev/null
-    invoke_transaction "${label_prefix}-xlm" "${oracle_id}" set_prices \
-        --asset "{\"Stellar\":\"${xlm_id}\"}" \
-        --prices "${xlm_prices}" >/dev/null
-}
-
-refresh_fixture_oracle_from_state() {
-    local label_prefix="$1" oracle_id blnd_id xlm_id
-
-    [[ "${VALUATION_MODE}" == "production-fixture" ]] || return 0
-    oracle_id="$(state_value test_sep40_oracle)"
-    blnd_id="$(state_value blnd_token)"
-    xlm_id="$(state_value xlm_token)"
-    refresh_fixture_oracle \
-        "${label_prefix}" "${oracle_id}" "${blnd_id}" "${xlm_id}"
-    state_set "oracle_refreshed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
-
-require_modeled_pool_lane() {
-    [[ "${NETWORK_MODE}" == "testnet" &&
-        "${VALUATION_MODE}" == "production-fixture" ]] ||
-        die "modeled pools are supported only by the isolated production-fixture public-testnet lane"
+require_modeled_pool_support() {
     [[ -s "${MODELED_POOLS_FIXTURE}" ]] ||
         die "modeled-pool fixture is missing: ${MODELED_POOLS_FIXTURE}"
     [[ -s "${V3_TEST_SEP40_ORACLE_WASM}" ]] ||
@@ -812,6 +779,19 @@ seed_modeled_sep40_oracle() {
             --prices "${prices}" >/dev/null
     done < <(jq -r --arg model "${model}" \
         '.pools[$model].reserves[].asset' "${MODELED_POOLS_FIXTURE}")
+}
+
+refresh_modeled_pool_oracles() {
+    local label_prefix="$1" version model oracle
+
+    for version in v2 v3; do
+        for model in fixed yieldblox; do
+            oracle="$(state_value "$(modeled_oracle_state_key "${version}" "${model}")")"
+            seed_modeled_sep40_oracle "${version}" "${model}" "${oracle}"
+        done
+    done
+    state_set "modeled_oracles_refreshed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    note "Refreshed the modeled lending-pool oracles (${label_prefix})."
 }
 
 ensure_modeled_v2_oracle() {
@@ -1298,7 +1278,7 @@ record_modeled_pools_provenance() {
 
 keepalive_modeled_pools() {
     local stamp="$1" version model pool oracle asset asset_id label tier
-    local factory candidate incumbent depositor state_key found=false
+    local factory candidate incumbent depositor state_key
 
     factory="$(state_value v2_pool_factory)"
     candidate="$(state_value candidate_backstop)"
@@ -1308,14 +1288,8 @@ keepalive_modeled_pools() {
     for version in v2 v3; do
         for model in fixed yieldblox; do
             state_key="$(modeled_pool_state_key "${version}" "${model}")"
-            pool="$(state_optional "${state_key}")"
-            oracle="$(state_optional "$(modeled_oracle_state_key "${version}" "${model}")")"
-            if [[ -z "${pool}" && -z "${oracle}" ]]; then
-                continue
-            fi
-            [[ -n "${pool}" && -n "${oracle}" ]] ||
-                die "${version} ${model} modeled pool/oracle state is incomplete"
-            found=true
+            pool="$(state_value "${state_key}")"
+            oracle="$(state_value "$(modeled_oracle_state_key "${version}" "${model}")")"
             extend_contract_instance \
                 "${stamp}-${version}-${model}-pool-instance" "${pool}" >/dev/null
             extend_contract_instance \
@@ -1361,13 +1335,10 @@ keepalive_modeled_pools() {
         done
     done
 
-    [[ "${found}" == "true" ]] || return 0
     for asset in EURC AQUA USDGLO USTRY CETES PYUSD; do
-        asset_id="$(state_optional "$(modeled_asset_state_key "${asset}")")"
-        if [[ -n "${asset_id}" ]]; then
-            extend_contract_instance \
-                "${stamp}-asset-${asset}-instance" "${asset_id}" >/dev/null
-        fi
+        asset_id="$(state_value "$(modeled_asset_state_key "${asset}")")"
+        extend_contract_instance \
+            "${stamp}-asset-${asset}-instance" "${asset_id}" >/dev/null
     done
     state_set "modeled_pools_keepalive_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -1378,14 +1349,14 @@ command_plan() {
 
     if [[ "${VALUATION_MODE}" == "production-fixture" ]]; then
         asset_description="synthetic BLND and USDC plus Friendbot-funded native XLM"
-        adapter_description="production valuation adapter and bounded test-only SEP-40 oracle"
+        adapter_description="Comet-derived production backstop valuation and bounded test-only lending oracles"
     else
         asset_description="isolated BLND, USDC, and XLM assets"
         adapter_description="deterministic test valuation adapter"
     fi
-    pool_description="the modeled Fixed v3 pool with XLM, USDC, and EURC reserves"
-    pool_funding_description="${CANDIDATE_BALANCE} BLNDUSDC, ${ACTIVATION_USDC_BALANCE} USDC backstop units, and an EURC-borrow emission fixture backed by USDC collateral"
-    incumbent_funding_description="Fund modeled Fixed v2 with ${INCUMBENT_BALANCE} BLNDUSDC while retaining the candidate's one-base-unit strict majority."
+    pool_description="matched Fixed and YieldBlox v2/v3 pools from captured reserve configurations"
+    pool_funding_description="three candidate backstop tiers plus the configured Fixed and YieldBlox emission positions"
+    incumbent_funding_description="Fund both modeled v2 pools with ${INCUMBENT_BALANCE} BLNDUSDC each while retaining the candidate's one-base-unit aggregate majority."
     cat <<EOF
 Blend v3 ${NETWORK_LABEL} migration plan
 
@@ -1406,8 +1377,8 @@ Deployment:
   2. Provision ${asset_description} and deploy real 80:20 BLND:USDC and BLND:XLM Comet pools.
   3. Deploy the exact emitter WASM and a coherent SDK-22 incumbent stack.
   4. Predict the candidate address, bind its immutable factory, and deploy it.
-  5. Deploy ${pool_description} with a transferable v2-style admin.
-  6. Fund it with ${pool_funding_description}, activate it, add it to the reward zone, and configure its selected reserve-position emissions.
+  5. Deploy ${pool_description} with transferable v2-style admins.
+  6. Fund them with ${pool_funding_description}, activate them, add them to their reward zones, and configure their selected reserve-position emissions.
   7. ${incumbent_funding_description}
   8. Assert strict candidate qualification and call begin_migration.
 
@@ -1415,8 +1386,8 @@ Time-gated continuation:
   9. Call prepare during the final seven days of the production 31-day queue.
  10. Call finalize at or after unlock.
  11. Verify the emitter, candidate, pool, balances, and cleared queue.
- 12. Distribute ongoing BLND, claim the backstop 70%, and gulp the pool 30%.
- 13. Claim the pool stream after its seven-day vesting period.
+ 12. Distribute ongoing BLND, compound both backstop tiers, and gulp both pool tranches.
+ 13. Claim both pool streams after their seven-day vesting period.
 
 Mutation is limited to ${NETWORK_LABEL} and ${WORK_DIR}.
 EOF
@@ -1452,17 +1423,89 @@ command_start() {
     wait_for_network
 }
 
+begin_deployed_migration() {
+    local emitter_id incumbent_id candidate_id blnd_usdc_token_id blnd_xlm_token_id
+    local incumbent_balance candidate_balance begin_raw epoch_start queued_swap unlock_time
+    local queued_candidate queued_blnd_xlm_token migration_status
+
+    emitter_id="$(state_value emitter)"
+    incumbent_id="$(state_value incumbent_backstop)"
+    candidate_id="$(state_value candidate_backstop)"
+    blnd_usdc_token_id="$(state_value blnd_usdc_token)"
+    blnd_xlm_token_id="$(state_value blnd_xlm_token)"
+
+    incumbent_balance="$(normalize_scalar "$(invoke_view \
+        "query-incumbent-blnd-usdc-balance" "${blnd_usdc_token_id}" balance \
+        --id "${incumbent_id}")")"
+    candidate_balance="$(normalize_scalar "$(invoke_view \
+        "query-candidate-blnd-usdc-balance" "${blnd_usdc_token_id}" balance \
+        --id "${candidate_id}")")"
+    assert_equal "${AGGREGATE_INCUMBENT_BALANCE}" \
+        "${incumbent_balance}" "incumbent balance"
+    assert_equal "${AGGREGATE_CANDIDATE_BALANCE}" \
+        "${candidate_balance}" "candidate balance"
+    (( candidate_balance > incumbent_balance )) ||
+        die "candidate does not strictly exceed the incumbent BLND:USDC LP balance"
+
+    migration_status="$(invoke_view \
+        "query-candidate-before-begin" "${candidate_id}" migration_status)"
+    if printf '%s' "${migration_status}" | jq -e '
+        . == "Pending" or
+        (type == "object" and (has("Pending") or .tag? == "Pending"))
+    ' >/dev/null; then
+        begin_raw="$(invoke_transaction \
+            "begin-migration" "${candidate_id}" begin_migration)"
+        epoch_start="$(normalize_scalar "${begin_raw}")"
+    elif printf '%s' "${migration_status}" | jq -e '
+        . == "Open" or
+        (type == "object" and (has("Open") or .tag? == "Open"))
+    ' >/dev/null; then
+        epoch_start="$(normalize_scalar "$(invoke_view \
+            "recover-open-migration-epoch" \
+            "${candidate_id}" migration_epoch_start)")"
+    else
+        die "cannot begin deployment from candidate migration state ${migration_status}"
+    fi
+    [[ "${epoch_start}" =~ ^[0-9]+$ ]] ||
+        die "invalid migration epoch start: ${epoch_start}"
+    queued_swap="$(invoke_view \
+        "query-open-emitter-queue" "${emitter_id}" get_queued_swap)"
+    unlock_time="$(printf '%s' "${queued_swap}" | jq -er '.unlock_time')"
+    queued_candidate="$(printf '%s' "${queued_swap}" | jq -er '.new_backstop')"
+    queued_blnd_xlm_token="$(printf '%s' "${queued_swap}" | jq -er '.new_backstop_token')"
+    [[ "${unlock_time}" =~ ^[0-9]+$ ]] ||
+        die "invalid migration unlock time: ${unlock_time}"
+    assert_equal "${candidate_id}" "${queued_candidate}" "queued candidate"
+    assert_equal "${blnd_xlm_token_id}" \
+        "${queued_blnd_xlm_token}" "queued next designated token"
+    state_set "migration_epoch_start" "${epoch_start}"
+    state_set "unlock_time" "${unlock_time}"
+    state_set "prepare_not_before" \
+        "$((unlock_time - PREPARATION_WINDOW_SECONDS))"
+    state_set "incumbent_balance" "${AGGREGATE_INCUMBENT_BALANCE}"
+    state_set "candidate_balance" "${AGGREGATE_CANDIDATE_BALANCE}"
+    state_set "activation_usdc_balance" "${ACTIVATION_USDC_BALANCE}"
+    state_set "pool_supply_balance" "${POOL_SUPPLY_BALANCE}"
+    state_set "phase" "open"
+
+    stellar_cli ledger latest \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" \
+        --output json-formatted >"${RUN_DIR}/ledger-after-begin.json"
+    note "Deployment and migration queue succeeded. State: ${STATE_FILE}"
+    command_status
+}
+
 command_deploy() {
     local skip_build="${1:-false}"
     local operator depositor issuer emitter_id blnd_id xlm_id blnd_usdc_token_id blnd_xlm_token_id
     local usdc_token_id
     local v2_pool_hash incumbent_id v2_factory_id deployed_incumbent_id
-    local oracle_id="" backstop_valuation_id v3_pool_hash candidate_id v3_factory_id
+    local backstop_valuation_id v3_pool_hash candidate_id v3_factory_id
     local deployed_candidate_id
     local fixed_v2_oracle fixed_v2_pool fixed_v3_oracle
     local pool_id
-    local incumbent_balance candidate_balance pool_status begin_raw epoch_start queued_swap unlock_time
-    local queued_candidate queued_blnd_xlm_token
+    local pool_status
     local blnd_usdc_quote blnd_xlm_quote
     local comet_xlm_balance="${COMET_INITIAL_PAIR_TOKEN}"
 
@@ -1599,30 +1642,13 @@ command_deploy() {
         --user "${depositor}" >/dev/null
 
     if [[ "${VALUATION_MODE}" == "production-fixture" ]]; then
-        oracle_id="$(deploy_wasm \
-            "deploy-test-sep40-oracle" "${V3_TEST_SEP40_ORACLE_WASM}" "" \
-            --admin "${operator}" \
-            --base "{\"Stellar\":\"${usdc_token_id}\"}" \
-            --assets \
-            "[{\"Stellar\":\"${blnd_id}\"},{\"Stellar\":\"${xlm_id}\"}]" \
-            --decimals "${FIXTURE_ORACLE_DECIMALS}" \
-            --resolution "${FIXTURE_ORACLE_RESOLUTION}")"
-        state_set "test_sep40_oracle" "${oracle_id}"
-        refresh_fixture_oracle \
-            "seed-test-oracle" "${oracle_id}" "${blnd_id}" "${xlm_id}"
-        state_set "oracle_refreshed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
         backstop_valuation_id="$(deploy_wasm \
             "deploy-production-valuation-adapter" "${V3_BACKSTOP_VALUATION_WASM}" "" \
-            --oracle "${oracle_id}" \
-            --oracle_base "{\"Stellar\":\"${usdc_token_id}\"}" \
             --blnd "${blnd_id}" \
             --usdc "${usdc_token_id}" \
             --xlm "${xlm_id}" \
             --blnd_usdc "${blnd_usdc_token_id}" \
-            --blnd_xlm "${blnd_xlm_token_id}" \
-            --twap_records "${FIXTURE_ORACLE_RECORDS}" \
-            --max_price_age "${FIXTURE_MAX_PRICE_AGE}")"
+            --blnd_xlm "${blnd_xlm_token_id}")"
         state_set "backstop_valuation" "${backstop_valuation_id}"
         blnd_usdc_quote="$(invoke_view \
             "quote-initial-blnd-usdc-lp" "${backstop_valuation_id}" quote \
@@ -1633,11 +1659,11 @@ command_deploy() {
         printf '%s' "${blnd_usdc_quote}" | jq -e '
             (.underlying_blnd | tonumber) > 0 and
             (.usdc_value | tonumber) > 0
-        ' >/dev/null || die "production adapter returned an invalid BLND:USDC quote"
+        ' >/dev/null || die "Comet valuation returned an invalid BLND:USDC quote"
         printf '%s' "${blnd_xlm_quote}" | jq -e '
             (.underlying_blnd | tonumber) > 0 and
             (.usdc_value | tonumber) > 0
-        ' >/dev/null || die "production adapter returned an invalid BLND:XLM quote"
+        ' >/dev/null || die "Comet valuation returned an invalid BLND:XLM quote"
         state_set "initial_blnd_usdc_lp_quote" "${blnd_usdc_quote}"
         state_set "initial_blnd_xlm_lp_quote" "${blnd_xlm_quote}"
     fi
@@ -1752,42 +1778,12 @@ command_deploy() {
         --requests "[{\"address\":\"${usdc_token_id}\",\"amount\":\"${POOL_SUPPLY_BALANCE}\",\"request_type\":0}]" >/dev/null
     ensure_fixed_v3_eurc_borrow "${pool_id}"
 
-    incumbent_balance="$(normalize_scalar "$(invoke_view \
-        "query-incumbent-blnd-usdc-balance" "${blnd_usdc_token_id}" balance --id "${incumbent_id}")")"
-    candidate_balance="$(normalize_scalar "$(invoke_view \
-        "query-candidate-blnd-usdc-balance" "${blnd_usdc_token_id}" balance --id "${candidate_id}")")"
-    assert_equal "${INCUMBENT_BALANCE}" "${incumbent_balance}" "incumbent balance"
-    assert_equal "${CANDIDATE_BALANCE}" "${candidate_balance}" "candidate balance"
-    (( candidate_balance > incumbent_balance )) ||
-        die "candidate does not strictly exceed the incumbent BLND:USDC LP balance"
-
-    begin_raw="$(invoke_transaction "begin-migration" "${candidate_id}" begin_migration)"
-    epoch_start="$(normalize_scalar "${begin_raw}")"
-    [[ "${epoch_start}" =~ ^[0-9]+$ ]] ||
-        die "invalid migration epoch start: ${epoch_start}"
-    queued_swap="$(invoke_view \
-        "query-open-emitter-queue" "${emitter_id}" get_queued_swap)"
-    unlock_time="$(printf '%s' "${queued_swap}" | jq -er '.unlock_time')"
-    queued_candidate="$(printf '%s' "${queued_swap}" | jq -er '.new_backstop')"
-    queued_blnd_xlm_token="$(printf '%s' "${queued_swap}" | jq -er '.new_backstop_token')"
-    [[ "${unlock_time}" =~ ^[0-9]+$ ]] || die "invalid migration unlock time: ${unlock_time}"
-    assert_equal "${candidate_id}" "${queued_candidate}" "queued candidate"
-    assert_equal "${blnd_xlm_token_id}" "${queued_blnd_xlm_token}" "queued next designated token"
-    state_set "migration_epoch_start" "${epoch_start}"
-    state_set "unlock_time" "${unlock_time}"
-    state_set "prepare_not_before" "$((unlock_time - PREPARATION_WINDOW_SECONDS))"
-    state_set "incumbent_balance" "${INCUMBENT_BALANCE}"
-    state_set "candidate_balance" "${CANDIDATE_BALANCE}"
-    state_set "activation_usdc_balance" "${ACTIVATION_USDC_BALANCE}"
-    state_set "pool_supply_balance" "${POOL_SUPPLY_BALANCE}"
-    state_set "phase" "open"
-
-    stellar_cli ledger latest \
-        --rpc-url "${RPC_URL}" \
-        --network-passphrase "${NETWORK_PASSPHRASE}" \
-        --output json-formatted >"${RUN_DIR}/ledger-after-begin.json"
-    note "Deployment and migration queue succeeded. State: ${STATE_FILE}"
-    command_status
+    # Complete both modeled v2/v3 pool pairs before opening the migration
+    # epoch, so both candidate BLND:USDC positions are prefunded before
+    # backfill begins. The setup command is idempotent and remains available
+    # to resume an interrupted deployment.
+    state_set "phase" "deploying"
+    command_deploy_modeled_pools
 }
 
 command_deploy_modeled_pools() {
@@ -1803,10 +1799,11 @@ command_deploy_modeled_pools() {
     validate_source_provenance
     require_network
     load_state
-    require_modeled_pool_lane
+    require_modeled_pool_support
     phase="$(state_value phase)"
-    [[ "${phase}" == "open" || "${phase}" == "prepared" ]] ||
-        die "modeled pre-migration pools require an open or prepared migration; saved phase is ${phase}"
+    [[ "${phase}" == "deploying" || "${phase}" == "open" ||
+        "${phase}" == "prepared" ]] ||
+        die "modeled pre-migration pools require a deploying, open, or prepared migration; saved phase is ${phase}"
 
     record_modeled_pools_provenance deployment
     state_set "modeled_pools_fixture_sha256" \
@@ -1893,7 +1890,6 @@ command_deploy_modeled_pools() {
         yieldblox "${yield_v3_pool}" Usdc \
         "${MODELED_V3_USDC_BALANCE}"
 
-    refresh_fixture_oracle_from_state "modeled-pools-activation-oracle"
     for pool in "${fixed_v3_pool}" "${yield_v3_pool}"; do
         pool_status="$(invoke_view \
             "query-modeled-v3-status" "${pool}" get_config |
@@ -2021,6 +2017,9 @@ command_deploy_modeled_pools() {
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     state_set "modeled_pools_deployed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     command_verify_modeled_pools
+    if [[ "${phase}" == "deploying" ]]; then
+        begin_deployed_migration
+    fi
 }
 
 assert_json_equal() {
@@ -2080,7 +2079,7 @@ command_verify_modeled_pools() {
     validate_tools
     require_network
     load_state
-    require_modeled_pool_lane
+    require_modeled_pool_support
     validate_source_provenance
     record_modeled_pools_provenance verification
 
@@ -2335,11 +2334,9 @@ command_refresh_oracle() {
     validate_tools
     require_network
     load_state
-    [[ "${VALUATION_MODE}" == "production-fixture" ]] ||
-        die "this migration does not use the test-only SEP-40 fixture"
+    require_modeled_pool_support
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-    refresh_fixture_oracle_from_state "refresh-test-oracle-${stamp}"
-    note "Refreshed the BLND and native-XLM fixture histories for the production adapter."
+    refresh_modeled_pool_oracles "refresh-lending-oracles-${stamp}"
 }
 
 command_keepalive() {
@@ -2483,12 +2480,6 @@ command_keepalive() {
         "${prefix}-blnd-admin" "${blnd_id}" admin)")"
     assert_equal "${emitter_id}" "${blnd_admin}" "BLND administrator"
 
-    if ! (
-        refresh_fixture_oracle_from_state \
-            "keepalive-oracle-$(date -u +%Y%m%dT%H%M%SZ)"
-    ); then
-        note "warning: critical migration TTLs were renewed, but the optional fixture-oracle refresh failed; run refresh-oracle separately"
-    fi
     if ! (
         keepalive_modeled_pools \
             "keepalive-modeled-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -2657,10 +2648,7 @@ EOF
 admit_modeled_v3_yieldblox_reward() {
     local candidate_id="$1" yield_pool reward_zone
 
-    yield_pool="$(state_optional modeled_v3_yieldblox_pool)"
-    if [[ -z "${yield_pool}" ]]; then
-        return 1
-    fi
+    yield_pool="$(state_value modeled_v3_yieldblox_pool)"
 
     reward_zone="$(invoke_view \
         "query-v3-reward-zone-before-yieldblox" \
@@ -2686,21 +2674,22 @@ admit_modeled_v3_yieldblox_reward() {
         die "YieldBlox v3 was not admitted to the candidate reward zone"
     state_set "modeled_v3_yieldblox_reward_enabled_at" \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    return 0
 }
 
 command_emissions() {
-    local phase candidate_id pool_id depositor distribution received
-    local backstop_allocated pool_allocated backstop_claimed pool_gulped stream expiration
+    local phase candidate_id pool_id depositor distribution received claim_refresh
+    local backstop_allocated pool_allocated pool_gulped stream expiration
+    local fixed_blnd_usdc_lp fixed_blnd_xlm_lp
     local emission_reserve_token_id yieldblox_reward_status
     local yield_pool yield_distribution yield_received yield_backstop_allocated
-    local yield_pool_allocated yield_backstop_claimed yield_pool_gulped yield_stream
+    local yield_pool_allocated yield_blnd_usdc_lp yield_blnd_xlm_lp
+    local yield_pool_gulped yield_stream
     local yield_expiration
 
     validate_tools
     require_network
     load_state
-    refresh_fixture_oracle_from_state "emissions-oracle"
+    refresh_modeled_pool_oracles "emissions"
     phase="$(state_value phase)"
     [[ "${phase}" == "verified" ]] ||
         die "ongoing emissions require a verified migration; saved phase is ${phase}"
@@ -2738,65 +2727,110 @@ command_emissions() {
         die "pool tranche is below the one-BLND gulp minimum: ${distribution}"
     fi
 
-    yieldblox_reward_status="not deployed"
-    if admit_modeled_v3_yieldblox_reward "${candidate_id}"; then
-        yield_pool="$(state_value modeled_v3_yieldblox_pool)"
-        yieldblox_reward_status="eligible and allocated after a shared distribution"
-        note "Waiting ${MULTI_POOL_EMISSION_DELAY_SECONDS} seconds for a shared two-pool interval..."
-        sleep "${MULTI_POOL_EMISSION_DELAY_SECONDS}"
-        yield_distribution="$(invoke_transaction \
-            "distribute-ongoing-blnd-to-modeled-pools" \
-            "${candidate_id}" distribute)"
-        yield_received="$(printf '%s' "${yield_distribution}" |
-            jq -er '.received | tostring')"
-        yield_backstop_allocated="$(printf '%s' "${yield_distribution}" |
-            jq -er '.backstop_allocated | tostring')"
-        yield_pool_allocated="$(printf '%s' "${yield_distribution}" |
-            jq -er '.pool_allocated | tostring')"
-        if [[ ! "${yield_received}" =~ ^[0-9]+$ ]] ||
-            (( yield_received <= 0 ))
-        then
-            die "shared distribution did not receive positive BLND: ${yield_distribution}"
-        fi
-        if [[ ! "${yield_backstop_allocated}" =~ ^[0-9]+$ ]] ||
-            (( yield_backstop_allocated <= 0 ))
-        then
-            die "shared distribution did not allocate its backstop tranche: ${yield_distribution}"
-        fi
-        if [[ ! "${yield_pool_allocated}" =~ ^[0-9]+$ ]] ||
-            (( yield_pool_allocated < 2 * SCALAR_7 ))
-        then
-            die "shared pool tranche is too small for two one-BLND gulps: ${yield_distribution}"
-        fi
-        received=$((received + yield_received))
-        backstop_allocated=$((backstop_allocated + yield_backstop_allocated))
-        pool_allocated=$((pool_allocated + yield_pool_allocated))
+    admit_modeled_v3_yieldblox_reward "${candidate_id}"
+    yield_pool="$(state_value modeled_v3_yieldblox_pool)"
+    yieldblox_reward_status="eligible and allocated after a shared distribution"
+    note "Waiting ${MULTI_POOL_EMISSION_DELAY_SECONDS} seconds for a shared two-pool interval..."
+    sleep "${MULTI_POOL_EMISSION_DELAY_SECONDS}"
+    yield_distribution="$(invoke_transaction \
+        "distribute-ongoing-blnd-to-modeled-pools" \
+        "${candidate_id}" distribute)"
+    yield_received="$(printf '%s' "${yield_distribution}" |
+        jq -er '.received | tostring')"
+    yield_backstop_allocated="$(printf '%s' "${yield_distribution}" |
+        jq -er '.backstop_allocated | tostring')"
+    yield_pool_allocated="$(printf '%s' "${yield_distribution}" |
+        jq -er '.pool_allocated | tostring')"
+    if [[ ! "${yield_received}" =~ ^[0-9]+$ ]] ||
+        (( yield_received <= 0 ))
+    then
+        die "shared distribution did not receive positive BLND: ${yield_distribution}"
     fi
+    if [[ ! "${yield_backstop_allocated}" =~ ^[0-9]+$ ]] ||
+        (( yield_backstop_allocated <= 0 ))
+    then
+        die "shared distribution did not allocate its backstop tranche: ${yield_distribution}"
+    fi
+    if [[ ! "${yield_pool_allocated}" =~ ^[0-9]+$ ]] ||
+        (( yield_pool_allocated < 2 * SCALAR_7 ))
+    then
+        die "shared pool tranche is too small for two one-BLND gulps: ${yield_distribution}"
+    fi
+    received=$((received + yield_received))
+    backstop_allocated=$((backstop_allocated + yield_backstop_allocated))
+    pool_allocated=$((pool_allocated + yield_pool_allocated))
 
-    backstop_claimed="$(normalize_scalar "$(invoke_transaction_as \
+    fixed_blnd_usdc_lp="$(normalize_scalar "$(invoke_transaction_as \
         "claim-backstop-ongoing-blnd" "${DEPOSITOR_IDENTITY}" \
         "${candidate_id}" claim_ongoing_blnd \
+        --tier BlndUsdc \
         --user "${depositor}" \
         --pool "${pool_id}" \
-        --recipient "${depositor}")")"
-    if [[ ! "${backstop_claimed}" =~ ^[0-9]+$ ]] ||
-        (( backstop_claimed <= 0 ))
+        --min_lp_tokens_out 0)")"
+    if [[ ! "${fixed_blnd_usdc_lp}" =~ ^[0-9]+$ ]] ||
+        (( fixed_blnd_usdc_lp <= 0 ))
     then
-        die "backstop depositor did not claim positive BLND: ${backstop_claimed}"
+        die "Fixed backstop depositor did not compound positive BLND:USDC LP: ${fixed_blnd_usdc_lp}"
     fi
-    yield_backstop_claimed=0
-    if [[ -n "${yield_pool:-}" ]]; then
-        yield_backstop_claimed="$(normalize_scalar "$(invoke_transaction_as \
-            "claim-yieldblox-backstop-ongoing-blnd" \
-            "${DEPOSITOR_IDENTITY}" "${candidate_id}" claim_ongoing_blnd \
-            --user "${depositor}" \
-            --pool "${yield_pool}" \
-            --recipient "${depositor}")")"
-        if [[ ! "${yield_backstop_claimed}" =~ ^[0-9]+$ ]] ||
-            (( yield_backstop_claimed <= 0 ))
-        then
-            die "YieldBlox backstop depositor did not claim positive BLND: ${yield_backstop_claimed}"
-        fi
+
+    note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds to refresh the checkpoint for the next tier claim..."
+    sleep "${EMISSION_START_DELAY_SECONDS}"
+    claim_refresh="$(invoke_transaction \
+        "refresh-before-fixed-blnd-xlm-claim" "${candidate_id}" distribute)"
+    received=$((received + $(printf '%s' "${claim_refresh}" | jq -er '.received | tonumber')))
+    backstop_allocated=$((backstop_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.backstop_allocated | tonumber')))
+    pool_allocated=$((pool_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.pool_allocated | tonumber')))
+    fixed_blnd_xlm_lp="$(normalize_scalar "$(invoke_transaction_as \
+        "claim-fixed-blnd-xlm-ongoing-blnd" "${DEPOSITOR_IDENTITY}" \
+        "${candidate_id}" claim_ongoing_blnd \
+        --tier BlndXlm \
+        --user "${depositor}" \
+        --pool "${pool_id}" \
+        --min_lp_tokens_out 0)")"
+    if [[ ! "${fixed_blnd_xlm_lp}" =~ ^[0-9]+$ ]] ||
+        (( fixed_blnd_xlm_lp <= 0 ))
+    then
+        die "Fixed backstop depositor did not compound positive BLND:XLM LP: ${fixed_blnd_xlm_lp}"
+    fi
+
+    note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds to refresh the YieldBlox claim checkpoint..."
+    sleep "${EMISSION_START_DELAY_SECONDS}"
+    claim_refresh="$(invoke_transaction \
+        "refresh-before-yieldblox-blnd-usdc-claim" "${candidate_id}" distribute)"
+    received=$((received + $(printf '%s' "${claim_refresh}" | jq -er '.received | tonumber')))
+    backstop_allocated=$((backstop_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.backstop_allocated | tonumber')))
+    pool_allocated=$((pool_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.pool_allocated | tonumber')))
+    yield_blnd_usdc_lp="$(normalize_scalar "$(invoke_transaction_as \
+        "claim-yieldblox-backstop-ongoing-blnd" \
+        "${DEPOSITOR_IDENTITY}" "${candidate_id}" claim_ongoing_blnd \
+        --tier BlndUsdc \
+        --user "${depositor}" \
+        --pool "${yield_pool}" \
+        --min_lp_tokens_out 0)")"
+    if [[ ! "${yield_blnd_usdc_lp}" =~ ^[0-9]+$ ]] ||
+        (( yield_blnd_usdc_lp <= 0 ))
+    then
+        die "YieldBlox backstop depositor did not compound positive BLND:USDC LP: ${yield_blnd_usdc_lp}"
+    fi
+
+    note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds to refresh the final tier claim checkpoint..."
+    sleep "${EMISSION_START_DELAY_SECONDS}"
+    claim_refresh="$(invoke_transaction \
+        "refresh-before-yieldblox-blnd-xlm-claim" "${candidate_id}" distribute)"
+    received=$((received + $(printf '%s' "${claim_refresh}" | jq -er '.received | tonumber')))
+    backstop_allocated=$((backstop_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.backstop_allocated | tonumber')))
+    pool_allocated=$((pool_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.pool_allocated | tonumber')))
+    yield_blnd_xlm_lp="$(normalize_scalar "$(invoke_transaction_as \
+        "claim-yieldblox-blnd-xlm-ongoing-blnd" \
+        "${DEPOSITOR_IDENTITY}" "${candidate_id}" claim_ongoing_blnd \
+        --tier BlndXlm \
+        --user "${depositor}" \
+        --pool "${yield_pool}" \
+        --min_lp_tokens_out 0)")"
+    if [[ ! "${yield_blnd_xlm_lp}" =~ ^[0-9]+$ ]] ||
+        (( yield_blnd_xlm_lp <= 0 ))
+    then
+        die "YieldBlox backstop depositor did not compound positive BLND:XLM LP: ${yield_blnd_xlm_lp}"
     fi
 
     pool_gulped="$(normalize_scalar "$(invoke_transaction \
@@ -2813,34 +2847,30 @@ command_emissions() {
     [[ "${expiration}" =~ ^[0-9]+$ ]] ||
         die "pool emission stream has no expiration: ${stream}"
 
-    yield_pool_gulped=0
-    yield_expiration=0
-    if [[ -n "${yield_pool:-}" ]]; then
-        yield_pool_gulped="$(normalize_scalar "$(invoke_transaction \
-            "gulp-yieldblox-pool-ongoing-blnd" \
-            "${yield_pool}" gulp_emissions)")"
-        if [[ ! "${yield_pool_gulped}" =~ ^[0-9]+$ ]] ||
-            (( yield_pool_gulped < SCALAR_7 ))
-        then
-            die "YieldBlox pool did not gulp at least one BLND: ${yield_pool_gulped}"
-        fi
-        yield_stream="$(invoke_view \
-            "query-yieldblox-pool-emission-stream" \
-            "${yield_pool}" get_reserve_emissions \
-            --reserve_token_index 3)"
-        yield_expiration="$(printf '%s' "${yield_stream}" |
-            jq -er '.expiration | tostring')"
-        [[ "${yield_expiration}" =~ ^[0-9]+$ ]] ||
-            die "YieldBlox pool emission stream has no expiration: ${yield_stream}"
+    yield_pool_gulped="$(normalize_scalar "$(invoke_transaction \
+        "gulp-yieldblox-pool-ongoing-blnd" \
+        "${yield_pool}" gulp_emissions)")"
+    if [[ ! "${yield_pool_gulped}" =~ ^[0-9]+$ ]] ||
+        (( yield_pool_gulped < SCALAR_7 ))
+    then
+        die "YieldBlox pool did not gulp at least one BLND: ${yield_pool_gulped}"
     fi
+    yield_stream="$(invoke_view \
+        "query-yieldblox-pool-emission-stream" \
+        "${yield_pool}" get_reserve_emissions \
+        --reserve_token_index 3)"
+    yield_expiration="$(printf '%s' "${yield_stream}" |
+        jq -er '.expiration | tostring')"
+    [[ "${yield_expiration}" =~ ^[0-9]+$ ]] ||
+        die "YieldBlox pool emission stream has no expiration: ${yield_stream}"
 
     state_set "ongoing_received" "${received}"
     state_set "ongoing_backstop_allocated" "${backstop_allocated}"
     state_set "ongoing_pool_allocated" "${pool_allocated}"
-    state_set "ongoing_fixed_backstop_claimed" "${backstop_claimed}"
-    state_set "ongoing_yieldblox_backstop_claimed" "${yield_backstop_claimed}"
-    state_set "ongoing_backstop_claimed" \
-        "$((backstop_claimed + yield_backstop_claimed))"
+    state_set "ongoing_fixed_blnd_usdc_lp_compounded" "${fixed_blnd_usdc_lp}"
+    state_set "ongoing_fixed_blnd_xlm_lp_compounded" "${fixed_blnd_xlm_lp}"
+    state_set "ongoing_yieldblox_blnd_usdc_lp_compounded" "${yield_blnd_usdc_lp}"
+    state_set "ongoing_yieldblox_blnd_xlm_lp_compounded" "${yield_blnd_xlm_lp}"
     state_set "ongoing_fixed_pool_gulped" "${pool_gulped}"
     state_set "ongoing_yieldblox_pool_gulped" "${yield_pool_gulped}"
     state_set "ongoing_pool_gulped" "$((pool_gulped + yield_pool_gulped))"
@@ -2857,8 +2887,10 @@ command_emissions() {
 ${NETWORK_LABEL} post-migration emissions verified
   emitter BLND received: ${received}
   backstop 70% allocated: ${backstop_allocated}
-  Fixed backstop depositor claimed: ${backstop_claimed}
-  YieldBlox backstop depositor claimed: ${yield_backstop_claimed}
+  Fixed BLND:USDC LP compounded: ${fixed_blnd_usdc_lp}
+  Fixed BLND:XLM LP compounded: ${fixed_blnd_xlm_lp}
+  YieldBlox BLND:USDC LP compounded: ${yield_blnd_usdc_lp}
+  YieldBlox BLND:XLM LP compounded: ${yield_blnd_xlm_lp}
   pool 30% allocated: ${pool_allocated}
   Fixed pool stream reserved: ${pool_gulped}
   YieldBlox pool stream reserved: ${yield_pool_gulped}
@@ -2970,14 +3002,10 @@ command_claim_emissions() {
     claimed="$(claim_pool_emissions_resumable \
         fixed "${pool_id}" "${emission_reserve_token_id}" \
         ongoing_fixed_pool_claimed)"
-    yield_claimed=0
-    yield_pool="$(state_optional modeled_v3_yieldblox_pool)"
-    if [[ -n "${yield_pool}" &&
-        -n "$(state_optional modeled_v3_yieldblox_reward_enabled_at)" ]]
-    then
-        yield_claimed="$(claim_pool_emissions_resumable \
-            yieldblox "${yield_pool}" 3 ongoing_yieldblox_pool_claimed)"
-    fi
+    yield_pool="$(state_value modeled_v3_yieldblox_pool)"
+    state_value modeled_v3_yieldblox_reward_enabled_at >/dev/null
+    yield_claimed="$(claim_pool_emissions_resumable \
+        yieldblox "${yield_pool}" 3 ongoing_yieldblox_pool_claimed)"
     state_set "ongoing_fixed_pool_claimed" "${claimed}"
     state_set "ongoing_yieldblox_pool_claimed" "${yield_claimed}"
     state_set "ongoing_pool_claimed" "$((claimed + yield_claimed))"

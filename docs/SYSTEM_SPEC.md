@@ -11,7 +11,7 @@ This repository owns:
 - the pinned `blend-contracts-v3` production-contract submodule;
 - cross-version compatibility and migration-only test contracts;
 - localnet and public-testnet migration orchestration;
-- production-oracle qualification tooling; and
+- Comet-derived backstop-valuation deployment tooling; and
 - reproducible deployment manifests and resource evidence.
 
 Contract behavior and economic policy are owned by the contract specification
@@ -29,8 +29,6 @@ deployment default, or test expectation.
    toolchain separation, and submodule provenance.
 3. [MIGRATION_ACCEPTANCE.md](MIGRATION_ACCEPTANCE.md) defines the normative
    cross-version and network acceptance criteria.
-4. [ORACLE_DEPLOYMENT.md](ORACLE_DEPLOYMENT.md) defines fail-closed production
-   SEP-40 provider qualification and deployment evidence.
 
 Localnet and testnet documents are operational runbooks; they must satisfy
 this specification set but do not authorize protocol behavior.
@@ -68,17 +66,14 @@ If a migration test conflicts with either executable boundary, correct the
 test or document a specification conflict. Do not silently change production
 contract behavior or substitute rebuilt v2 bytecode.
 
-Updating either submodule pin, a frozen artifact, a network assumption, or an
-oracle provider is an explicit reviewed change. Successful testnet execution
-is evidence, not production approval.
+Updating either submodule pin, a frozen artifact, or a network assumption is
+an explicit reviewed change. Successful testnet execution is evidence, not
+production approval.
 
 ## Open deployment decisions
 
 The following production-readiness decisions do not authorize contract or
 economic-policy changes:
 
-- Select and qualify a concrete SEP-40 provider, then complete the exact-WASM
-  and initialized-storage resource simulation required by
-  [ORACLE_DEPLOYMENT.md](ORACLE_DEPLOYMENT.md).
 - Define the production lending-reserve admission policy for issuer controls,
   clawback, deauthorization, rebasing, and other nonstandard token behavior.

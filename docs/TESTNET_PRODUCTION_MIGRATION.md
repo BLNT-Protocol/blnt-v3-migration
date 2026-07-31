@@ -1,4 +1,4 @@
-# Production Backstop-Valuation Public-Testnet Migration
+# Comet-Valued Public-Testnet Migration
 
 This isolated lane exercises the production backstop-valuation contract
 against fresh, real Comet contracts on public testnet without modifying the
@@ -11,6 +11,11 @@ It contains public account, asset, contract, transaction, timestamp, artifact,
 and provenance data only. Signing material remains exclusively in the ignored
 local Stellar configuration.
 
+The committed registry describes the earlier oracle-backed valuation
+deployment. Its constructor is not compatible with the current oracle-free
+contract, so the candidate requires a fresh isolated deployment before new
+network evidence is recorded.
+
 The runner creates:
 
 - a fresh deployment of the exact deployed emitter WASM;
@@ -19,18 +24,18 @@ The runner creates:
   Friendbot;
 - a real 80:20 BLND:USDC Comet initialized with 1,000 BLND and 25 USDC;
 - a real 80:20 BLND:XLM Comet initialized with 1,000 BLND and 100 native XLM;
-- a bounded, authenticated, test-only SEP-40 oracle with seven five-minute
-  observations for BLND/USDC and XLM/USDC; and
-- the optimized production backstop-valuation contract bound immutably to that
-  oracle, the three assets, and both Comets; and
-- the modeled Fixed v3 pool as the candidate's primary migration,
-  verification, and post-migration emission pool.
+- bounded, authenticated, test-only SEP-40 lending oracles for the modeled
+  pools; and
+- the optimized production backstop-valuation contract bound immutably to the
+  three assets and both Comets;
+- matched Fixed and YieldBlox v2/v3 lending pools; and
+- three-tier candidate and single-tier incumbent backstop positions for both
+  pool pairs.
 
-The fixture prices are 0.10 USDC per BLND and 0.25 USDC per XLM. Consequently,
-each Comet starts with 100 USDC of BLND and 25 USDC of its paired asset,
-matching its 80:20 normalized weights. The oracle is deliberately controlled
-and is not a production price source; its purpose is to exercise the exact
-backstop-valuation and stateful SEP-40 call boundary on public testnet.
+The BLND:USDC Comet is the backstop's USDC anchor. The valuation contract uses
+its current 80:20 reserve ratio to value both LP tiers and does not call an
+oracle. The controlled SEP-40 contracts are used only by the modeled lending
+pools for reserve pricing.
 
 ## Start the isolated migration
 
@@ -41,8 +46,9 @@ make testnet-production-plan
 make testnet-production-validate
 ```
 
-Deploy the complete incumbent and candidate stacks, create both Comets, and
-begin the unshortened 31-day deployed-emitter queue:
+Deploy the complete incumbent and candidate stacks, create both Comets,
+deploy and fund both modeled pool pairs, and then begin the unshortened 31-day
+deployed-emitter queue:
 
 ```bash
 make testnet-production-run
@@ -54,26 +60,25 @@ It also uses distinct Stellar CLI identities from the original testnet lane.
 ## Operate the queue
 
 Query status and run the transaction-backed keepalive at least every five
-days. When modeled pools are present, the same command also renews their
-instances, reserve/position entries, custom assets, and lending oracles:
+days. The same command renews all modeled pool instances, reserve/position
+entries, custom assets, and lending oracles:
 
 ```bash
 make testnet-production-status
 make testnet-production-keepalive
 ```
 
-The keepalive refreshes both fixed-price oracle histories. To refresh only the
-oracle before a manual quote or diagnostic:
+The keepalive refreshes the modeled pools' fixed-price oracle histories. To
+refresh only those lending oracles before a pool diagnostic:
 
 ```bash
 make testnet-production-refresh-oracle
 ```
 
-The production backstop-valuation contract rejects a latest observation more
-than one hour old. Activation valuation and the emission exercise refresh the
-fixture automatically. Preparation and finalization do not depend on that
-controlled oracle, so an oracle-updater failure cannot block the permissionless
-migration lifecycle. During the final seven-day window and after unlock:
+Backstop activation and the migration lifecycle do not depend on those
+controlled oracles. Modeled lending-pool operations can still fail closed when
+their reserve prices are stale. During the final seven-day window and after
+unlock:
 
 ```bash
 make testnet-production-prepare
@@ -88,17 +93,17 @@ After the seven-day pool stream expires:
 make testnet-production-claim-emissions
 ```
 
-This lane proves deployment and transaction compatibility. It does not qualify
-the controlled oracle as an acceptable mainnet provider.
+This lane proves deployment and transaction compatibility. Its controlled
+lending oracles are test fixtures, not acceptable mainnet providers.
 
 ## Modeled lending pools
 
-The same live lane can complete side-by-side lending-pool fixtures whose
+Every fresh deployment creates the side-by-side lending-pool fixtures whose
 reserve parameters were captured from mainnet Fixed Pool v2 and YieldBlox Pool
-v2. On a fresh deployment, Fixed v3 already exists as the candidate's primary
-pool, and Fixed v2 is its migration-qualification counterpart. The command
-adds both YieldBlox versions, then finishes the additional three-tier funding.
-The command is resumable and refuses to run after migration activation:
+v2. The setup finishes before `begin_migration()`, so both candidate pools are
+prefunded before the backfill clock begins. If the pool portion of deployment
+is interrupted, its idempotent setup can be resumed; verification may also be
+repeated independently:
 
 ```bash
 make testnet-production-deploy-modeled-pools
@@ -124,9 +129,9 @@ tranche for USDC suppliers, seeds 1,000 USDC of supply per pool, adds both to
 the incumbent reward zone, advances the deployed emitter, and starts the
 seven-day emission streams. The large synthetic BLND issuance used to create
 the activation LP is test-only setup capital, not an emitter distribution.
-Rerunning the deployment command renews a missing or expired stream; standalone
-verification rejects a null, zero-rate, or expired stream instead of reporting
-it as emitting.
+Rerunning the modeled-pool setup command renews a missing or expired stream;
+standalone verification rejects a null, zero-rate, or expired stream instead
+of reporting it as emitting.
 
 The v3 pools use distinct 30% pool-tranche configurations. Fixed v3 directs
 the tranche to EURC borrowers; its deterministic exercise supplies 500 EURC
@@ -140,10 +145,12 @@ checkpoint guard. Consequently, the first
 `make testnet-production-emissions` transaction after migration considers both
 pools for the 70% backstop and 30% pool tranches. The exercise gulps and later
 claims the Fixed EURC-borrow and YieldBlox USDC-supply streams independently.
+It also claims each pool's two backstop-tier accruals separately and compounds
+the BLND into the originating BLND:USDC or BLND:XLM Comet position.
 
 The controlled lending-oracle fixtures use seven-decimal USD prices. Their
-price and valuation setters require authorization from the isolated runner
-operator bound at construction, and verification checks that immutable
+price setters require authorization from the isolated runner operator bound at
+construction, and verification checks that immutable
 binding. Other public-testnet accounts cannot rewrite the fixtures. They make
 the pools usable for functional test transactions but are not suitable price
 sources for production. Synthetic EURC, AQUA, USDGLO, USTRY, CETES, and PYUSD

@@ -5,7 +5,6 @@ use soroban_sdk::{
     Symbol, Vec,
 };
 
-const ORACLE_VERSION: u32 = 1;
 const MIN_RECORDS: u32 = 2;
 const MAX_RECORDS: u32 = 25;
 const MAX_DECIMALS: u32 = 18;
@@ -89,11 +88,6 @@ impl TestSep40Oracle {
             .instance()
             .set(&DataKey::Resolution, &resolution);
         extend_instance_ttl(&env);
-    }
-
-    pub fn version(env: Env) -> u32 {
-        extend_instance_ttl(&env);
-        ORACLE_VERSION
     }
 
     pub fn admin(env: Env) -> Address {

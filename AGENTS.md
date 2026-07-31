@@ -119,7 +119,7 @@ a side effect of work in this repository.
 - Supplier loss is permitted only after the configured backstop successfully
   reports that all three tiers are below the $100 minimum. It must accrue each
   affected reserve and apply Blend v2's ceiling-rounded bToken exchange-rate
-  loss with intentional saturation at zero; stale or unavailable valuation
+  loss with intentional saturation at zero; invalid or unavailable valuation
   fails closed.
 - Emitter migration qualification uses the candidate contract's direct balance
   of the incumbent emitter-designated token and requires a strictly greater
@@ -136,16 +136,12 @@ a side effect of work in this repository.
 - Pool-status and reward-zone threshold decisions must use the same canonical
   activation valuation. Stored pool status is not an additional reward-zone
   eligibility gate.
-- Production LP value uses the immutable SEP-40 USDC-base TWAP backstop
-  valuation and the lower of the 80%-BLND and 20%-paired-reserve implied Comet
-  totals. Spot Comet BLND composition remains canonical only for
-  ongoing-emission weight. Do not replace production backstop valuation with
-  caller-supplied values or the deterministic test fixture.
+- Production LP value uses current reserves from the immutable BLND:USDC and
+  BLND:XLM 80:20 Comets. BLND:USDC is the USDC anchor and plain USDC is valued
+  one-for-one. Do not introduce a backstop price oracle or caller-supplied
+  production values.
 - Candidate construction must match the backstop-valuation contract's
-  immutable BLND, plain-USDC, BLND:USDC, and BLND:XLM binding exactly. Generic
-  resource tests must model independent oracle tick storage; the selected
-  provider's exact WASM and initialized layout still require predeployment
-  simulation.
+  immutable BLND, plain-USDC, BLND:USDC, and BLND:XLM binding exactly.
 - Pool status preserves v2 codes and hard Q4W thresholds: normal On-Ice at
   30%, Admin Active On-Ice at 50%, normal Frozen at 60%, and Admin On-Ice
   Frozen at 75%. The transferable pool admin may select statuses 0, 2, and 4
@@ -164,6 +160,9 @@ a side effect of work in this repository.
   additional stored pool-status gate. V3 replacement weight uses eligible
   underlying BLND across active BLND:USDC and BLND:XLM tier positions; plain
   USDC and Q4W positions have zero emission weight.
+- Ongoing 70% backstop claims are tier-specific: BLND:USDC accrual compounds
+  into BLND:USDC, and BLND:XLM accrual compounds into BLND:XLM. The resulting
+  LP shares return to the same user's active position in the same pool.
 - Preserve the v2 action matrix: On-Ice blocks borrowing and auction
   cancellation; Frozen additionally blocks both supply and collateral supply.
 - Never involuntarily swap a depositor's BLND:USDC backstop asset. Conversion

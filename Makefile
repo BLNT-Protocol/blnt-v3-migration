@@ -139,18 +139,6 @@ testnet-production-emissions:
 testnet-production-claim-emissions:
 	bash scripts/testnet-production-migration.sh claim-emissions
 
-oracle-plan:
-	bash scripts/valuation-oracle.sh plan
-
-oracle-check:
-	bash scripts/valuation-oracle.sh check
-
-oracle-deploy:
-	bash scripts/valuation-oracle.sh deploy
-
-oracle-verify:
-	bash scripts/valuation-oracle.sh verify
-
 build-v3:
 	$(MAKE) -C $(V3_DIR) build
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked

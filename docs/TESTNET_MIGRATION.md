@@ -30,12 +30,12 @@ contracts rather than relying on official test BLND, USDC, or liquidity:
 It uses the deterministic test valuation adapter solely to exercise the
 candidate's immutable valuation interface. Its mutable fixture setters require
 authorization from the isolated runner operator bound at construction. This
-adapter is not a production price source. The fixture deploys matched
-Fixed-pool models against v2 and v3, each with XLM, USDC, and EURC reserves. It
-funds the v2 pool with BLND:USDC, activates the v3 pool with BLND:USDC and
-plain-USDC backstop value, adds the v3 pool to the reward zone, and creates its
-EURC-borrow emission position so the ongoing-emission path can be verified
-after migration.
+adapter is not a production price source. Before opening the emitter queue,
+the fixture deploys matched Fixed and YieldBlox pools against v2 and v3 using
+the captured reserve configurations. Both v2 pools receive BLND:USDC and enter
+the incumbent reward zone. Both v3 pools receive all three backstop tiers and
+enter the candidate reward zone. Fixed v3 routes its pool emission tranche to
+EURC borrowing, while YieldBlox v3 routes it to USDC supply.
 
 ## Commands
 

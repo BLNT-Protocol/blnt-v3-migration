@@ -226,13 +226,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "blend-v3-test-valuation-adapter"
-version = "0.0.0"
-dependencies = [
- "soroban-sdk",
-]
-
-[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

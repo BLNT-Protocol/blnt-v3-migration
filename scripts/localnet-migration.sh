@@ -30,21 +30,18 @@ case "${NETWORK_MODE}" in
         exit 2
         ;;
 esac
-VALUATION_MODE="${BLEND_MIGRATION_VALUATION_MODE:-deterministic}"
-case "${VALUATION_MODE}" in
-    deterministic)
-        XLM_ASSET_MODE="issued"
-        ;;
-    production-fixture)
+XLM_ASSET_MODE="${BLEND_MIGRATION_XLM_ASSET_MODE:-issued}"
+case "${XLM_ASSET_MODE}" in
+    issued) ;;
+    native)
         [[ "${NETWORK_MODE}" == "testnet" ]] || {
-            printf 'error: production-fixture valuation mode is testnet-only\n' >&2
+            printf 'error: native XLM asset mode is testnet-only\n' >&2
             exit 2
         }
-        XLM_ASSET_MODE="native"
         ;;
     *)
-        printf 'error: unsupported BLEND_MIGRATION_VALUATION_MODE: %s\n' \
-            "${VALUATION_MODE}" >&2
+        printf 'error: unsupported BLEND_MIGRATION_XLM_ASSET_MODE: %s\n' \
+            "${XLM_ASSET_MODE}" >&2
         exit 2
         ;;
 esac
@@ -102,8 +99,6 @@ V2_POOL_WASM="${ROOT_DIR}/deployed-artifacts/mainnet/v2-pool.wasm"
 V3_FACTORY_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/pool_factory.wasm"
 V3_BACKSTOP_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
 V3_POOL_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/pool.wasm"
-V3_TEST_VALUATION_ADAPTER_WASM="${ROOT_DIR}/migration-harness/target/wasm32v1-none/optimized/blend_v3_test_valuation_adapter.wasm"
-V3_BACKSTOP_VALUATION_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/blend_v3_backstop_valuation.wasm"
 V3_TEST_SEP40_ORACLE_WASM="${ROOT_DIR}/migration-harness/target/wasm32v1-none/optimized/blend_v3_test_sep40_oracle.wasm"
 COMET_WASM="${ROOT_DIR}/blend-contracts-v2/comet.wasm"
 
@@ -231,16 +226,11 @@ validate_artifacts() {
         "${V3_BACKSTOP_WASM}" \
         "${V3_POOL_WASM}" \
         "${V3_TEST_SEP40_ORACLE_WASM}" \
-        "${V3_TEST_VALUATION_ADAPTER_WASM}" \
         "${COMET_WASM}" \
         "${EMITTER_WASM}"
     do
         [[ -s "${artifact}" ]] || die "missing or empty WASM artifact: ${artifact}"
     done
-    if [[ "${VALUATION_MODE}" == "production-fixture" ]]; then
-        [[ -s "${V3_BACKSTOP_VALUATION_WASM}" ]] ||
-            die "missing or empty WASM artifact: ${V3_BACKSTOP_VALUATION_WASM}"
-    fi
     [[ -s "${MODELED_POOLS_FIXTURE}" ]] ||
         die "modeled-pool fixture is missing: ${MODELED_POOLS_FIXTURE}"
     note "Validated exact deployed incumbent and emitter plus SDK-27 candidate artifacts."
@@ -296,18 +286,18 @@ new_run_dir() {
 }
 
 load_state() {
-    local saved_mode saved_rpc saved_valuation_mode
+    local saved_mode saved_rpc saved_xlm_asset_mode
 
     [[ -f "${STATE_FILE}" ]] || die "deployment state not found; run deploy first"
     RUN_DIR="$(jq -er '.run_dir' "${STATE_FILE}")"
     [[ -d "${RUN_DIR}" ]] || die "recorded run directory does not exist: ${RUN_DIR}"
     saved_mode="$(jq -er '.network_mode // "local"' "${STATE_FILE}")"
-    saved_valuation_mode="$(jq -er '.valuation_mode // "deterministic"' "${STATE_FILE}")"
+    saved_xlm_asset_mode="$(jq -er '.xlm_asset_mode // "issued"' "${STATE_FILE}")"
     saved_rpc="$(jq -er '.rpc_url' "${STATE_FILE}")"
     [[ "${saved_mode}" == "${NETWORK_MODE}" ]] ||
         die "saved network mode ${saved_mode} does not match requested ${NETWORK_MODE}"
-    [[ "${saved_valuation_mode}" == "${VALUATION_MODE}" ]] ||
-        die "saved valuation mode ${saved_valuation_mode} does not match requested ${VALUATION_MODE}"
+    [[ "${saved_xlm_asset_mode}" == "${XLM_ASSET_MODE}" ]] ||
+        die "saved XLM asset mode ${saved_xlm_asset_mode} does not match requested ${XLM_ASSET_MODE}"
     [[ "${saved_rpc}" == "${RPC_URL}" ]] ||
         die "saved RPC ${saved_rpc} does not match requested ${RPC_URL}"
 }
@@ -346,7 +336,7 @@ initialize_state() {
     jq -n \
         --arg network_mode "${NETWORK_MODE}" \
         --arg network_label "${NETWORK_LABEL}" \
-        --arg valuation_mode "${VALUATION_MODE}" \
+        --arg xlm_asset_mode "${XLM_ASSET_MODE}" \
         --arg network_passphrase "${NETWORK_PASSPHRASE}" \
         --arg rpc_url "${RPC_URL}" \
         --arg container_name "${CONTAINER_NAME}" \
@@ -359,7 +349,7 @@ initialize_state() {
         '{
             network_mode: $network_mode,
             network_label: $network_label,
-            valuation_mode: $valuation_mode,
+            xlm_asset_mode: $xlm_asset_mode,
             network_passphrase: $network_passphrase,
             rpc_url: $rpc_url,
             container_name: $container_name,
@@ -1344,16 +1334,15 @@ keepalive_modeled_pools() {
 }
 
 command_plan() {
-    local asset_description adapter_description pool_description
+    local asset_description valuation_description pool_description
     local incumbent_funding_description pool_funding_description
 
-    if [[ "${VALUATION_MODE}" == "production-fixture" ]]; then
+    if [[ "${XLM_ASSET_MODE}" == "native" ]]; then
         asset_description="synthetic BLND and USDC plus Friendbot-funded native XLM"
-        adapter_description="Comet-derived production backstop valuation and bounded test-only lending oracles"
     else
         asset_description="isolated BLND, USDC, and XLM assets"
-        adapter_description="deterministic test valuation adapter"
     fi
+    valuation_description="integrated Comet-derived backstop valuation and bounded test-only lending oracles"
     pool_description="matched Fixed and YieldBlox v2/v3 pools from captured reserve configurations"
     pool_funding_description="three candidate backstop tiers plus the configured Fixed and YieldBlox emission positions"
     incumbent_funding_description="Fund both modeled v2 pools with ${INCUMBENT_BALANCE} BLNDUSDC each while retaining the candidate's one-base-unit aggregate majority."
@@ -1363,14 +1352,14 @@ Blend v3 ${NETWORK_LABEL} migration plan
 Network:
   Protocol: 27
   Mode: ${NETWORK_MODE}
-  Valuation mode: ${VALUATION_MODE}
+  XLM asset mode: ${XLM_ASSET_MODE}
   RPC: ${RPC_URL}
   Work directory: ${WORK_DIR}
 
 Artifacts:
   Frozen incumbent: exact deployed mainnet v2 pool, pool factory, and backstop WASM
   Deployed emitter: exact deployed mainnet emitter WASM
-  Candidate: SDK 27 pool, pool factory, backstop, ${adapter_description}
+  Candidate: SDK 27 pool, pool factory, and backstop with ${valuation_description}
 
 Deployment:
   1. Create and fund isolated issuer/operator and depositor identities.
@@ -1501,12 +1490,11 @@ command_deploy() {
     local operator depositor issuer emitter_id blnd_id xlm_id blnd_usdc_token_id blnd_xlm_token_id
     local usdc_token_id
     local v2_pool_hash incumbent_id v2_factory_id deployed_incumbent_id
-    local backstop_valuation_id v3_pool_hash candidate_id v3_factory_id
+    local v3_pool_hash candidate_id v3_factory_id
     local deployed_candidate_id
     local fixed_v2_oracle fixed_v2_pool fixed_v3_oracle
     local pool_id
     local pool_status
-    local blnd_usdc_quote blnd_xlm_quote
     local comet_xlm_balance="${COMET_INITIAL_PAIR_TOKEN}"
 
     if [[ "${XLM_ASSET_MODE}" == "native" ]]; then
@@ -1542,13 +1530,6 @@ command_deploy() {
     state_set "v3_pool_wasm_sha256" "$(sha256_file "${V3_POOL_WASM}")"
     state_set "test_sep40_oracle_wasm_sha256" \
         "$(sha256_file "${V3_TEST_SEP40_ORACLE_WASM}")"
-    if [[ "${VALUATION_MODE}" == "production-fixture" ]]; then
-        state_set "backstop_valuation_wasm_sha256" \
-            "$(sha256_file "${V3_BACKSTOP_VALUATION_WASM}")"
-    else
-        state_set "backstop_valuation_wasm_sha256" \
-            "$(sha256_file "${V3_TEST_VALUATION_ADAPTER_WASM}")"
-    fi
     state_set "comet_wasm_sha256" "$(sha256_file "${COMET_WASM}")"
 
     note "Creating and funding isolated ${NETWORK_LABEL} depositor ${DEPOSITOR_IDENTITY}..."
@@ -1578,19 +1559,6 @@ command_deploy() {
     state_set "blnd_xlm_token" "${blnd_xlm_token_id}"
     state_set "usdc_token" "${usdc_token_id}"
     state_set "xlm_asset_mode" "${XLM_ASSET_MODE}"
-
-    if [[ "${VALUATION_MODE}" == "deterministic" ]]; then
-        # This one-to-one fixture exercises the immutable valuation boundary
-        # locally. It is deliberately not a production pricing source.
-        backstop_valuation_id="$(deploy_wasm \
-            "deploy-test-valuation-adapter" "${V3_TEST_VALUATION_ADAPTER_WASM}" "" \
-            --admin "${operator}" \
-            --blnd "${blnd_id}" \
-            --usdc "${usdc_token_id}" \
-            --blnd_usdc "${blnd_usdc_token_id}" \
-            --blnd_xlm "${blnd_xlm_token_id}")"
-        state_set "backstop_valuation" "${backstop_valuation_id}"
-    fi
 
     capture "create-depositor-blnd-trustline" \
         stellar_cli tx new change-trust \
@@ -1640,33 +1608,6 @@ command_deploy() {
         --max_amounts_in \
         "[\"$((13000 * SCALAR_7))\",\"$((500 * SCALAR_7))\"]" \
         --user "${depositor}" >/dev/null
-
-    if [[ "${VALUATION_MODE}" == "production-fixture" ]]; then
-        backstop_valuation_id="$(deploy_wasm \
-            "deploy-production-valuation-adapter" "${V3_BACKSTOP_VALUATION_WASM}" "" \
-            --blnd "${blnd_id}" \
-            --usdc "${usdc_token_id}" \
-            --xlm "${xlm_id}" \
-            --blnd_usdc "${blnd_usdc_token_id}" \
-            --blnd_xlm "${blnd_xlm_token_id}")"
-        state_set "backstop_valuation" "${backstop_valuation_id}"
-        blnd_usdc_quote="$(invoke_view \
-            "quote-initial-blnd-usdc-lp" "${backstop_valuation_id}" quote \
-            --token "${blnd_usdc_token_id}" --amount "${SCALAR_7}")"
-        blnd_xlm_quote="$(invoke_view \
-            "quote-initial-blnd-xlm-lp" "${backstop_valuation_id}" quote \
-            --token "${blnd_xlm_token_id}" --amount "${SCALAR_7}")"
-        printf '%s' "${blnd_usdc_quote}" | jq -e '
-            (.underlying_blnd | tonumber) > 0 and
-            (.usdc_value | tonumber) > 0
-        ' >/dev/null || die "Comet valuation returned an invalid BLND:USDC quote"
-        printf '%s' "${blnd_xlm_quote}" | jq -e '
-            (.underlying_blnd | tonumber) > 0 and
-            (.usdc_value | tonumber) > 0
-        ' >/dev/null || die "Comet valuation returned an invalid BLND:XLM quote"
-        state_set "initial_blnd_usdc_lp_quote" "${blnd_usdc_quote}"
-        state_set "initial_blnd_xlm_lp_quote" "${blnd_xlm_quote}"
-    fi
 
     invoke_transaction "set-emitter-as-blnd-admin" "${blnd_id}" set_admin \
         --new_admin "${emitter_id}" >/dev/null
@@ -1719,13 +1660,13 @@ command_deploy() {
         --blnd_usdc_token "${blnd_usdc_token_id}" \
         --blnd_xlm_token "${blnd_xlm_token_id}" \
         --usdc_token "${usdc_token_id}" \
-        --backstop_valuation "${backstop_valuation_id}")"
+        --xlm_token "${xlm_id}")"
     assert_equal "${candidate_id}" "${deployed_candidate_id}" \
         "candidate deterministic address"
 
     # Every lane uses the modeled Fixed pair as its incumbent/candidate lending
-    # topology. The candidate's backstop valuation remains independent from the
-    # test-only lending oracles used by these pools.
+    # topology. The candidate's integrated backstop valuation remains
+    # independent from the test-only lending oracles used by these pools.
     ensure_modeled_asset EURC
     state_set "modeled_pools_fixture_sha256" \
         "$(sha256_file "${MODELED_POOLS_FIXTURE}")"
@@ -2340,7 +2281,7 @@ command_refresh_oracle() {
 }
 
 command_keepalive() {
-    local emitter_id incumbent_id candidate_id factory_id pool_id backstop_valuation_id depositor
+    local emitter_id incumbent_id candidate_id factory_id pool_id depositor
     local blnd_id xlm_id blnd_usdc_token_id blnd_xlm_token_id usdc_token_id unlock_time
     local stamp prefix last_distro_key blnd_admin queued_swap emitter_backstop
     local incumbent_balance candidate_balance primary_pool_supply_asset
@@ -2354,7 +2295,6 @@ command_keepalive() {
     candidate_id="$(state_value candidate_backstop)"
     factory_id="$(state_value v3_pool_factory)"
     pool_id="$(state_value v3_pool)"
-    backstop_valuation_id="$(state_value backstop_valuation)"
     depositor="$(state_value depositor)"
     blnd_id="$(state_value blnd_token)"
     xlm_id="$(state_value xlm_token)"
@@ -2393,8 +2333,6 @@ command_keepalive() {
         "${factory_id}" is_pool --pool_id "${pool_id}" >/dev/null
     invoke_forced_transaction "${prefix}-pool" \
         "${pool_id}" get_config >/dev/null
-    extend_contract_instance "${prefix}-backstop-valuation" \
-        "${backstop_valuation_id}" >/dev/null
     invoke_forced_transaction "${prefix}-position" \
         "${candidate_id}" tier_shares \
         --tier BlndUsdc \
@@ -2544,10 +2482,11 @@ command_finalize() {
 
 command_verify() {
     local operator emitter_id incumbent_id candidate_id factory_id pool_id
-    local backstop_valuation_id blnd_usdc_token_id blnd_xlm_token_id emitter_backstop
-    local candidate_blnd_usdc_token candidate_blnd_xlm_token candidate_backstop_valuation
+    local blnd_usdc_token_id blnd_xlm_token_id emitter_backstop
+    local candidate_blnd_usdc_token candidate_blnd_xlm_token
     local factory_backstop pool_operator pool_registered pool_status
-    local incumbent_balance candidate_balance queued_swap migration_status activated_at saved_phase
+    local candidate_pool_valuation incumbent_balance candidate_balance queued_swap
+    local migration_status activated_at saved_phase
 
     validate_tools
     require_network
@@ -2558,7 +2497,6 @@ command_verify() {
     candidate_id="$(state_value candidate_backstop)"
     factory_id="$(state_value v3_pool_factory)"
     pool_id="$(state_value v3_pool)"
-    backstop_valuation_id="$(state_value backstop_valuation)"
     blnd_usdc_token_id="$(state_value blnd_usdc_token)"
     blnd_xlm_token_id="$(state_value blnd_xlm_token)"
     saved_phase="$(state_value phase)"
@@ -2570,9 +2508,6 @@ command_verify() {
     candidate_blnd_xlm_token="$(normalize_scalar "$(invoke_view \
         "verify-candidate-blnd-xlm-lp" "${candidate_id}" tier_token \
         --tier BlndXlm)")"
-    candidate_backstop_valuation="$(normalize_scalar "$(invoke_view \
-        "verify-candidate-backstop-valuation" \
-        "${candidate_id}" backstop_valuation)")"
     factory_backstop="$(normalize_scalar "$(invoke_view \
         "verify-factory-backstop" "${factory_id}" backstop)")"
     pool_operator="$(normalize_scalar "$(invoke_view \
@@ -2583,6 +2518,9 @@ command_verify() {
     pool_registered="$(normalize_scalar "$(invoke_view \
         "verify-pool-registration" "${factory_id}" is_pool \
         --pool_id "${pool_id}")")"
+    candidate_pool_valuation="$(invoke_view \
+        "verify-candidate-pool-valuation" "${candidate_id}" pool_valuation \
+        --pool "${pool_id}")"
     incumbent_balance="$(normalize_scalar "$(invoke_view \
         "verify-incumbent-balance" "${blnd_usdc_token_id}" balance --id "${incumbent_id}")")"
     candidate_balance="$(normalize_scalar "$(invoke_view \
@@ -2597,12 +2535,18 @@ command_verify() {
     assert_equal "${blnd_usdc_token_id}" "${candidate_blnd_usdc_token}" "candidate BLND:USDC LP token"
     assert_equal "${blnd_xlm_token_id}" "${candidate_blnd_xlm_token}" \
         "candidate BLND:XLM LP token"
-    assert_equal "${backstop_valuation_id}" "${candidate_backstop_valuation}" \
-        "candidate backstop valuation"
     assert_equal "${candidate_id}" "${factory_backstop}" "v3 factory binding"
     assert_equal "${operator}" "${pool_operator}" "v3 pool admin"
     assert_equal "0" "${pool_status}" "active v3 pool status"
     assert_equal "true" "${pool_registered}" "v3 pool registration"
+    printf '%s' "${candidate_pool_valuation}" | jq -e '
+        (.active_blnd.blnd_usdc | tonumber) > 0 and
+        (.active_blnd.blnd_xlm | tonumber) > 0 and
+        (.active_values.blnd_usdc | tonumber) > 0 and
+        (.active_values.blnd_xlm | tonumber) > 0 and
+        (.active_values.usdc | tonumber) > 0
+    ' >/dev/null ||
+        die "integrated candidate pool valuation is not positive for every tier: ${candidate_pool_valuation}"
     [[ "${incumbent_balance}" =~ ^[0-9]+$ ]] ||
         die "invalid post-migration incumbent BLND:USDC LP balance"
     [[ "${candidate_balance}" =~ ^[0-9]+$ ]] ||
@@ -2623,6 +2567,7 @@ command_verify() {
         emissions_streaming|emissions_claimed) ;;
         *) state_set "phase" "verified" ;;
     esac
+    state_set "verified_primary_pool_valuation" "${candidate_pool_valuation}"
     state_set "verified_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     stellar_cli ledger latest \
         --rpc-url "${RPC_URL}" \
@@ -2639,7 +2584,7 @@ ${NETWORK_LABEL} migration verified
   candidate pool: ${pool_id}
   candidate pool admin: ${pool_operator}
   candidate pool status: ${pool_status}
-  candidate valuation adapter: ${backstop_valuation_id}
+  candidate valuation: integrated Comet reserve valuation
   activation timestamp: ${activated_at}
   evidence directory: ${RUN_DIR}
 EOF

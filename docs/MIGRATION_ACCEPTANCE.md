@@ -148,7 +148,7 @@ originating pool tier.
 | Protocol-27 compatibility harness | Exact deployed SDK-22 v2 and emitter WASM interacting with optimized v3 WASM |
 | Local Quickstart | Unshortened production queue, resumability, TTL keepalive, transaction costs, and final invariants |
 | Public testnet | Production-style transaction assembly and wall-clock queue operation using isolated test assets |
-| Production backstop-valuation testnet lane | Real 80:20 Comets and optimized oracle-free backstop valuation from current Comet reserves |
+| Native-XLM public-testnet lane | Real 80:20 Comets and optimized oracle-free backstop valuation integrated into the candidate backstop |
 
 The compatibility harness MUST invoke at least one deployed v2 backstop entry
 point through the Protocol-27 host and complete the deployed-emitter swap into
@@ -182,8 +182,8 @@ balance majority.
 
 Modeled lending pools MAY use authenticated mutable SEP-40 fixtures for
 deterministic reserve prices, but those feeds MUST be labeled non-production.
-The backstop-valuation contract MUST remain independent of them and bind only
-the configured assets and Comets.
+The backstop's integrated valuation MUST remain independent of them and read
+only the configured assets and Comets.
 
 Modeled v2 reserve setup MUST resume safely across the separate
 `queue_set_reserve` and `set_reserve` transactions rather than submitting a

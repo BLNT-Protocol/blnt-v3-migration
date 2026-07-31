@@ -11,7 +11,7 @@ This repository owns:
 - the pinned `blend-contracts-v3` production-contract submodule;
 - cross-version compatibility and migration-only test contracts;
 - localnet and public-testnet migration orchestration;
-- Comet-derived backstop-valuation deployment tooling; and
+- integrated Comet-derived backstop valuation evidence; and
 - reproducible deployment manifests and resource evidence.
 
 Contract behavior and economic policy are owned by the contract specification

@@ -44,12 +44,12 @@ for the migration protocol. Contract behavior is composed by
 [blend-contracts-v3/docs/SYSTEM_SPEC.md](blend-contracts-v3/docs/SYSTEM_SPEC.md).
 [docs/BASELINE.md](docs/BASELINE.md) defines source and artifact policy, and
 [docs/MIGRATION_ACCEPTANCE.md](docs/MIGRATION_ACCEPTANCE.md) defines
-cross-version migration acceptance. The contract submodule owns the normative
-[backstop-valuation specification](blend-contracts-v3/docs/BACKSTOP_VALUATION.md).
+cross-version migration acceptance. The contract submodule's v3 specification
+defines the integrated Comet-based backstop valuation.
 Operational instructions live in
 [docs/LOCALNET_MIGRATION.md](docs/LOCALNET_MIGRATION.md) and
-[docs/TESTNET_MIGRATION.md](docs/TESTNET_MIGRATION.md). The isolated production
-backstop-valuation testnet lane is documented in
+[docs/TESTNET_MIGRATION.md](docs/TESTNET_MIGRATION.md). The isolated native-XLM
+testnet lane is documented in
 [docs/TESTNET_PRODUCTION_MIGRATION.md](docs/TESTNET_PRODUCTION_MIGRATION.md).
 
 ## Toolchain lanes
@@ -100,10 +100,9 @@ Check the v3 workspace with its pinned current toolchain:
 make check-v3
 ```
 
-This verifies the exact deployed fixtures and builds the SDK-27
-compatibility probe, candidate contracts, Comet-derived backstop-valuation
-contract, and deterministic test fixture. It then runs the contract suites and
-the deployed-WASM cross-version migration harness. Exact behavioral
+This verifies the exact deployed fixtures and builds the SDK-27 compatibility
+probe, candidate contracts, and test-only lending oracle. It then runs the
+contract suites and the deployed-WASM cross-version migration harness. Exact behavioral
 requirements remain in the contract and migration specifications rather than
 being restated here.
 

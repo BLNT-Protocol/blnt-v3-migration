@@ -2,7 +2,7 @@ use soroban_sdk::{
     contract, contractclient, contractimpl, contracttype,
     testutils::{Address as _, Ledger},
     token::StellarAssetClient,
-    Address, Env,
+    Address, Env, Vec,
 };
 
 mod deployed_emitter {
@@ -13,12 +13,6 @@ mod deployed_emitter {
 mod v3_backstop {
     soroban_sdk::contractimport!(
         file = "../../blend-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
-    );
-}
-
-mod test_valuation {
-    soroban_sdk::contractimport!(
-        file = "../target/wasm32v1-none/optimized/blend_v3_test_valuation_adapter.wasm"
     );
 }
 
@@ -72,6 +66,60 @@ fn create_asset(env: &Env, admin: &Address) -> Address {
         .address()
 }
 
+#[derive(Clone)]
+#[contracttype]
+enum CometKey {
+    Balance(Address),
+    Blnd,
+    Pair,
+}
+
+#[contract]
+struct MockComet;
+
+#[contractimpl]
+impl MockComet {
+    pub fn __constructor(env: Env, blnd: Address, pair: Address) {
+        env.storage().instance().set(&CometKey::Blnd, &blnd);
+        env.storage().instance().set(&CometKey::Pair, &pair);
+    }
+
+    pub fn decimals(_env: Env) -> u32 {
+        7
+    }
+
+    pub fn get_tokens(env: Env) -> Vec<Address> {
+        soroban_sdk::vec![
+            &env,
+            env.storage().instance().get(&CometKey::Blnd).unwrap(),
+            env.storage().instance().get(&CometKey::Pair).unwrap(),
+        ]
+    }
+
+    pub fn get_normalized_weight(env: Env, token: Address) -> i128 {
+        let blnd: Address = env.storage().instance().get(&CometKey::Blnd).unwrap();
+        if token == blnd {
+            8_000_000
+        } else {
+            2_000_000
+        }
+    }
+
+    pub fn balance(env: Env, id: Address) -> i128 {
+        env.storage()
+            .instance()
+            .get(&CometKey::Balance(id))
+            .unwrap_or(0)
+    }
+
+    pub fn mint(env: Env, to: Address, amount: i128) {
+        let balance = Self::balance(env.clone(), to.clone());
+        env.storage()
+            .instance()
+            .set(&CometKey::Balance(to), &(balance + amount));
+    }
+}
+
 #[test]
 fn optimized_candidate_migrates_through_the_deployed_emitter() {
     let env = Env::default();
@@ -80,9 +128,10 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
 
     let token_admin = Address::generate(&env);
     let blnd = create_asset(&env, &token_admin);
-    let blnd_usdc = create_asset(&env, &token_admin);
-    let blnd_xlm = create_asset(&env, &token_admin);
     let usdc = create_asset(&env, &token_admin);
+    let xlm = create_asset(&env, &token_admin);
+    let blnd_usdc = env.register(MockComet, (&blnd, &usdc));
+    let blnd_xlm = env.register(MockComet, (&blnd, &xlm));
 
     let incumbent = Address::generate(&env);
     let emitter_id = env.register(deployed_emitter::WASM, ());
@@ -92,11 +141,6 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
 
     let candidate_id = Address::generate(&env);
     let factory = env.register(MockPoolFactory, (&candidate_id,));
-    let valuation_admin = Address::generate(&env);
-    let valuation = env.register(
-        test_valuation::WASM,
-        (&valuation_admin, &blnd, &usdc, &blnd_usdc, &blnd_xlm),
-    );
     env.register_at(
         &candidate_id,
         v3_backstop::WASM,
@@ -106,13 +150,13 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
             &emitter_id,
             &blnd,
             &usdc,
+            &xlm,
             &factory,
-            &valuation,
         ),
     );
     let candidate = v3_backstop::Client::new(&env, &candidate_id);
 
-    let blnd_usdc_token = StellarAssetClient::new(&env, &blnd_usdc);
+    let blnd_usdc_token = MockCometClient::new(&env, &blnd_usdc);
     blnd_usdc_token.mint(&incumbent, &(100 * SCALAR_7));
     blnd_usdc_token.mint(&candidate_id, &(100 * SCALAR_7 + 1));
 
@@ -143,5 +187,4 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
         candidate.tier_token(&v3_backstop::BackstopTier::BlndXlm),
         blnd_xlm
     );
-    assert_eq!(candidate.backstop_valuation(), valuation);
 }

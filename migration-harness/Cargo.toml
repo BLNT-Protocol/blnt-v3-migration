@@ -4,7 +4,6 @@ members = [
     "compat-probe",
     "migration-tests",
     "test-sep40-oracle",
-    "test-valuation-adapter",
 ]
 
 [workspace.package]

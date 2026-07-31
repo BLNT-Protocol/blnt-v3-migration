@@ -143,7 +143,6 @@ build-v3:
 	$(MAKE) -C $(V3_DIR) build
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-test-sep40-oracle --target wasm32v1-none --release --locked
-	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-test-valuation-adapter --target wasm32v1-none --release --locked
 	mkdir -p $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized
 	stellar contract optimize \
 		--wasm $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/release/blend_v3_compat_probe.wasm \
@@ -151,9 +150,6 @@ build-v3:
 	stellar contract optimize \
 		--wasm $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/release/blend_v3_test_sep40_oracle.wasm \
 		--wasm-out $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized/blend_v3_test_sep40_oracle.wasm
-	stellar contract optimize \
-		--wasm $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/release/blend_v3_test_valuation_adapter.wasm \
-		--wasm-out $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized/blend_v3_test_valuation_adapter.wasm
 
 check-v3: verify-deployed-artifacts build-v3
 	$(MAKE) -C $(V3_DIR) test

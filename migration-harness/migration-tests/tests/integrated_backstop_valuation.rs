@@ -3,13 +3,6 @@ use soroban_sdk::{
 };
 
 #[allow(clippy::too_many_arguments)]
-mod adapter {
-    soroban_sdk::contractimport!(
-        file = "../../blend-contracts-v3/target/wasm32v1-none/optimized/blend_v3_backstop_valuation.wasm"
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
 mod backstop {
     soroban_sdk::contractimport!(
         file = "../../blend-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
@@ -199,66 +192,7 @@ fn register_token(env: &Env) -> Address {
 }
 
 #[test]
-fn optimized_production_adapter_quotes_comet_reserves_with_mainnet_headroom() {
-    let env = Env::default();
-    let blnd = register_token(&env);
-    let usdc = register_token(&env);
-    let xlm = register_token(&env);
-    let blnd_usdc = env.register(
-        MockComet,
-        (
-            &blnd,
-            &usdc,
-            &(100 * SCALAR_7),
-            &(1_600 * SCALAR_7),
-            &(20 * SCALAR_7),
-        ),
-    );
-    let blnd_xlm = env.register(
-        MockComet,
-        (
-            &blnd,
-            &xlm,
-            &(100 * SCALAR_7),
-            &(1_600 * SCALAR_7),
-            &(200 * SCALAR_7),
-        ),
-    );
-    let adapter_id = env.register(adapter::WASM, (&blnd, &usdc, &xlm, &blnd_usdc, &blnd_xlm));
-    let client = adapter::Client::new(&env, &adapter_id);
-
-    env.cost_estimate().budget().reset_unlimited();
-    assert_eq!(
-        client.quote(&blnd_usdc, &(10 * SCALAR_7)),
-        adapter::AssetValuation {
-            underlying_blnd: 160 * SCALAR_7,
-            usdc_value: 10 * SCALAR_7,
-            valid_until: u64::MAX,
-        }
-    );
-    assert_eq!(
-        client.quote(&blnd_xlm, &(10 * SCALAR_7)),
-        adapter::AssetValuation {
-            underlying_blnd: 160 * SCALAR_7,
-            usdc_value: 10 * SCALAR_7,
-            valid_until: u64::MAX,
-        }
-    );
-    let resources = env.cost_estimate().resources();
-    assert!(resources.instructions <= 600_000_000);
-    assert!(resources.mem_bytes <= 41_943_040);
-    assert!(resources.disk_read_entries <= 100);
-    assert!(resources.write_entries <= 50);
-    assert!(
-        resources.disk_read_entries + resources.memory_read_entries + resources.write_entries <= 90
-    );
-    assert!(resources.disk_read_bytes <= 200_000);
-    assert!(resources.write_bytes <= 132_096);
-    assert!(resources.contract_events_size_bytes <= 16_384);
-}
-
-#[test]
-fn optimized_candidate_values_four_comet_quotes_with_mainnet_headroom() {
+fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
     let env = Env::default();
     env.mock_all_auths();
     let blnd = register_token(&env);
@@ -284,8 +218,6 @@ fn optimized_candidate_values_four_comet_quotes_with_mainnet_headroom() {
             &(200 * SCALAR_7),
         ),
     );
-    let adapter_id = env.register(adapter::WASM, (&blnd, &usdc, &xlm, &blnd_usdc, &blnd_xlm));
-
     let candidate_id = Address::generate(&env);
     let factory_id = env.register(MockPoolFactory, (&candidate_id,));
     let emitter_id = env.register(MockEmitter, ());
@@ -298,8 +230,8 @@ fn optimized_candidate_values_four_comet_quotes_with_mainnet_headroom() {
             &emitter_id,
             &blnd,
             &usdc,
+            &xlm,
             &factory_id,
-            &adapter_id,
         ),
     );
     let pool = env.register(MockPool, ());

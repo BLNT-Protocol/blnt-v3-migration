@@ -28,10 +28,9 @@ Read these before changing protocol behavior:
 3. `blend-contracts-v3/docs/SYSTEM_SPEC.md`
 4. `blend-contracts-v3/docs/V2_SYSTEM_SPEC.md`
 5. `blend-contracts-v3/docs/V3_SYSTEM_SPEC.md`
-6. `blend-contracts-v3/docs/BACKSTOP_VALUATION.md`
-7. `docs/MIGRATION_ACCEPTANCE.md`
-8. `docs/BASELINE.md`
-9. Existing contract tests and the implementation being changed
+6. `docs/MIGRATION_ACCEPTANCE.md`
+7. `docs/BASELINE.md`
+8. Existing contract tests and the implementation being changed
 
 If the documents conflict with deployed executable behavior, preserve the
 behavior needed for migration and document the conflict. Do not silently
@@ -140,8 +139,8 @@ a side effect of work in this repository.
   BLND:XLM 80:20 Comets. BLND:USDC is the USDC anchor and plain USDC is valued
   one-for-one. Do not introduce a backstop price oracle or caller-supplied
   production values.
-- Candidate construction must match the backstop-valuation contract's
-  immutable BLND, plain-USDC, BLND:USDC, and BLND:XLM binding exactly.
+- Candidate construction must validate its immutable BLND, USDC, XLM,
+  BLND:USDC, and BLND:XLM bindings exactly.
 - Pool status preserves v2 codes and hard Q4W thresholds: normal On-Ice at
   30%, Admin Active On-Ice at 50%, normal Frozen at 60%, and Admin On-Ice
   Frozen at 75%. The transferable pool admin may select statuses 0, 2, and 4

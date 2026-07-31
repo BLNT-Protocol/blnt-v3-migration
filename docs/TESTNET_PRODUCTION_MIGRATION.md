@@ -1,20 +1,15 @@
 # Comet-Valued Public-Testnet Migration
 
-This isolated lane exercises the production backstop-valuation contract
-against fresh, real Comet contracts on public testnet without modifying the
-original `.testnet/` migration. Its state, keys, transaction results, and cost
-evidence live below the ignored `.testnet-production/` directory.
+This isolated lane exercises the candidate's integrated Comet valuation with
+native XLM and fresh Comet contracts on public testnet without modifying the
+issued-XLM `.testnet/` migration. Its state, keys, transaction results, and
+cost evidence live below the ignored `.testnet-production/` directory.
 
-The sanitized public deployment registry is versioned at
-[`../deployments/testnet-production.json`](../deployments/testnet-production.json).
-It contains public account, asset, contract, transaction, timestamp, artifact,
-and provenance data only. Signing material remains exclusively in the ignored
-local Stellar configuration.
-
-The committed registry describes the earlier oracle-backed valuation
-deployment. Its constructor is not compatible with the current oracle-free
-contract, so the candidate requires a fresh isolated deployment before new
-network evidence is recorded.
+The ignored `.testnet-production/` state records the live run. After a fresh
+deployment is verified, its public account, asset, contract, transaction,
+timestamp, integrated pool-valuation, artifact, and provenance data SHOULD be
+copied into a sanitized versioned registry. Signing material remains
+exclusively in the ignored local Stellar configuration.
 
 The runner creates:
 
@@ -25,17 +20,17 @@ The runner creates:
 - a real 80:20 BLND:USDC Comet initialized with 1,000 BLND and 25 USDC;
 - a real 80:20 BLND:XLM Comet initialized with 1,000 BLND and 100 native XLM;
 - bounded, authenticated, test-only SEP-40 lending oracles for the modeled
-  pools; and
-- the optimized production backstop-valuation contract bound immutably to the
-  three assets and both Comets;
+  pools;
+- the optimized candidate backstop bound immutably to the three assets and
+  both Comets;
 - matched Fixed and YieldBlox v2/v3 lending pools; and
 - three-tier candidate and single-tier incumbent backstop positions for both
   pool pairs.
 
-The BLND:USDC Comet is the backstop's USDC anchor. The valuation contract uses
-its current 80:20 reserve ratio to value both LP tiers and does not call an
-oracle. The controlled SEP-40 contracts are used only by the modeled lending
-pools for reserve pricing.
+The BLND:USDC Comet is the backstop's USDC anchor. The backstop uses its current
+80:20 reserve ratio to value both LP tiers and does not call an oracle. The
+controlled SEP-40 contracts are used only by the modeled lending pools for
+reserve pricing.
 
 ## Start the isolated migration
 
@@ -160,12 +155,13 @@ configuration and source contract IDs are recorded in
 
 ## Live deployment state
 
-Public contract IDs, provenance, and lifecycle timestamps belong in the
-versioned
-[`deployments/testnet-production.json`](../deployments/testnet-production.json)
-registry rather than this runbook. Query the live network and next required
-operation with:
+Query the live network and next required operation from the ignored deployment
+state with:
 
 ```bash
 make testnet-production-status
 ```
+
+After verification, publish a sanitized registry under `deployments/` without
+any signing material or local identity names. The verified valuation record is
+read directly from the candidate backstop.

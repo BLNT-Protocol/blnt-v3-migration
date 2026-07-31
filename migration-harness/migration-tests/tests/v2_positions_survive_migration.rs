@@ -32,12 +32,6 @@ mod v3_backstop {
     );
 }
 
-mod v3_test_valuation_adapter {
-    soroban_sdk::contractimport!(
-        file = "../target/wasm32v1-none/optimized/blend_v3_test_valuation_adapter.wasm"
-    );
-}
-
 const SCALAR_7: i128 = 10_000_000;
 const PREPARATION_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 
@@ -94,6 +88,27 @@ impl MockComet {
         env.storage()
             .instance()
             .set(&MockCometKey::PairedReserve, &paired_reserve);
+    }
+
+    pub fn decimals(_env: Env) -> u32 {
+        7
+    }
+
+    pub fn get_tokens(env: Env) -> Vec<Address> {
+        soroban_sdk::vec![
+            &env,
+            env.storage().instance().get(&MockCometKey::Blnd).unwrap(),
+            env.storage().instance().get(&MockCometKey::Paired).unwrap(),
+        ]
+    }
+
+    pub fn get_normalized_weight(env: Env, token: Address) -> i128 {
+        let blnd: Address = env.storage().instance().get(&MockCometKey::Blnd).unwrap();
+        if token == blnd {
+            8_000_000
+        } else {
+            2_000_000
+        }
     }
 
     pub fn get_total_supply(env: Env) -> i128 {
@@ -473,11 +488,6 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
 
     let candidate_id = Address::generate(&env);
     let v3_pool_factory_id = env.register(MockV3PoolFactory, (&candidate_id,));
-    let adapter_admin = Address::generate(&env);
-    let valuation_adapter_id = env.register(
-        v3_test_valuation_adapter::WASM,
-        (&adapter_admin, &blnd, &usdc, &blnd_usdc_lp, &next_lp),
-    );
     env.register_at(
         &candidate_id,
         v3_backstop::WASM,
@@ -487,8 +497,8 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
             &emitter_id,
             &blnd,
             &usdc,
+            &xlm,
             &v3_pool_factory_id,
-            &valuation_adapter_id,
         ),
     );
     let candidate = v3_backstop::Client::new(&env, &candidate_id);

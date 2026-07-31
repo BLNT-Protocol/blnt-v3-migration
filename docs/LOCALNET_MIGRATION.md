@@ -19,17 +19,12 @@ The runner uses independently issued local assets and real Comet contracts:
 - `USDC`, representing the plain-USDC third backstop tier
 - `XLM`, representing the isolated pair asset for the next Comet LP
 
-The two LPs execute the checked-in Comet WASM and expose real current reserve
-composition to the candidate's emission calculation. Their isolated initial
-balances and the test valuation adapter remain deterministic fixtures; they do
-not represent production market pricing or liquidity.
-
-The runner also deploys a test-only valuation adapter with immutable asset
-bindings. It values each configured LP token one-for-one in both USDC and
-underlying BLND so the canonical valuation call path can be exercised
-deterministically. Separate authenticated SEP-40 fixtures provide the modeled
-pools' deterministic reserve prices. None of these fixtures is a production
-pricing source.
+The two LPs execute the checked-in Comet WASM and expose current reserve
+composition to the candidate's integrated valuation and emission calculations.
+Their isolated initial balances are deterministic fixtures; they do not
+represent production market pricing or liquidity. Separate authenticated
+SEP-40 fixtures provide the modeled pools' deterministic reserve prices and
+are not used for backstop valuation.
 
 The migration runner deploys matched Fixed and YieldBlox models against the
 incumbent and candidate before opening the emitter queue. Both v3 pools receive
@@ -107,14 +102,14 @@ make localnet-keepalive
 ```
 
 This explicitly extends the deployed emitter, incumbent distribution
-checkpoint, valuation adapter, both Comets, all four modeled pools and their
-lending oracles, configured assets, backstop positions, and relevant token
-balances. It also refreshes each lending-oracle history. Before reporting
-success, it verifies the saved queue target, next designated token, unlock
-time, and the candidate's strict balance majority. It does not alter queue
-timestamps, balances, shares, pool status, distribution timestamps, or
-migration eligibility. Each keepalive result and resource-cost report is
-retained in the run evidence directory.
+checkpoint, both Comets, all four modeled pools and their lending oracles,
+configured assets, backstop positions, and relevant token balances. It also
+refreshes each lending-oracle history. Before reporting success, it verifies
+the saved queue target, next designated token, unlock time, and the candidate's
+strict balance majority. It does not alter queue timestamps, balances, shares,
+pool status, distribution timestamps, or migration eligibility. Each
+keepalive result and resource-cost report is retained in the run evidence
+directory.
 
 If the Mac sleeps, the container may remain running while Stellar Core stops
 closing ledgers and the RPC reports stale health. Recover that process and

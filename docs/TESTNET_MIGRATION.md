@@ -1,8 +1,7 @@
 # Public-Testnet Migration Exercise
 
-This lane uses the deterministic valuation adapter and the ignored `.testnet/`
-state directory. The independent production backstop-valuation lane, including
-native XLM and fresh 80:20 Comets, is documented in
+This lane uses isolated issued XLM and the ignored `.testnet/` state directory.
+The native-XLM lane, also using fresh 80:20 Comets, is documented in
 [`TESTNET_PRODUCTION_MIGRATION.md`](TESTNET_PRODUCTION_MIGRATION.md).
 
 The public-testnet runner reuses the exact migration transaction assembly used
@@ -27,15 +26,13 @@ contracts rather than relying on official test BLND, USDC, or liquidity:
 - BLND:USDC Comet LP
 - BLND:XLM Comet LP
 
-It uses the deterministic test valuation adapter solely to exercise the
-candidate's immutable valuation interface. Its mutable fixture setters require
-authorization from the isolated runner operator bound at construction. This
-adapter is not a production price source. Before opening the emitter queue,
-the fixture deploys matched Fixed and YieldBlox pools against v2 and v3 using
-the captured reserve configurations. Both v2 pools receive BLND:USDC and enter
-the incumbent reward zone. Both v3 pools receive all three backstop tiers and
-enter the candidate reward zone. Fixed v3 routes its pool emission tranche to
-EURC borrowing, while YieldBlox v3 routes it to USDC supply.
+The candidate backstop values both LP tiers directly from the current Comet
+reserves. Before opening the emitter queue, the fixture deploys matched Fixed
+and YieldBlox pools against v2 and v3 using the captured reserve
+configurations. Both v2 pools receive BLND:USDC and enter the incumbent reward
+zone. Both v3 pools receive all three backstop tiers and enter the candidate
+reward zone. Fixed v3 routes its pool emission tranche to EURC borrowing,
+while YieldBlox v3 routes it to USDC supply.
 
 ## Commands
 

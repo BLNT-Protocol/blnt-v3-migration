@@ -1049,7 +1049,7 @@ ensure_modeled_v2_backstop_deposit() {
 }
 
 ensure_modeled_v3_backstop_deposit() {
-    local model="$1" pool="$2" tier="$3" target="$4" function_name="$5"
+    local model="$1" pool="$2" tier="$3" target="$4"
     local current delta label
 
     current="$(modeled_v3_user_shares "${pool}" "${tier}")"
@@ -1062,7 +1062,8 @@ ensure_modeled_v3_backstop_deposit() {
         label="$(printf '%s' "${tier}" | tr '[:upper:]' '[:lower:]')"
         invoke_transaction_as "deposit-${model}-v3-${label}" \
             "${DEPOSITOR_IDENTITY}" "$(state_value candidate_backstop)" \
-            "${function_name}" \
+            deposit \
+            --tier "${tier}" \
             --from "$(state_value depositor)" \
             --pool-address "${pool}" \
             --amount "${delta}" >/dev/null
@@ -1716,7 +1717,8 @@ command_deploy() {
     ensure_modeled_blnd_usdc_lp_capacity \
         "$((INCUMBENT_BALANCE + CANDIDATE_BALANCE))"
     invoke_transaction_as "deposit-candidate-blnd-usdc-lp" \
-        "${DEPOSITOR_IDENTITY}" "${candidate_id}" deposit_blnd_usdc \
+        "${DEPOSITOR_IDENTITY}" "${candidate_id}" deposit \
+        --tier BlndUsdc \
         --from "${depositor}" \
         --pool-address "${pool_id}" \
         --amount "${CANDIDATE_BALANCE}" >/dev/null
@@ -1724,7 +1726,8 @@ command_deploy() {
     invoke_transaction "activate-fixed-v2-primary-pool" \
         "${fixed_v2_pool}" set_status --pool_status 0 >/dev/null
     invoke_transaction_as "deposit-candidate-usdc" \
-        "${DEPOSITOR_IDENTITY}" "${candidate_id}" deposit_usdc \
+        "${DEPOSITOR_IDENTITY}" "${candidate_id}" deposit \
+        --tier Usdc \
         --from "${depositor}" \
         --pool-address "${pool_id}" \
         --amount "${ACTIVATION_USDC_BALANCE}" >/dev/null
@@ -1856,19 +1859,19 @@ command_deploy_modeled_pools() {
     # never loses its strict BLND:USDC LP majority while the v2 side is funded.
     ensure_modeled_v3_backstop_deposit \
         fixed "${fixed_v3_pool}" BlndUsdc \
-        "${fixed_v3_target}" deposit_blnd_usdc
+        "${fixed_v3_target}"
     ensure_modeled_v2_backstop_deposit fixed "${fixed_v2_pool}"
     ensure_modeled_v3_backstop_deposit \
         yieldblox "${yield_v3_pool}" BlndUsdc \
-        "${yield_v3_target}" deposit_blnd_usdc
+        "${yield_v3_target}"
     ensure_modeled_v2_backstop_deposit yieldblox "${yield_v2_pool}"
 
     ensure_modeled_v3_backstop_deposit \
         fixed "${fixed_v3_pool}" BlndXlm \
-        "${MODELED_BLND_XLM_LP_BALANCE}" deposit_blnd_xlm
+        "${MODELED_BLND_XLM_LP_BALANCE}"
     ensure_modeled_v3_backstop_deposit \
         yieldblox "${yield_v3_pool}" BlndXlm \
-        "${MODELED_BLND_XLM_LP_BALANCE}" deposit_blnd_xlm
+        "${MODELED_BLND_XLM_LP_BALANCE}"
 
     fixed_usdc_shares="$(modeled_v3_user_shares "${fixed_v3_pool}" Usdc)"
     yield_usdc_shares="$(modeled_v3_user_shares "${yield_v3_pool}" Usdc)"
@@ -1885,10 +1888,10 @@ command_deploy_modeled_pools() {
         "${usdc_required}" "modeled-usdc"
     ensure_modeled_v3_backstop_deposit \
         fixed "${fixed_v3_pool}" Usdc \
-        "${MODELED_V3_USDC_BALANCE}" deposit_usdc
+        "${MODELED_V3_USDC_BALANCE}"
     ensure_modeled_v3_backstop_deposit \
         yieldblox "${yield_v3_pool}" Usdc \
-        "${MODELED_V3_USDC_BALANCE}" deposit_usdc
+        "${MODELED_V3_USDC_BALANCE}"
 
     refresh_fixture_oracle_from_state "modeled-pools-activation-oracle"
     for pool in "${fixed_v3_pool}" "${yield_v3_pool}"; do

@@ -497,7 +497,12 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
     let candidate_depositor = Address::generate(&env);
     let candidate_lp_amount = incumbent_lp_amount + 1;
     blnd_usdc_lp_client.mint(&candidate_depositor, &candidate_lp_amount);
-    candidate.deposit_blnd_usdc(&candidate_depositor, &v3_pool_id, &candidate_lp_amount);
+    candidate.deposit(
+        &v3_backstop::BackstopTier::BlndUsdc,
+        &candidate_depositor,
+        &v3_pool_id,
+        &candidate_lp_amount,
+    );
     assert_eq!(
         blnd_usdc_lp_client.balance(&candidate_id),
         blnd_usdc_lp_client.balance(&v2_backstop_id) + 1

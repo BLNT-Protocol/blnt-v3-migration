@@ -443,10 +443,30 @@ fn optimized_candidate_values_four_quotes_with_separate_tick_headroom() {
     blnd_usdc_client.mint(&provider, &(20 * SCALAR_7));
     blnd_xlm_client.mint(&provider, &(20 * SCALAR_7));
     let candidate = backstop::Client::new(&env, &candidate_id);
-    candidate.deposit_blnd_usdc(&provider, &pool, &(20 * SCALAR_7));
-    candidate.deposit_blnd_xlm(&provider, &pool, &(20 * SCALAR_7));
-    candidate.queue_blnd_usdc_withdrawal(&provider, &pool, &(5 * SCALAR_7));
-    candidate.queue_blnd_xlm_withdrawal(&provider, &pool, &(5 * SCALAR_7));
+    candidate.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &provider,
+        &pool,
+        &(20 * SCALAR_7),
+    );
+    candidate.deposit(
+        &backstop::BackstopTier::BlndXlm,
+        &provider,
+        &pool,
+        &(20 * SCALAR_7),
+    );
+    candidate.queue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
+        &provider,
+        &pool,
+        &(5 * SCALAR_7),
+    );
+    candidate.queue_withdrawal(
+        &backstop::BackstopTier::BlndXlm,
+        &provider,
+        &pool,
+        &(5 * SCALAR_7),
+    );
 
     env.cost_estimate().budget().reset_unlimited();
     assert_eq!(

@@ -6,9 +6,10 @@ testnet Soroban resource limits. It records contract IDs, transaction results,
 CLI `--cost` output, balances, and final invariants below the ignored
 `.localnet/` directory.
 
-The same transaction assembly is reused by the isolated public-testnet wrapper
-documented in [TESTNET_MIGRATION.md](TESTNET_MIGRATION.md). Network-specific
-state and keys remain separate.
+The same transaction assembly is reused by the native-XLM public-testnet
+wrapper documented in
+[TESTNET_PRODUCTION_MIGRATION.md](TESTNET_PRODUCTION_MIGRATION.md).
+Network-specific state and keys remain separate.
 
 The runner uses independently issued local assets and real Comet contracts:
 

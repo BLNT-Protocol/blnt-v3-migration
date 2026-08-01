@@ -67,39 +67,6 @@ localnet-claim-emissions:
 localnet-stop:
 	bash scripts/localnet-migration.sh stop
 
-testnet-plan:
-	bash scripts/testnet-migration.sh plan
-
-testnet-validate:
-	bash scripts/testnet-migration.sh validate
-
-testnet-deploy:
-	bash scripts/testnet-migration.sh deploy
-
-testnet-run:
-	bash scripts/testnet-migration.sh run
-
-testnet-status:
-	bash scripts/testnet-migration.sh status
-
-testnet-keepalive:
-	bash scripts/testnet-migration.sh keepalive
-
-testnet-prepare:
-	bash scripts/testnet-migration.sh prepare
-
-testnet-finalize:
-	bash scripts/testnet-migration.sh finalize
-
-testnet-verify:
-	bash scripts/testnet-migration.sh verify
-
-testnet-emissions:
-	bash scripts/testnet-migration.sh emissions
-
-testnet-claim-emissions:
-	bash scripts/testnet-migration.sh claim-emissions
-
 testnet-production-plan:
 	bash scripts/testnet-production-migration.sh plan
 

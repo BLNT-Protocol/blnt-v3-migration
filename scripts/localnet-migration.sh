@@ -10,19 +10,25 @@ case "${NETWORK_MODE}" in
         WORK_DIR="${BLEND_LOCALNET_WORK_DIR:-${ROOT_DIR}/.localnet}"
         RPC_PORT="${BLEND_LOCALNET_RPC_PORT:-8000}"
         RPC_URL="${BLEND_MIGRATION_RPC_URL:-http://127.0.0.1:${RPC_PORT}/soroban/rpc}"
+        HORIZON_URL="${BLEND_MIGRATION_HORIZON_URL:-http://127.0.0.1:${RPC_PORT}}"
+        FRIENDBOT_URL="${BLEND_MIGRATION_FRIENDBOT_URL:-http://127.0.0.1:${RPC_PORT}/friendbot}"
         NETWORK_PASSPHRASE="Standalone Network ; February 2017"
         OPERATOR_IDENTITY="${BLEND_MIGRATION_OPERATOR_IDENTITY:-blend-v3-local-operator}"
         DEPOSITOR_IDENTITY="${BLEND_MIGRATION_DEPOSITOR_IDENTITY:-blend-v3-local-depositor}"
+        DEFAULT_XLM_ASSET_MODE="issued"
         LEDGER_SECONDS=1
         ;;
     testnet)
         NETWORK_LABEL="Public testnet"
-        WORK_DIR="${BLEND_TESTNET_WORK_DIR:-${ROOT_DIR}/.testnet}"
+        WORK_DIR="${BLEND_TESTNET_WORK_DIR:-${ROOT_DIR}/.testnet-production}"
         RPC_PORT=""
         RPC_URL="${BLEND_MIGRATION_RPC_URL:-https://soroban-testnet.stellar.org}"
+        HORIZON_URL="${BLEND_MIGRATION_HORIZON_URL:-https://horizon-testnet.stellar.org}"
+        FRIENDBOT_URL="${BLEND_MIGRATION_FRIENDBOT_URL:-https://friendbot.stellar.org/}"
         NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
-        OPERATOR_IDENTITY="${BLEND_MIGRATION_OPERATOR_IDENTITY:-blend-v3-testnet-operator}"
-        DEPOSITOR_IDENTITY="${BLEND_MIGRATION_DEPOSITOR_IDENTITY:-blend-v3-testnet-depositor}"
+        OPERATOR_IDENTITY="${BLEND_MIGRATION_OPERATOR_IDENTITY:-blend-v3-production-testnet-operator}"
+        DEPOSITOR_IDENTITY="${BLEND_MIGRATION_DEPOSITOR_IDENTITY:-blend-v3-production-testnet-depositor}"
+        DEFAULT_XLM_ASSET_MODE="native"
         LEDGER_SECONDS=5
         ;;
     *)
@@ -30,7 +36,7 @@ case "${NETWORK_MODE}" in
         exit 2
         ;;
 esac
-XLM_ASSET_MODE="${BLEND_MIGRATION_XLM_ASSET_MODE:-issued}"
+XLM_ASSET_MODE="${BLEND_MIGRATION_XLM_ASSET_MODE:-${DEFAULT_XLM_ASSET_MODE}}"
 case "${XLM_ASSET_MODE}" in
     issued) ;;
     native)
@@ -275,6 +281,23 @@ wait_for_network() {
         sleep 2
     done
     die "local RPC did not become healthy within 60 seconds"
+}
+
+fund_and_wait_for_account() {
+    local account="$1"
+
+    for _ in {1..120}; do
+        if curl --fail --silent --show-error --max-time 5 \
+            "${HORIZON_URL}/accounts/${account}" >/dev/null 2>&1
+        then
+            return
+        fi
+        curl --fail --silent --show-error --max-time 10 \
+            --get --data-urlencode "addr=${account}" \
+            "${FRIENDBOT_URL}" >/dev/null 2>&1 || true
+        sleep 1
+    done
+    die "funded account did not become visible through Horizon: ${account}"
 }
 
 new_run_dir() {
@@ -1296,7 +1319,7 @@ keepalive_modeled_pools() {
                 invoke_forced_transaction \
                     "${stamp}-${version}-${model}-registration" \
                     "$(state_value v3_pool_factory)" is_pool \
-                    --pool_id "${pool}" >/dev/null
+                    --pool_address "${pool}" >/dev/null
                 for tier in BlndUsdc BlndXlm Usdc; do
                     invoke_forced_transaction \
                         "${stamp}-${version}-${model}-${tier}-position" \
@@ -1514,11 +1537,9 @@ command_deploy() {
 
     note "Creating and funding isolated ${NETWORK_LABEL} operator ${OPERATOR_IDENTITY}..."
     stellar_cli keys generate "${OPERATOR_IDENTITY}" \
-        --overwrite \
-        --fund \
-        --rpc-url "${RPC_URL}" \
-        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+        --overwrite >/dev/null
     operator="$(stellar_cli keys public-key "${OPERATOR_IDENTITY}")"
+    fund_and_wait_for_account "${operator}"
     issuer="${operator}"
     initialize_state "${operator}"
     state_set "emitter_wasm_sha256" "${EXPECTED_EMITTER_SHA256}"
@@ -1534,11 +1555,9 @@ command_deploy() {
 
     note "Creating and funding isolated ${NETWORK_LABEL} depositor ${DEPOSITOR_IDENTITY}..."
     stellar_cli keys generate "${DEPOSITOR_IDENTITY}" \
-        --overwrite \
-        --fund \
-        --rpc-url "${RPC_URL}" \
-        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+        --overwrite >/dev/null
     depositor="$(stellar_cli keys public-key "${DEPOSITOR_IDENTITY}")"
+    fund_and_wait_for_account "${depositor}"
     state_set "depositor" "${depositor}"
 
     emitter_id="$(deploy_wasm "deploy-deployed-emitter" "${EMITTER_WASM}" "")"
@@ -2049,7 +2068,7 @@ command_verify_modeled_pools() {
                 factory="$(state_value v3_pool_factory)"
                 registered="$(normalize_scalar "$(invoke_view \
                     "verify-${model}-v3-registration" "${factory}" is_pool \
-                    --pool_id "${pool}")")"
+                    --pool_address "${pool}")")"
                 oracle_admin="$(normalize_scalar "$(invoke_view \
                     "verify-${model}-v3-oracle-admin" \
                     "${oracle}" admin)")"
@@ -2330,7 +2349,7 @@ command_keepalive() {
     invoke_forced_transaction "${prefix}-candidate" \
         "${candidate_id}" migration_status >/dev/null
     invoke_forced_transaction "${prefix}-factory" \
-        "${factory_id}" is_pool --pool_id "${pool_id}" >/dev/null
+        "${factory_id}" is_pool --pool_address "${pool_id}" >/dev/null
     invoke_forced_transaction "${prefix}-pool" \
         "${pool_id}" get_config >/dev/null
     invoke_forced_transaction "${prefix}-position" \
@@ -2517,7 +2536,7 @@ command_verify() {
         jq -er '.status | tostring')"
     pool_registered="$(normalize_scalar "$(invoke_view \
         "verify-pool-registration" "${factory_id}" is_pool \
-        --pool_id "${pool_id}")")"
+        --pool_address "${pool_id}")")"
     candidate_pool_valuation="$(invoke_view \
         "verify-candidate-pool-valuation" "${candidate_id}" pool_valuation \
         --pool "${pool_id}")"

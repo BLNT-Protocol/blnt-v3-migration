@@ -1,9 +1,9 @@
 # Comet-Valued Public-Testnet Migration
 
 This isolated lane exercises the candidate's integrated Comet valuation with
-native XLM and fresh Comet contracts on public testnet without modifying the
-issued-XLM `.testnet/` migration. Its state, keys, transaction results, and
-cost evidence live below the ignored `.testnet-production/` directory.
+native XLM and fresh Comet contracts on public testnet. Its state, keys,
+transaction results, and cost evidence live below the ignored
+`.testnet-production/` directory.
 
 The ignored `.testnet-production/` state records the live run. After a fresh
 deployment is verified, its public account, asset, contract, transaction,
@@ -50,7 +50,6 @@ make testnet-production-run
 ```
 
 The runner refuses to overwrite an existing `.testnet-production/state.json`.
-It also uses distinct Stellar CLI identities from the original testnet lane.
 
 ## Operate the queue
 

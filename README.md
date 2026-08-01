@@ -47,9 +47,8 @@ for the migration protocol. Contract behavior is composed by
 cross-version migration acceptance. The contract submodule's v3 specification
 defines the integrated Comet-based backstop valuation.
 Operational instructions live in
-[docs/LOCALNET_MIGRATION.md](docs/LOCALNET_MIGRATION.md) and
-[docs/TESTNET_MIGRATION.md](docs/TESTNET_MIGRATION.md). The isolated native-XLM
-testnet lane is documented in
+[docs/LOCALNET_MIGRATION.md](docs/LOCALNET_MIGRATION.md). The isolated
+native-XLM public-testnet lane is documented in
 [docs/TESTNET_PRODUCTION_MIGRATION.md](docs/TESTNET_PRODUCTION_MIGRATION.md).
 
 ## Toolchain lanes

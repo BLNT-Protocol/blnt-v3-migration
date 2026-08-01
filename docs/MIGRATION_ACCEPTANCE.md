@@ -147,8 +147,7 @@ originating pool tier.
 | Optimized WASM | Contract ABI, serialization, cross-contract behavior, and resource limits |
 | Protocol-27 compatibility harness | Exact deployed SDK-22 v2 and emitter WASM interacting with optimized v3 WASM |
 | Local Quickstart | Unshortened production queue, resumability, TTL keepalive, transaction costs, and final invariants |
-| Public testnet | Production-style transaction assembly and wall-clock queue operation using isolated test assets |
-| Native-XLM public-testnet lane | Real 80:20 Comets and optimized oracle-free backstop valuation integrated into the candidate backstop |
+| Native-XLM public testnet | Production-style transaction assembly, wall-clock queue operation, real 80:20 Comets, and integrated oracle-free backstop valuation |
 
 The compatibility harness MUST invoke at least one deployed v2 backstop entry
 point through the Protocol-27 host and complete the deployed-emitter swap into

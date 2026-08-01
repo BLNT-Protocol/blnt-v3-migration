@@ -1,0 +1,134 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-08-01T19:13:36Z",
+  "network": {
+    "name": "Stellar Testnet",
+    "passphrase": "Test SDF Network ; September 2015",
+    "rpc_url": "https://soroban-testnet.stellar.org",
+    "protocol": 27,
+    "xlm_asset_mode": "native"
+  },
+  "source": {
+    "migration_repository_commit": "510aedca7aef133f5f61625864d0b4b1b73812d4",
+    "contracts_repository_commit": "9ef1df4016a5b65b4bcec82771b91c4db6f3d1d0",
+    "dirty": false
+  },
+  "accounts": {
+    "operator": "GARVKDQCPFNH5JKUGLLYN5NPHHF3F3M2DXUKCCUFKQUDVWPUIPG5CDA4",
+    "depositor": "GC3WONAK6L5XWSP227QVYK4EI4S7GZY52SL56HDNQCVAASHQVCQP2AE4"
+  },
+  "artifacts": {
+    "emitter_sha256": "438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89",
+    "v2_pool_factory_sha256": "31328050548831f63d2b72e37bcfd0bb7371b7907135755dbe09ed434d755ca9",
+    "v2_backstop_sha256": "c1f4502a757e25c611f5a159bc1ab0eef64085adac6c68123dca66e87faffbc2",
+    "v2_pool_sha256": "a41fc53d6753b6c04eb15b021c55052366a4c8e0e21bc72700f461264ec1350e",
+    "v3_pool_factory_sha256": "5560ab09cbe373cf1a5fc1acdf951a4a069f6c41236bf9a438a3d43e66131595",
+    "v3_backstop_sha256": "3f06a9ee4ff3b33e75c14b0b97c00e8a00fced18a03dc326d1f20175b570a66e",
+    "v3_pool_sha256": "360763bce3e6d7598b1711461c98cf523dd3e4c55a2c447fd47ace1864eb1006",
+    "comet_sha256": "5d721fa580714291f6846fc01738e86d70acb47e449ea75312e272a0f7436dd8",
+    "lending_oracle_sha256": "ee498142dbeb4de4d60a1d5e0741669c28ebe00f6265762fb160afaf412aa0b8"
+  },
+  "assets": {
+    "BLND": "CALWPHWH3PVFFICH2MIUS4P6BB2MHZL7I2GQHGSV5FJI2TXBSDN4JKZX",
+    "USDC": "CDR7K6Y66CKMWJQJ6G3ZZBEDU2EQT5BOMLM2L7Q3SZH4GVONL3PESGFP",
+    "XLM": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "EURC": "CDF7A66XITHBDUPMSTS6AUSMUJNKIEEXGSUQF2KWWGUFMTSFHCE2THP6",
+    "AQUA": "CB543QMFBUWCE5IZHNO767DI6RFX2GYDZP54TGDUX2CSBLNBV5LEER6D",
+    "USDGLO": "CCBLQ6OQY5KTFVGTMJ3Y5AGP7UCOEDC7ENSRIORKQBDJ7JUV35JDFUCW",
+    "USTRY": "CB4OAG6CS2YEEBTOT6UNDPAYYBHECWWK4JLQWVO3UA34S5TERKUBR56I",
+    "CETES": "CDAKUDTO4BQC3DSEHMSCKY67ZMQKRCGL5LWW2G35XH5WHXSMW2N7XHYL",
+    "PYUSD": "CAQEXZ5DTVZA2M2BRYNNPSE27QPLOM6TM66QA5O4PKXUCTKKUE6R5KHD"
+  },
+  "comet_pools": {
+    "BLND_USDC": {
+      "contract_id": "CDSEROHWEQ36T57LKEBLKL6PEQYAADFADAV3W5PQ6OGPB476262RSATG",
+      "weights": {
+        "BLND": 80,
+        "USDC": 20
+      }
+    },
+    "BLND_XLM": {
+      "contract_id": "CAWCYQVHIEN5PTDVKTRA3RHEJDQOCORQFEGYGU3WLUWELECRF5UV3QMB",
+      "weights": {
+        "BLND": 80,
+        "XLM": 20
+      }
+    }
+  },
+  "protocol": {
+    "emitter": "CBFFTZC2VS2IDKWBCHUXTRTQTJ4QN5MXWGSS7AHGPWV5YXB3MGIPZXHT",
+    "v2": {
+      "backstop": "CDT3MYMEIS7DFZMLI6ZNZU3GADMBJWJNQ4PYHW4NKMHOA2CB5MXPS42W",
+      "pool_factory": "CATXBIBHLFRKC57UZWGRAWNMLIXNAYOYN3CHDVNYPIBFPAHIFHUHCVYS"
+    },
+    "v3": {
+      "backstop": "CA2YHCQBO56GJORKLP6RQ3CDKTTOZR4T3AKLRDBZHCEVBA32VRBSVT2H",
+      "pool_factory": "CB2NP2EWZ4LJ5THDBCYRU2CZDWNYZFVQIUX6TV2UCB4PQBJUCJNMSFW5"
+    }
+  },
+  "modeled_pools": {
+    "fixed": {
+      "v2": {
+        "pool": "CB4DTPMYKJQFOPVNVLMGYEFRYO4HQNRKM6HSNUA2PCJC7IHDY2VAUPD5",
+        "oracle": "CA4PSXWY7FX7YTCMQIY6WB7TFAQAPZIFKG6IEANB4KXGRYQVI6GGIDUE",
+        "status": "admin_active",
+        "reward_zone_member": true,
+        "blnd_usdc_base_units": "220000000000"
+      },
+      "v3": {
+        "pool": "CCXXTIFRL7KCSIHTBF4X5XV6FHBKQ7X2XFVL4AJ6HALICSBRTQHWQ74I",
+        "oracle": "CAPK3EOT2CJCXXAYRR743VDGYUPL67O6OS4AZ3TWFUS2Q3YUEUEA27NQ",
+        "status": "admin_active",
+        "reward_zone_member": true,
+        "pool_emission_position": "EURC borrow",
+        "backstop_base_units": {
+          "BLND_USDC": "220000000001",
+          "BLND_XLM": "100000000",
+          "USDC": "125000000000"
+        }
+      }
+    },
+    "yieldblox": {
+      "v2": {
+        "pool": "CABHRGSDCNIUVMZ5E74YN5UMV4IR7PKZZXKVMD72LT6Z2DDL3JDVRABY",
+        "oracle": "CAFER7XNOAAAAY5MOCA3SU3K7COD36ZNZOUSV5ARJLIZD2UYN3PLH3CL",
+        "status": "admin_active",
+        "reward_zone_member": true,
+        "blnd_usdc_base_units": "220000000000"
+      },
+      "v3": {
+        "pool": "CBFHI7AYBI45H52DAGVYU55R6VDMS7O4P24BUHEMOQ5HDKP5SQ5PIBFX",
+        "oracle": "CCBS5IEHWEV3ILFJBKTD3LFF6IFIYSVDBQF7VEPJ26UMFXYQUIUYUTUD",
+        "status": "admin_active",
+        "reward_zone_member": true,
+        "pool_emission_position": "USDC supply",
+        "backstop_base_units": {
+          "BLND_USDC": "220000000000",
+          "BLND_XLM": "100000000",
+          "USDC": "125000000000"
+        }
+      }
+    }
+  },
+  "reward_zones": {
+    "v2": [
+      "CABHRGSDCNIUVMZ5E74YN5UMV4IR7PKZZXKVMD72LT6Z2DDL3JDVRABY",
+      "CB4DTPMYKJQFOPVNVLMGYEFRYO4HQNRKM6HSNUA2PCJC7IHDY2VAUPD5"
+    ],
+    "v3": [
+      "CBFHI7AYBI45H52DAGVYU55R6VDMS7O4P24BUHEMOQ5HDKP5SQ5PIBFX",
+      "CCXXTIFRL7KCSIHTBF4X5XV6FHBKQ7X2XFVL4AJ6HALICSBRTQHWQ74I"
+    ]
+  },
+  "migration": {
+    "phase": "open",
+    "queue_transaction": "7b2806144abb1c739d6c81d075114551cd0d62bc31bd4fa16301a1fd4423fc0e",
+    "epoch_started_at": "2026-08-01T06:21:31Z",
+    "prepare_not_before": "2026-08-25T06:21:31Z",
+    "unlock_at": "2026-09-01T06:21:31Z",
+    "incumbent_blnd_usdc_base_units": "440000000000",
+    "candidate_blnd_usdc_base_units": "440000000001",
+    "queued_backstop": "CA2YHCQBO56GJORKLP6RQ3CDKTTOZR4T3AKLRDBZHCEVBA32VRBSVT2H",
+    "queued_designated_token": "CAWCYQVHIEN5PTDVKTRA3RHEJDQOCORQFEGYGU3WLUWELECRF5UV3QMB"
+  }
+}

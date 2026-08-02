@@ -269,23 +269,33 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
 
     env.cost_estimate().budget().reset_unlimited();
     assert_eq!(
-        candidate.pool_valuation(&pool),
-        backstop::PoolValuation {
-            active_blnd: backstop::BlndEmissionValues {
-                blnd_usdc: 240 * SCALAR_7,
-                blnd_xlm: 240 * SCALAR_7,
+        candidate.pool_data(&pool),
+        backstop::PoolData {
+            blnd_usdc: backstop::PoolTierData {
+                active_blnd: 240 * SCALAR_7,
+                active_value: 15 * SCALAR_7,
+                assets: 20 * SCALAR_7,
+                queued_shares: 5 * SCALAR_7,
+                queued_value: 5 * SCALAR_7,
+                shares: 20 * SCALAR_7,
             },
-            active_values: backstop::ActivationValues {
-                blnd_usdc: 15 * SCALAR_7,
-                blnd_xlm: 15 * SCALAR_7,
-                usdc: 0,
+            blnd_xlm: backstop::PoolTierData {
+                active_blnd: 240 * SCALAR_7,
+                active_value: 15 * SCALAR_7,
+                assets: 20 * SCALAR_7,
+                queued_shares: 5 * SCALAR_7,
+                queued_value: 5 * SCALAR_7,
+                shares: 20 * SCALAR_7,
             },
-            queued_values: backstop::ActivationValues {
-                blnd_usdc: 5 * SCALAR_7,
-                blnd_xlm: 5 * SCALAR_7,
-                usdc: 0,
+            usdc: backstop::PoolTierData {
+                active_blnd: 0,
+                active_value: 0,
+                assets: 0,
+                queued_shares: 0,
+                queued_value: 0,
+                shares: 0,
             },
-            valid_until: u64::MAX,
+            valuation_valid_until: u64::MAX,
         }
     );
     let resources = env.cost_estimate().resources();

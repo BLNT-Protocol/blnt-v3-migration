@@ -2374,13 +2374,8 @@ command_keepalive() {
         --tier Usdc \
         --user "${depositor}" \
         --pool "${pool_id}" >/dev/null
-    invoke_forced_transaction "${prefix}-blnd-usdc-tier-state" \
-        "${candidate_id}" pool_tier_state \
-        --tier BlndUsdc \
-        --pool "${pool_id}" >/dev/null
-    invoke_forced_transaction "${prefix}-usdc-tier-state" \
-        "${candidate_id}" pool_tier_state \
-        --tier Usdc \
+    invoke_forced_transaction "${prefix}-pool-data" \
+        "${candidate_id}" pool_data \
         --pool "${pool_id}" >/dev/null
     invoke_forced_transaction "${prefix}-reward-zone" \
         "${candidate_id}" reward_zone >/dev/null
@@ -2569,7 +2564,7 @@ command_verify() {
     local blnd_usdc_token_id blnd_xlm_token_id emitter_backstop
     local candidate_blnd_usdc_token candidate_blnd_xlm_token
     local factory_backstop pool_operator pool_registered pool_status
-    local candidate_pool_valuation incumbent_balance candidate_balance queued_swap
+    local candidate_pool_data incumbent_balance candidate_balance queued_swap
     local migration_status activated_at saved_phase scheduled_backfill funded_backfill
 
     validate_tools
@@ -2602,8 +2597,8 @@ command_verify() {
     pool_registered="$(normalize_scalar "$(invoke_view \
         "verify-pool-registration" "${factory_id}" is_pool \
         --pool_address "${pool_id}")")"
-    candidate_pool_valuation="$(invoke_view \
-        "verify-candidate-pool-valuation" "${candidate_id}" pool_valuation \
+    candidate_pool_data="$(invoke_view \
+        "verify-candidate-pool-data" "${candidate_id}" pool_data \
         --pool "${pool_id}")"
     incumbent_balance="$(normalize_scalar "$(invoke_view \
         "verify-incumbent-balance" "${blnd_usdc_token_id}" balance --id "${incumbent_id}")")"
@@ -2625,14 +2620,14 @@ command_verify() {
     assert_equal "${operator}" "${pool_operator}" "v3 pool admin"
     assert_equal "0" "${pool_status}" "active v3 pool status"
     assert_equal "true" "${pool_registered}" "v3 pool registration"
-    printf '%s' "${candidate_pool_valuation}" | jq -e '
-        (.active_blnd.blnd_usdc | tonumber) > 0 and
-        (.active_blnd.blnd_xlm | tonumber) > 0 and
-        (.active_values.blnd_usdc | tonumber) > 0 and
-        (.active_values.blnd_xlm | tonumber) > 0 and
-        (.active_values.usdc | tonumber) > 0
+    printf '%s' "${candidate_pool_data}" | jq -e '
+        (.blnd_usdc.active_blnd | tonumber) > 0 and
+        (.blnd_xlm.active_blnd | tonumber) > 0 and
+        (.blnd_usdc.active_value | tonumber) > 0 and
+        (.blnd_xlm.active_value | tonumber) > 0 and
+        (.usdc.active_value | tonumber) > 0
     ' >/dev/null ||
-        die "integrated candidate pool valuation is not positive for every tier: ${candidate_pool_valuation}"
+        die "integrated candidate pool valuation is not positive for every tier: ${candidate_pool_data}"
     [[ "${incumbent_balance}" =~ ^[0-9]+$ ]] ||
         die "invalid post-migration incumbent BLND:USDC LP balance"
     [[ "${candidate_balance}" =~ ^[0-9]+$ ]] ||
@@ -2663,7 +2658,7 @@ command_verify() {
         emissions_streaming|emissions_claimed) ;;
         *) state_set "phase" "verified" ;;
     esac
-    state_set "verified_primary_pool_valuation" "${candidate_pool_valuation}"
+    state_set "verified_primary_pool_data" "${candidate_pool_data}"
     state_set "scheduled_backfill" "${scheduled_backfill}"
     state_set "funded_backfill" "${funded_backfill}"
     state_set "verified_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"

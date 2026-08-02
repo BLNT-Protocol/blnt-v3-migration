@@ -2584,9 +2584,10 @@ command_verify() {
     emitter_backstop="$(normalize_scalar "$(invoke_view \
         "verify-emitter-backstop" "${emitter_id}" get_backstop)")"
     candidate_blnd_usdc_token="$(normalize_scalar "$(invoke_view \
-        "verify-candidate-blnd-usdc-lp" "${candidate_id}" backstop_token)")"
+        "verify-candidate-blnd-usdc-lp" "${candidate_id}" backstop_token \
+        --tier BlndUsdc)")"
     candidate_blnd_xlm_token="$(normalize_scalar "$(invoke_view \
-        "verify-candidate-blnd-xlm-lp" "${candidate_id}" tier_token \
+        "verify-candidate-blnd-xlm-lp" "${candidate_id}" backstop_token \
         --tier BlndXlm)")"
     factory_backstop="$(normalize_scalar "$(invoke_view \
         "verify-factory-backstop" "${factory_id}" backstop)")"
@@ -2855,7 +2856,7 @@ command_emissions() {
 
     fixed_blnd_usdc_lp="$(normalize_scalar "$(invoke_transaction_as \
         "claim-backstop-ongoing-blnd" "${DEPOSITOR_IDENTITY}" \
-        "${candidate_id}" claim_ongoing_blnd \
+        "${candidate_id}" claim \
         --tier BlndUsdc \
         --user "${depositor}" \
         --pool "${pool_id}" \
@@ -2875,7 +2876,7 @@ command_emissions() {
     pool_allocated=$((pool_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.pool_allocated | tonumber')))
     fixed_blnd_xlm_lp="$(normalize_scalar "$(invoke_transaction_as \
         "claim-fixed-blnd-xlm-ongoing-blnd" "${DEPOSITOR_IDENTITY}" \
-        "${candidate_id}" claim_ongoing_blnd \
+        "${candidate_id}" claim \
         --tier BlndXlm \
         --user "${depositor}" \
         --pool "${pool_id}" \
@@ -2895,7 +2896,7 @@ command_emissions() {
     pool_allocated=$((pool_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.pool_allocated | tonumber')))
     yield_blnd_usdc_lp="$(normalize_scalar "$(invoke_transaction_as \
         "claim-yieldblox-backstop-ongoing-blnd" \
-        "${DEPOSITOR_IDENTITY}" "${candidate_id}" claim_ongoing_blnd \
+        "${DEPOSITOR_IDENTITY}" "${candidate_id}" claim \
         --tier BlndUsdc \
         --user "${depositor}" \
         --pool "${yield_pool}" \
@@ -2915,7 +2916,7 @@ command_emissions() {
     pool_allocated=$((pool_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.pool_allocated | tonumber')))
     yield_blnd_xlm_lp="$(normalize_scalar "$(invoke_transaction_as \
         "claim-yieldblox-blnd-xlm-ongoing-blnd" \
-        "${DEPOSITOR_IDENTITY}" "${candidate_id}" claim_ongoing_blnd \
+        "${DEPOSITOR_IDENTITY}" "${candidate_id}" claim \
         --tier BlndXlm \
         --user "${depositor}" \
         --pool "${yield_pool}" \

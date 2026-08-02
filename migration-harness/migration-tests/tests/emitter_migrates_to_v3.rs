@@ -186,9 +186,12 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
         v3_backstop::MigrationStatus::Active
     );
     assert_eq!(candidate.activated_at(), Some(queued.unlock_time));
-    assert_eq!(candidate.backstop_token(), blnd_usdc);
     assert_eq!(
-        candidate.tier_token(&v3_backstop::BackstopTier::BlndXlm),
+        candidate.backstop_token(&v3_backstop::BackstopTier::BlndUsdc),
+        blnd_usdc
+    );
+    assert_eq!(
+        candidate.backstop_token(&v3_backstop::BackstopTier::BlndXlm),
         blnd_xlm
     );
 }

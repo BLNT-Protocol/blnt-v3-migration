@@ -243,12 +243,12 @@ Backstop and pool claims MUST remain disabled until migration is active and the
 entire positive schedule is funded. There is no separate backfill claim:
 BLND:USDC owners use the ordinary tier claim, which compounds BLND into
 BLND:USDC LP and credits ordinary tier shares, while pools use the ordinary 30%
-reservation and claim path. Repeat funding or an unexpected balance delta MUST
+allowance and claim path. Repeat funding or an unexpected balance delta MUST
 fail atomically.
 
 ## 8. Transition to ongoing BLND
 
-Backfill and post-migration BLND share one allocation and claim ledger. Before
+Backfill and post-migration BLND share one allocation ledger. Before
 the initial drop, the scheduled backfill is the unfunded portion of that
 aggregate obligation. After exact funding, it is ordinary accounted,
 unclaimed BLND rather than a segregated reserve.
@@ -256,8 +256,7 @@ unclaimed BLND rather than a segregated reserve.
 The candidate MUST bind its BLND token immutably at construction and expose
 whether that binding has passed an exact-delta proof.
 
-Before accumulated-balance reconciliation is allowed, the configured BLND
-binding MUST be verified by one of two exact-delta paths:
+The configured BLND binding MUST be verified by one of two exact-delta paths:
 
 - successful positive backfill funding verifies the initial-drop balance
   increase; or
@@ -270,22 +269,19 @@ emitter invocation and all candidate state changes. Directly prefunding the
 configured BLND token MUST NOT bypass the exact current-call delta.
 
 The permissionless post-migration distributor MUST invoke the emitter and
-reconcile the candidate's actual BLND balance against funded, previously
-accounted, unclaimed BLND. The unfunded backfill obligation MUST be excluded
-from the required actual balance until the exact initial drop succeeds. This
-also accounts exactly once for an emitter distribution invoked directly before
-the candidate entry point.
+allocate one BLND per second elapsed since the candidate's preceding
+checkpoint. It MUST verify that the amount returned for the current invocation
+equals one BLND per second between the emitter checkpoints immediately before
+and after that invocation. This accounts exactly once for a direct emitter
+invocation made before the candidate entry point without observing pool
+allowance claims.
 
-The emitter-reported amount for the current invocation MUST NOT exceed the
-reconciled receipt, and its checkpoint MUST advance without exceeding ledger
-time. Standalone distribution calls require at least five seconds since the
-preceding emitter checkpoint.
-
-Any other unaccounted BLND transferred directly to the candidate is treated as
-donated emissions. After migration, reward-zone pool weight includes active,
-nonqueued underlying BLND in both BLND:USDC and BLND:XLM; the 70% pool tranche
-is divided between those two tiers by the same underlying-BLND measure. Plain
-USDC remains ineligible.
+The emitter checkpoint MUST advance without exceeding ledger time. Standalone
+distribution calls require at least five seconds since the preceding candidate
+checkpoint. Unrelated BLND transfers create no emission entitlement. After
+migration, reward-zone pool weight includes active, nonqueued underlying BLND
+in both BLND:USDC and BLND:XLM; the 70% pool tranche is divided between those
+two tiers by the same underlying-BLND measure. Plain USDC remains ineligible.
 
 ## 9. Next designated token
 

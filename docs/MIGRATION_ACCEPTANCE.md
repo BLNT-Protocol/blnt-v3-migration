@@ -125,10 +125,10 @@ It MUST additionally verify:
   increase and rolls back on an unexpected delta or repeat.
 - No backstop or pool claim can consume the obligation before activation and
   complete funding. Thereafter backfilled BLND uses the same tier-compounding
-  and pool-reservation claim paths as ongoing BLND; no separate backfill claim
+  and pool-allowance claim paths as ongoing BLND; no separate backfill claim
   exists.
-- Aggregate allocations, scoped rounding carries, claims, the unfunded amount,
-  and actual custody conserve the scheduled drop exactly.
+- Aggregate allocations, scoped rounding carries, granted pool allowances,
+  backstop claims, and the unfunded amount conserve the scheduled drop exactly.
 
 ## Transition to ongoing BLND
 
@@ -137,12 +137,12 @@ The suite MUST verify both configured-BLND exact-delta paths:
 1. successful backfill funding; and
 2. the first positive ongoing emitter call when it occurs before funding.
 
-Directly prefunded BLND cannot satisfy this proof. After verification, the
-candidate MUST reconcile actual BLND custody against funded, accounted,
-unclaimed obligations and account for a direct emitter invocation exactly once.
-Before funding, scheduled backfill is excluded from required actual custody. A
-failed balance, timestamp, or binding check MUST roll back the emitter call and
-candidate checkpoint atomically.
+Directly prefunded BLND cannot satisfy this proof. After verification, each
+candidate call MUST allocate elapsed checkpoint time once, verify the current
+emitter mint against its immediately surrounding checkpoints, account for a
+prior direct emitter invocation exactly once, and ignore unrelated BLND
+transfers. A failed amount, timestamp, or binding check MUST roll back the
+emitter call and candidate checkpoint atomically.
 
 Ongoing contract allocation is governed and tested by the v3 contract
 specification. Optimized-WASM acceptance MUST exercise separate BLND:USDC and

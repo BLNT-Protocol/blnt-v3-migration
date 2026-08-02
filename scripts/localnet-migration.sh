@@ -1004,11 +1004,12 @@ modeled_v2_user_shares() {
 modeled_v3_user_shares() {
     local pool="$1" tier="$2"
 
-    normalize_scalar "$(invoke_view "query-modeled-v3-${tier}-shares" \
-        "$(state_value candidate_backstop)" tier_shares \
+    invoke_view "query-modeled-v3-${tier}-balance" \
+        "$(state_value candidate_backstop)" user_balance \
         --tier "${tier}" \
-        --user "$(state_value depositor)" \
-        --pool "${pool}")"
+        --pool "${pool}" \
+        --user "$(state_value depositor)" |
+        jq -er '((.shares | tonumber) + ([.q4w[]?.amount | tonumber] | add // 0)) | tostring'
 }
 
 modeled_v3_blnd_usdc_target() {
@@ -1324,10 +1325,10 @@ keepalive_modeled_pools() {
                 for tier in BlndUsdc BlndXlm Usdc; do
                     invoke_forced_transaction \
                         "${stamp}-${version}-${model}-${tier}-position" \
-                        "${candidate}" tier_shares \
+                        "${candidate}" user_balance \
                         --tier "${tier}" \
-                        --user "${depositor}" \
-                        --pool "${pool}" >/dev/null
+                        --pool "${pool}" \
+                        --user "${depositor}" >/dev/null
                 done
             fi
             while IFS= read -r asset; do
@@ -2365,15 +2366,15 @@ command_keepalive() {
     invoke_forced_transaction "${prefix}-pool" \
         "${pool_id}" get_config >/dev/null
     invoke_forced_transaction "${prefix}-position" \
-        "${candidate_id}" tier_shares \
+        "${candidate_id}" user_balance \
         --tier BlndUsdc \
-        --user "${depositor}" \
-        --pool "${pool_id}" >/dev/null
+        --pool "${pool_id}" \
+        --user "${depositor}" >/dev/null
     invoke_forced_transaction "${prefix}-usdc-position" \
-        "${candidate_id}" tier_shares \
+        "${candidate_id}" user_balance \
         --tier Usdc \
-        --user "${depositor}" \
-        --pool "${pool_id}" >/dev/null
+        --pool "${pool_id}" \
+        --user "${depositor}" >/dev/null
     invoke_forced_transaction "${prefix}-pool-data" \
         "${candidate_id}" pool_data \
         --pool "${pool_id}" >/dev/null

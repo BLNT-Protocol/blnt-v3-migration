@@ -94,10 +94,10 @@ lending oracles are test fixtures, not acceptable mainnet providers.
 
 Every fresh deployment creates the side-by-side lending-pool fixtures whose
 reserve parameters were captured from mainnet Fixed Pool v2 and YieldBlox Pool
-v2. The setup finishes before `begin_migration()`, so both candidate pools are
-prefunded before the backfill clock begins. If the pool portion of deployment
-is interrupted, its idempotent setup can be resumed; verification may also be
-repeated independently:
+v2. The setup finishes before the emitter queue and first candidate
+`distribute()`, so both candidate pools are prefunded before the backfill clock
+begins. If the pool portion of deployment is interrupted, its idempotent setup
+can be resumed; verification may also be repeated independently:
 
 ```bash
 make testnet-production-deploy-modeled-pools
@@ -132,15 +132,15 @@ the tranche to EURC borrowers; its deterministic exercise supplies 500 EURC
 of liquidity, supplies 1,000 USDC as collateral, and borrows 100 EURC.
 YieldBlox v3 directs the tranche to USDC suppliers and is seeded with 1,000
 USDC. Both Fixed v3 and YieldBlox v3 enter the candidate reward zone during
-prefunding. Before migration activation, no candidate emissions can accrue,
-so qualified pools may enter without a distribution checkpoint. After
-activation, later weight-bearing reward-zone edits retain the one-hour
-checkpoint guard. Consequently, the first
-`make testnet-production-emissions` transaction after migration considers both
-pools for the 70% backstop and 30% pool tranches. The exercise gulps and later
-claims the Fixed EURC-borrow and YieldBlox USDC-supply streams independently.
-It also claims each pool's two backstop-tier accruals separately and compounds
-the BLND into the originating BLND:USDC or BLND:XLM Comet position.
+prefunding. The original queue then starts backfill through the ordinary 70/30
+indexes: only BLND:USDC receives the backstop tranche, while both pool
+configurations receive their proportional pool tranche. After activation,
+BLND:XLM also becomes eligible and reward-zone edits retain the one-hour
+checkpoint guard. The finalize command funds the complete positive schedule
+through candidate `drop()` before claims. The exercise gulps and later claims
+the Fixed EURC-borrow and YieldBlox USDC-supply streams independently. It also
+claims each pool's two backstop-tier accruals separately and compounds BLND
+into the originating BLND:USDC or BLND:XLM Comet position.
 
 The controlled lending-oracle fixtures use seven-decimal USD prices. Their
 price setters require authorization from the isolated runner operator bound at

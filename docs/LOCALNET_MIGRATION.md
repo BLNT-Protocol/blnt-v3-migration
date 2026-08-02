@@ -45,11 +45,13 @@ no continuing protocol authority. The exercise uses only the deployed emitter's
 permissionless queue and swap mechanism; it deploys no governance, multisig,
 administrator recovery, or alternate upgrade path.
 
-Successful migration awards zero discretionary BLND. The candidate exposes a
-permissionless post-activation funding path that invokes the emitter's
-initial-drop facility only for the scheduled, time-weighted BLND:USDC backfill,
-capped at 10 million BLND. The current runner does not yet invoke that path, so
-the otherwise available allocation of up to 40 million BLND remains
+Successful migration awards zero discretionary BLND. During the queue, the
+candidate accrues up to 10 million BLND through its ordinary 70/30 emission
+indexes: the backstop tranche is BLND:USDC-only, while the pool tranche follows
+each pool's supply/borrow configuration. After activation, permissionless
+candidate `drop()` funds exactly that schedule through the emitter's initial
+drop; the finalize command invokes and verifies it when the schedule is
+positive. The otherwise available discretionary allocation remains
 undistributed.
 
 ## Prerequisites
@@ -135,8 +137,9 @@ At or after the unlock:
 make localnet-finalize
 ```
 
-`localnet-finalize` invokes the candidate's atomic finalization path and then
-verifies:
+`localnet-finalize` is resumable across the v2-style sequence: it invokes the
+emitter's existing swap, calls candidate `distribute()` to synchronize, calls
+candidate `drop()` for a positive backfill schedule, and then verifies:
 
 - The emitter points to the candidate.
 - The emitter queue is empty.
@@ -147,7 +150,8 @@ verifies:
 - The pool remains registered.
 - The incumbent and next designated tokens match the deployment plan.
 - Incumbent and candidate balances are conserved.
-- The candidate still holds strictly more incumbent BLND:USDC LP tokens.
+- The successful emitter swap proved the required strict incumbent-token
+  comparison at transition time.
 
 Verification can be repeated independently:
 

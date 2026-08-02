@@ -51,6 +51,8 @@ trait DeployedEmitter {
     fn get_last_distro(env: Env, backstop_id: Address) -> u64;
     fn get_backstop(env: Env) -> Address;
     fn get_queued_swap(env: Env) -> Option<QueuedSwap>;
+    fn queue_swap_backstop(env: Env, new_backstop: Address, new_backstop_token: Address);
+    fn swap_backstop(env: Env);
 }
 
 #[contract]
@@ -519,11 +521,14 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
     );
 
     let queue_start = env.ledger().timestamp();
-    assert_eq!(candidate.begin_migration(), queue_start);
+    emitter.queue_swap_backstop(&candidate_id, &next_lp);
+    assert_eq!(candidate.distribute(), 0);
+    assert_eq!(candidate.migration_epoch_start(), Some(queue_start));
     let unlock_time = emitter.get_queued_swap().unwrap().unlock_time;
     env.ledger()
         .set_timestamp(unlock_time - PREPARATION_WINDOW_SECONDS);
-    assert_eq!(candidate.prepare_migration(), unlock_time);
+    assert_eq!(candidate.distribute(), 0);
+    assert_eq!(candidate.verified_queue_unlock(), Some(unlock_time));
     env.ledger().set_timestamp(unlock_time);
 
     // Snapshot all incumbent economic state immediately before the only call
@@ -544,7 +549,8 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
     let candidate_blnd_before = TokenClient::new(&env, &blnd).balance(&candidate_id);
     let incumbent_last_distro = emitter.get_last_distro(&v2_backstop_id);
 
-    assert_eq!(candidate.finalize_migration(), unlock_time);
+    emitter.swap_backstop();
+    assert_eq!(candidate.distribute(), 0);
     assert_eq!(emitter.get_backstop(), candidate_id);
     assert_eq!(emitter.get_last_distro(&candidate_id), unlock_time);
 

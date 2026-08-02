@@ -30,6 +30,8 @@ trait DeployedEmitter {
     fn initialize(env: Env, blnd_token: Address, backstop: Address, backstop_token: Address);
     fn get_backstop(env: Env) -> Address;
     fn get_queued_swap(env: Env) -> Option<QueuedSwap>;
+    fn queue_swap_backstop(env: Env, new_backstop: Address, new_backstop_token: Address);
+    fn swap_backstop(env: Env);
 }
 
 #[derive(Clone)]
@@ -160,20 +162,22 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
     blnd_usdc_token.mint(&incumbent, &(100 * SCALAR_7));
     blnd_usdc_token.mint(&candidate_id, &(100 * SCALAR_7 + 1));
 
-    candidate.begin_migration();
+    emitter.queue_swap_backstop(&candidate_id, &blnd_xlm);
+    assert_eq!(candidate.distribute(), 0);
     let queued = emitter.get_queued_swap().unwrap();
     assert_eq!(queued.new_backstop, candidate_id);
     assert_eq!(queued.new_backstop_token, blnd_xlm);
 
     env.ledger().set_timestamp(queued.unlock_time - 7 * DAY);
-    candidate.prepare_migration();
+    assert_eq!(candidate.distribute(), 0);
     assert_eq!(
         candidate.migration_status(),
         v3_backstop::MigrationStatus::Prepared
     );
 
     env.ledger().set_timestamp(queued.unlock_time);
-    assert_eq!(candidate.finalize_migration(), queued.unlock_time);
+    emitter.swap_backstop();
+    assert_eq!(candidate.distribute(), 0);
 
     assert_eq!(emitter.get_backstop(), candidate_id);
     assert!(emitter.get_queued_swap().is_none());

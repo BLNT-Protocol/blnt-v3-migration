@@ -44,12 +44,12 @@ The emitter's replacement mechanism is permissionless and economically gated:
    token, and an unlock exactly 31 days later.
 3. The incumbent designated token remains the comparison asset throughout the
    queue.
-4. Finalization MUST reject before unlock or if the proposed backstop no longer
+4. The swap MUST reject before unlock or if the proposed backstop no longer
    holds the strictly greater balance.
-5. Finalization first distributes BLND accrued through that timestamp to the
+5. The swap first distributes BLND accrued through that timestamp to the
    incumbent.
 6. It then registers the proposed backstop and proposed designated token and
-   starts the new backstop's distribution clock at the finalization timestamp.
+   starts the new backstop's distribution clock at the swap timestamp.
 
 The emitter compares raw SEP-41 balances. It does not calculate market value,
 LP composition, pool activation, risk, pool attribution, or user ownership.
@@ -108,36 +108,47 @@ backfill.
 
 Construction starts public prefunding and fixes the absolute deadline.
 
-### 5.2 Queue operations
+### 5.2 Queue observation and preparation
+
+The migration uses the v2 emitter and backstop function names:
 
 | Operation | Preconditions | Effect |
 | --- | --- | --- |
-| `begin_migration()` | No accounting epoch; within the original-start limit | Atomically creates the canonical emitter queue and records its original epoch |
-| `open_migration_epoch()` | Another caller's correct queue remains observable | Records that queue as the original epoch without finalizing it |
-| `prepare_migration()` | Open epoch; currently verifiable queue; strictly greater direct balance; preparation window | Idempotently records the verified queue; the original unlock permanently anchors the recovery horizon |
+| Emitter `queue_swap_backstop()` | Strictly greater candidate direct balance; no live queue | Creates the permissionless 31-day queue |
+| Candidate `distribute()` before replacement | Live compatible queue within the immutable limits | Opens or checkpoints the original backfill epoch and, during the final seven days, records a verified prepared queue |
+
+The original queue MUST be observed through `distribute()` before it disappears.
+The emitter does not retain canceled queue history, so an unobserved queue that
+is canceled or swapped cannot later be reconstructed on-chain.
 
 A replacement queue MUST target the configured candidate and BLND:XLM
-designated token, receive fresh verification and preparation, and remain
-within every immutable limit. Cancellation or re-queueing MUST NOT move either
-absolute horizon.
+designated token, receive fresh verification and preparation through
+`distribute()`, and remain within every immutable limit. Cancellation or
+re-queueing MUST NOT move either absolute horizon.
 
-`prepare_migration()` MUST NOT silently adopt a queue when no epoch has been
-recorded. The emitter does not retain canceled queue history, so an unobserved
-queue that is canceled cannot later be reconstructed on-chain.
+Before a replacement queue is prepared, it MUST NOT advance backfill beyond
+the original or most recently verified unlock. A valid replacement catches up
+to its current checkpoint only when final-window preparation succeeds.
 
-The candidate MUST revalidate its qualifying balance at finalization. Loss of
-the strictly greater balance before the emitter swap prevents finalization.
+Observing a queue before a BLND-bearing weight mutation MUST open the epoch and
+require a current distribution checkpoint. This prevents weight added after
+queue creation from receiving retroactive backfill.
 
-### 5.3 Finalization and synchronization
+Preparation MUST revalidate the candidate's strictly greater direct balance.
+The emitter independently repeats that comparison when its swap is invoked, so
+loss of the majority before the swap prevents replacement.
+
+### 5.3 Emitter swap and candidate synchronization
 
 | Operation | Preconditions | Effect |
 | --- | --- | --- |
-| `finalize_migration()` | Prepared, currently verified and unlocked queue; strictly greater balance; within both horizons | Atomically invokes the emitter swap, excludes the final incumbent distribution from candidate accrual, verifies candidate registration, freezes backfill, and enables ongoing emissions |
-| `sync_migration()` | Another caller already swapped the emitter; candidate remains Prepared; currently verified queue; before unlock plus seven days | Verifies candidate registration, freezes backfill at that queue's unlock, and enables ongoing emissions without moving the recovery anchor |
+| Emitter `swap_backstop()` | Prepared candidate operationally; emitter queue unlocked; strictly greater direct balance | Distributes the incumbent's final accrued BLND and registers the candidate and BLND:XLM token |
+| First candidate `distribute()` after replacement | Candidate remains Prepared; before verified unlock plus seven days | Verifies candidate registration, checkpoints backfill through the verified unlock, activates ongoing accounting, and returns zero |
 
-Both paths MUST preserve user positions and enforceable claims, swap no user
-assets, award zero discretionary BLND, and either be idempotent or reject
-repetition without duplicating value.
+The candidate exposes no separate begin, prepare, finalize, or synchronization
+mutator. Permissionless `distribute()` drives its local lifecycle around the
+emitter's existing queue and swap operations, matching the v2 transition
+surface. Repeated calls MUST NOT duplicate value.
 
 The synchronization deadline is seven days after the verified queue's unlock,
 not seven days after the direct swap. A direct swap performed late leaves only
@@ -150,11 +161,10 @@ emitter pointing to a candidate whose local lifecycle remains Prepared. This
 candidate accepts that bounded operational risk rather than adding a
 governance recovery path.
 
-Because the emitter exposes no immutable direct-swap timestamp, recovery-path
-synchronization MUST cap backfill at the verified queue's unlock. Canonical
-finalization ends backfill at its atomic swap-and-activation timestamp. This
-may omit the interval between unlock and a later direct swap, but no interval
-may receive both migration backfill and ongoing BLND.
+Because the emitter exposes no immutable direct-swap timestamp,
+synchronization MUST cap backfill at the verified queue's unlock. This may omit
+the interval between unlock and a later direct swap, but no interval may
+receive both migration backfill and ongoing BLND.
 
 While the emitter points to an unsynchronized Prepared candidate, every
 BLND:USDC or BLND:XLM weight mutation and reward-zone edit MUST fail. Plain
@@ -164,117 +174,84 @@ backfill nor ongoing BLND weight.
 ## 6. Continuous BLND:USDC migration accounting
 
 An accounted BLND:USDC deposit is ordinary second-loss tier capital from the
-moment it is accepted, before or after migration.
+moment it is accepted, before or after migration. Before migration succeeds,
+the same custody also contributes to the candidate's direct emitter-qualifying
+balance and its active, nonqueued shares participate in backfill emissions.
 
-Before migration succeeds, the same shares additionally:
+The original queue opens the ordinary emission indexes at that queue's start.
+Shares already deposited at that time begin accruing immediately. Later
+deposits start at the current index and receive no retroactive credit.
 
-- contribute their tokens to the candidate's direct emitter-qualifying
-  balance; and
-- accumulate migration-backfill weight while deposited if their deposit
-  precedes the currently verified queue's unlock.
+Queueing first checkpoints the owner's accrued BLND, then removes the queued
+shares from future emission weight. Dequeueing resumes at the current index.
+Neither queueing nor withdrawing erases BLND already accrued. There is no
+separate principal-time position, survivor checkpoint, or early-withdrawal
+forfeiture rule.
 
-Backfill-eligible principal MUST record actual contributed LP-token units, not
-the number of shares minted at a non-unit exchange rate. A withdrawal removes
-principal and time basis pro rata to shares burned. Loss absorption does not
-forfeit principal because the capital remained committed and was consumed
-protecting its attributed candidate pool.
-
-Deposits at or after a verified unlock remain ordinary tier capital but have
-zero backfill weight for that queue. If a replacement queue is later verified,
-new deposits before the replacement unlock are eligible from their deposit
-time; an earlier ineligible deposit does not become eligible retroactively.
-
-Queueing a withdrawal alone does not forfeit backfill. Actual withdrawal before
-successful migration forfeits the withdrawn shares' proportional principal and
-time basis.
-
-Migration freezes only temporary backfill weight. It MUST NOT redeem, convert,
-reissue, or change ownership of BLND:USDC tier shares. Activation value,
-second-loss capacity, take-rate eligibility, withdrawal restrictions, and
-underlying-BLND ongoing-emission weight continue to use the ordinary tier
-position.
+Migration MUST NOT redeem, convert, reissue, or change ownership of BLND:USDC
+tier shares. Activation value, second-loss capacity, take-rate eligibility,
+withdrawal restrictions, and post-migration emission weight continue to use the
+ordinary tier position.
 
 The pre-migration loss waterfall applies only to liabilities of candidate v3
 pools connected to this backstop. Candidate capital does not absorb incumbent
 v2 pool losses merely because it also qualifies the emitter replacement.
 The immutable BLND:XLM, BLND:USDC, then plain-USDC waterfall applies before
-and after migration; finalization does not reorder tiers or swap their assets.
+and after migration; replacement does not reorder tiers or swap their assets.
 
 BLND:XLM and plain USDC MAY be deposited before migration but receive no
 migration backfill and do not enter the incumbent balance comparison.
 
 ## 7. Backfill
 
-The original observed emitter queue starts the backfill clock. If candidate
-construction precedes that queue, otherwise eligible prefunding receives
-weight from the prefunding start through finalization.
+The original observed emitter queue starts permissionless backfill
+distribution. Each elapsed eligible second contributes one BLND, subject to the
+10-million-BLND cap. An interval with no positive active BLND:USDC weight in the
+reward zone advances the checkpoint but schedules no BLND.
 
-Scheduled backfill accrues at one BLND per second until the applicable
-finalization cutoff and is capped at 10 million BLND:
+Under the two-retry lifecycle limits and verified-unlock cutoff, continuous
+eligibility over the longest 100-day interval produces at most 8,640,000 BLND.
+The 10-million-BLND ceiling is therefore a safety cap rather than an expected
+award.
 
-\[
-B = \min(t_f-t_0,\ 10{,}000{,}000)
-\]
+Every backfill checkpoint uses the same fixed 70/30 split and cumulative-index
+accounting as ongoing emissions:
 
-where \(t_0\) is the original queue start and \(t_f\) is the canonical or
-recovery cutoff. A position deposited before \(t_0\) still uses its actual
-deposit timestamp in the position-weight formula below; prefunding therefore
-increases that position's relative time-weight without starting aggregate
-scheduled BLND before the original queue.
+- 70% is allocated among reward-zone pools by active, nonqueued underlying
+  BLND in BLND:USDC, then to active BLND:USDC tier shares;
+- 30% is allocated to the same pools for their configured supply/borrow
+  emission positions; and
+- BLND:XLM and plain USDC receive no migration backfill.
 
-Under the two-retry lifecycle limits, the longest scheduled interval is 107
-days and produces at most 9,244,800 BLND. The 10-million-BLND ceiling is
-therefore a safety cap rather than an expected award.
+Pool, tier-index, user-index, and split rounding carry forward at their ordinary
+scopes. A sufficiently recent checkpoint MUST precede weight changes, bounding
+retroactive credit to the configured checkpoint window. Backfill earned before
+shares are queued or withdrawn remains claimable, while those shares earn
+nothing after leaving active weight.
 
-Successful migration awards zero discretionary BLND. The only permitted
-initial-drop issuance is \(B\), sent to the candidate for the claims defined
-here. The unused portion of the emitter's 50-million-BLND ceiling MUST remain
-undistributed.
+The first post-swap `distribute()` checkpoints only through the verified
+unlock. After that cutoff, both tranches use the post-migration emission rules.
 
-For position \(i\), eligible principal tranche \(A_{i,k}\), tranche deposit
-timestamp \(T_{i,k}\), and cutoff \(t_f\):
+Successful migration awards zero discretionary BLND. If scheduled backfill is
+positive, any caller MAY fund it once through candidate `drop()`, which invokes
+the emitter's initial drop. The
+candidate MUST name itself as the only recipient, request exactly the scheduled
+amount, and verify an equal increase in its configured BLND balance. The unused
+portion of the emitter's 50-million-BLND ceiling remains undistributed.
 
-\[
-W_i = \sum_k A_{i,k}(t_f-T_{i,k})
-\]
-
-\[
-B_i =
-\left\lfloor
-B\frac{W_i}{\sum_j W_j}
-\right\rfloor
-\]
-
-Only principal still represented by deposited shares when migration succeeds
-is included. Withdrawing early forfeits weight to the surviving positions
-proportionally; an earlier small deposit receives no special allocation beyond
-its actual principal-time weight.
-
-The candidate MUST freeze the global aggregate weight and each surviving
-position's weight without iterating over all users at finalization.
-
-After migration, any caller MAY invoke one-time backfill funding. The candidate
-MUST request exactly one initial-drop recipient—the candidate itself—for
-exactly \(B\), and MUST verify an exact \(B\) increase in its configured BLND
-balance before committing the funded reserve and BLND binding.
-
-A missing eligible weight, failed emitter call, unexpected balance delta, or
-repeat funding attempt MUST fail atomically.
-
-Claims MUST use the frozen global and position weights in constant time. The
-position owner MUST authorize the claim and MAY select its recipient. Each
-position MAY claim at most once. State updates and the BLND transfer MUST be
-atomic.
-
-Floor-rounding dust remains in the segregated backfill reserve. It MUST NOT be
-withdrawn, reassigned, counted as ongoing emissions, or distributed
-discretionarily. Funded, claimed, and remaining totals MUST be externally
-auditable without iteration.
+Backstop and pool claims MUST remain disabled until migration is active and the
+entire positive schedule is funded. There is no separate backfill claim:
+BLND:USDC owners use the ordinary tier claim, which compounds BLND into
+BLND:USDC LP and credits ordinary tier shares, while pools use the ordinary 30%
+reservation and claim path. Repeat funding or an unexpected balance delta MUST
+fail atomically.
 
 ## 8. Transition to ongoing BLND
 
-Ongoing accounting MUST use BLND actually received after the emitter changes
-recipients and MUST exclude the remaining backfill reserve.
+Backfill and post-migration BLND share one allocation and claim ledger. Before
+the initial drop, the scheduled backfill is the unfunded portion of that
+aggregate obligation. After exact funding, it is ordinary accounted,
+unclaimed BLND rather than a segregated reserve.
 
 The candidate MUST bind its BLND token immutably at construction and expose
 whether that binding has passed an exact-delta proof.
@@ -282,19 +259,22 @@ whether that binding has passed an exact-delta proof.
 Before accumulated-balance reconciliation is allowed, the configured BLND
 binding MUST be verified by one of two exact-delta paths:
 
-- successful backfill funding verifies the initial-drop balance increase; or
-- if backfill was not funded, the first positive ongoing distribution
-  snapshots the configured-token balance before invoking the emitter and
-  requires the balance to increase by exactly the reported amount.
+- successful positive backfill funding verifies the initial-drop balance
+  increase; or
+- if it occurs first, the first positive ongoing distribution snapshots the
+  configured-token balance before invoking the emitter and requires the
+  balance to increase by exactly the reported amount.
 
 The successful proof MUST be stored and exposed. Failure MUST roll back the
 emitter invocation and all candidate state changes. Directly prefunding the
 configured BLND token MUST NOT bypass the exact current-call delta.
 
-The permissionless distributor MUST invoke the emitter and reconcile the
-candidate's actual BLND balance against the remaining backfill reserve and
-previously accounted, unclaimed ongoing BLND. This supports an emitter
-distribution invoked directly before the candidate entry point.
+The permissionless post-migration distributor MUST invoke the emitter and
+reconcile the candidate's actual BLND balance against funded, previously
+accounted, unclaimed BLND. The unfunded backfill obligation MUST be excluded
+from the required actual balance until the exact initial drop succeeds. This
+also accounts exactly once for an emitter distribution invoked directly before
+the candidate entry point.
 
 The emitter-reported amount for the current invocation MUST NOT exceed the
 reconciled receipt, and its checkpoint MUST advance without exceeding ledger
@@ -302,7 +282,10 @@ time. Standalone distribution calls require at least five seconds since the
 preceding emitter checkpoint.
 
 Any other unaccounted BLND transferred directly to the candidate is treated as
-donated ongoing emissions.
+donated emissions. After migration, reward-zone pool weight includes active,
+nonqueued underlying BLND in both BLND:USDC and BLND:XLM; the 70% pool tranche
+is divided between those two tiers by the same underlying-BLND measure. Plain
+USDC remains ineligible.
 
 ## 9. Next designated token
 
@@ -318,7 +301,7 @@ or alternate upgrade path.
 
 Deployment keys and transaction submitters are operational actors only and
 MUST NOT receive continuing protocol authority merely because they deploy,
-fund, prepare, finalize, or synchronize the candidate.
+queue, swap, distribute, or fund the candidate.
 
 No recovery path may override the emitter's queue, balance comparison, or
 unlock time. Bounded permissionless recovery may only observe, validate, or
@@ -332,8 +315,8 @@ A migration-ready candidate MUST:
 2. pass inherited v2 tests and the candidate's native and optimized-WASM
    suites;
 3. execute exact deployed SDK-22 v2 and emitter WASM on the Protocol-27 host;
-4. complete canonical and direct-swap recovery paths within the documented
-   limits;
+4. complete the direct emitter-swap and candidate-distribution path within the
+   documented limits;
 5. preserve incumbent positions unchanged and operational;
 6. conserve candidate tier capital, backfill, and ongoing BLND through every
    lifecycle transition; and

@@ -32,38 +32,42 @@ The cross-version suite MUST verify:
 - The candidate directly holds strictly more of the incumbent designated
   token than the incumbent backstop; equality is insufficient.
 - The incumbent designated token remains the comparison asset for the complete
-  queue, and a balance deficit permits cancellation and prevents
-  finalization.
+  queue, and a balance deficit permits cancellation and prevents the swap.
 - Queue unlock occurs exactly 31 days after creation and cannot be bypassed.
-- `begin_migration()` atomically creates the canonical emitter queue and opens
-  the accounting epoch.
-- A compatible queue created directly on the emitter is not adopted until
-  `open_migration_epoch()` records it.
-- `prepare_migration()` is available only during the final seven days,
-  verifies the live queue, and permanently anchors the recovery horizon.
+- The queue is created through the emitter's existing
+  `queue_swap_backstop()` function.
+- The first pre-swap candidate `distribute()` observes the compatible queue
+  and opens its accounting epoch.
+- A candidate `distribute()` during the final seven days verifies the live
+  queue and permanently anchors the recovery horizon.
 - At most two replacement queues may be verified. Cancellation and requeueing
   do not extend the 76-day recovery horizon or 138-day construction-anchored
   deadline.
+- An unverified replacement queue cannot advance backfill beyond the original
+  or most recently verified unlock; a valid replacement catches up only after
+  final-window verification succeeds.
 - The queued recipient is the exact candidate and the next designated token is
   its configured BLND:XLM Comet LP.
-- Canonical `finalize_migration()` atomically performs the emitter swap and
-  activates the candidate.
-- If another caller swaps the emitter directly, `sync_migration()` can recover
+- The emitter's existing `swap_backstop()` performs the only replacement path.
+- The first candidate `distribute()` after that swap activates the candidate
   during the fixed seven-day grace period and cannot synchronize a canceled or
   incompatible queue.
+- The candidate exposes v2-named `distribute() -> i128` and `drop()` migration
+  entry points and no separate begin, prepare, finalize, synchronization, or
+  backfill-funding mutator.
 - A successful direct swap remains synchronizable after the candidate loses
   its former strict BLND:USDC majority.
 - The synchronization deadline is measured from the verified unlock, not from
   a later direct swap.
 - While the emitter points to an unsynchronized Prepared candidate,
   BLND-bearing tier-weight mutations and reward-zone edits fail closed.
-- Queue creation, observation, preparation, finalization, and synchronization
-  are permissionless and expose no governance, multisig, administrator,
-  emergency override, privileged WASM replacement, or alternate migration
-  path.
+- Queue creation, observation, preparation, emitter swap, and candidate
+  synchronization are permissionless and expose no governance, multisig,
+  administrator, emergency override, privileged WASM replacement, or alternate
+  migration path.
 
-Finalization MUST distribute the incumbent's time-accrued BLND before changing
-the emitter recipient. The candidate's ongoing distribution clock begins at
+The emitter swap MUST distribute the incumbent's time-accrued BLND before
+changing its recipient. The candidate's ongoing distribution clock begins at
 that transition and receives no ongoing BLND for the preceding interval.
 
 ## Incumbent isolation
@@ -72,12 +76,12 @@ The accelerated harness MUST establish v2 supplier, borrower, collateral,
 debt, and backstop-share positions in the exact deployed SDK-22 contracts
 before migration.
 
-Immediately before finalization it MUST snapshot those positions and relevant
-token balances. Immediately afterward it MUST prove that:
+Immediately before the emitter swap it MUST snapshot those positions and
+relevant token balances. Immediately afterward it MUST prove that:
 
 - no v2 principal, collateral, debt, backstop share, or existing claim moved,
   converted, closed, or entered v3;
-- the only incumbent balance change caused by finalization is the emitter's
+- the only incumbent balance change caused by the swap is the emitter's
   final time-accrued BLND distribution;
 - the next positive emitter distribution goes only to the candidate; and
 - ordinary v2 repay, supply, and backstop-deposit entry points remain usable.
@@ -96,42 +100,49 @@ It MUST additionally verify:
 - BLND:XLM and plain USDC never affect the incumbent balance comparison or
   migration backfill.
 - Prefunding begins at candidate construction, and the original queue must
-  start within 31 days.
-- Only eligible BLND:USDC deposited before the applicable verified unlock
-  accrues principal-time weight.
-- Queueing preserves weight, while actual full or partial withdrawal forfeits
-  the withdrawn position's proportional principal and time basis.
-- Loss absorption does not erase the history of capital that remained
-  committed to the candidate.
-- Canonical finalization ends backfill at its atomic transition timestamp.
-  Recovery synchronization caps it at the verified unlock, so no interval
-  receives both backfill and ongoing emissions.
-- Scheduled backfill accrues at one BLND per second from the original queue
-  start, remains capped at 10 million BLND, and reaches at most 9,244,800 BLND
-  under the bounded 107-day lifecycle.
-- Successful migration awards zero discretionary BLND. The initial drop names
-  only the candidate and requests exactly the scheduled backfill; the
+  start within 31 days. Shares present when it starts accrue from that original
+  queue checkpoint rather than from construction.
+- Before migration, only active, nonqueued BLND:USDC in reward-zone pools
+  supplies pool and user weight. Later deposits start at the current index.
+- Queueing checkpoints already accrued BLND and stops future accrual for the
+  queued shares. Dequeueing resumes at the current index; withdrawal cannot
+  erase prior accrual.
+- BLND:XLM becomes emission-eligible only after migration. Plain USDC remains
+  ineligible before and after.
+- The first post-swap candidate `distribute()` caps backfill at the verified
+  unlock, so no interval receives both backfill and ongoing emissions.
+- Eligible backfill accrues at one BLND per second from the original queue
+  start, uses the ordinary fixed 70/30 split and cumulative indexes, remains
+  capped at 10 million BLND, and reaches at most 8,640,000 BLND under the
+  bounded 100-day verified-unlock lifecycle. Intervals with no positive
+  eligible pool weight schedule no BLND.
+- The pre-migration 70% tranche is assigned only to BLND:USDC depositors; the
+  30% tranche uses each pool's ordinary supply/borrow configuration.
+- Successful migration awards zero discretionary BLND. Candidate `drop()`
+  names only the candidate and requests exactly the scheduled backfill; the
   remaining emitter allocation stays undistributed.
-- Funding succeeds once only after an exact configured-BLND balance increase
-  and rolls back on missing eligible weight, an unexpected delta, or a repeat.
-- Claims require position-owner authorization, permit an owner-selected
-  recipient, use frozen constant-time checkpoints, and cannot be repeated.
-- Funded, claimed, and reserved totals conserve the drop exactly. Floor dust
-  remains segregated and cannot become ongoing emissions or a discretionary
-  award.
+- Positive funding succeeds once only after an exact configured-BLND balance
+  increase and rolls back on an unexpected delta or repeat.
+- No backstop or pool claim can consume the obligation before activation and
+  complete funding. Thereafter backfilled BLND uses the same tier-compounding
+  and pool-reservation claim paths as ongoing BLND; no separate backfill claim
+  exists.
+- Aggregate allocations, scoped rounding carries, claims, the unfunded amount,
+  and actual custody conserve the scheduled drop exactly.
 
 ## Transition to ongoing BLND
 
 The suite MUST verify both configured-BLND exact-delta paths:
 
 1. successful backfill funding; and
-2. when no backfill is funded, the first positive ongoing emitter call.
+2. the first positive ongoing emitter call when it occurs before funding.
 
 Directly prefunded BLND cannot satisfy this proof. After verification, the
-candidate MUST reconcile its actual BLND custody, exclude the remaining
-backfill reserve and already-accounted claims, and account for a direct emitter
-invocation exactly once. A failed balance, timestamp, or binding check MUST
-roll back the emitter call and candidate checkpoint atomically.
+candidate MUST reconcile actual BLND custody against funded, accounted,
+unclaimed obligations and account for a direct emitter invocation exactly once.
+Before funding, scheduled backfill is excluded from required actual custody. A
+failed balance, timestamp, or binding check MUST roll back the emitter call and
+candidate checkpoint atomically.
 
 Ongoing contract allocation is governed and tested by the v3 contract
 specification. Optimized-WASM acceptance MUST exercise separate BLND:USDC and
@@ -193,7 +204,7 @@ duplicate queue after interruption.
 The candidate may be described as migration-ready only when:
 
 1. every contract-suite prerequisite passes;
-2. canonical finalization and direct-swap synchronization paths pass;
+2. the direct emitter-swap and candidate-distribution path passes;
 3. cancellation, expiry, balance-race, retry, and repeated-call cases pass;
 4. incumbent positions remain unchanged and operational;
 5. migration capital, backfill, and ongoing BLND remain conserved;

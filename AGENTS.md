@@ -130,8 +130,9 @@ a side effect of work in this repository.
   mechanism. V2-compatible transferable pool administration is pool-local and
   is not a protocol-upgrade path.
 - A successful migration awards zero discretionary BLND. Any one-time BLND
-  distributed in connection with migration must fund only the scheduled,
-  time-weighted BLND:USDC backfill and must not exceed 10 million BLND.
+  distribution must exactly fund the scheduled emission-index backfill, use
+  the ordinary 70/30 split, and remain capped at 10 million BLND. Before
+  migration, only BLND:USDC is eligible for the backstop tranche.
 - Pool-status and reward-zone threshold decisions must use the same canonical
   activation valuation. Stored pool status is not an additional reward-zone
   eligibility gate.
@@ -159,9 +160,10 @@ a side effect of work in this repository.
   additional stored pool-status gate. V3 replacement weight uses eligible
   underlying BLND across active BLND:USDC and BLND:XLM tier positions; plain
   USDC and Q4W positions have zero emission weight.
-- Ongoing 70% backstop claims are tier-specific: BLND:USDC accrual compounds
-  into BLND:USDC, and BLND:XLM accrual compounds into BLND:XLM. The resulting
-  LP shares return to the same user's active position in the same pool.
+- Backfill and ongoing 70% claims share the tier-specific claim path:
+  BLND:USDC accrual compounds into BLND:USDC, and post-migration BLND:XLM
+  accrual compounds into BLND:XLM. The LP shares return to the same user's
+  active position in the same pool; accrued backfill is never forfeited.
 - Preserve the v2 action matrix: On-Ice blocks borrowing and auction
   cancellation; Frozen additionally blocks both supply and collateral supply.
 - Never involuntarily swap a depositor's BLND:USDC backstop asset. Conversion

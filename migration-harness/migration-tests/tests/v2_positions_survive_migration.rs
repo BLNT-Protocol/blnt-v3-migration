@@ -523,12 +523,18 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
     let queue_start = env.ledger().timestamp();
     emitter.queue_swap_backstop(&candidate_id, &next_lp);
     assert_eq!(candidate.distribute(), 0);
-    assert_eq!(candidate.migration_epoch_start(), Some(queue_start));
+    assert_eq!(
+        candidate.migration_state().migration_epoch_start,
+        Some(queue_start)
+    );
     let unlock_time = emitter.get_queued_swap().unwrap().unlock_time;
     env.ledger()
         .set_timestamp(unlock_time - PREPARATION_WINDOW_SECONDS);
     assert_eq!(candidate.distribute(), 0);
-    assert_eq!(candidate.verified_queue_unlock(), Some(unlock_time));
+    assert_eq!(
+        candidate.migration_state().verified_queue_unlock,
+        Some(unlock_time)
+    );
     env.ledger().set_timestamp(unlock_time);
 
     // Snapshot all incumbent economic state immediately before the only call

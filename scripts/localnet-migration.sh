@@ -1440,7 +1440,7 @@ command_start() {
 begin_deployed_migration() {
     local emitter_id incumbent_id candidate_id blnd_usdc_token_id blnd_xlm_token_id
     local incumbent_balance candidate_balance epoch_start queued_swap unlock_time
-    local queued_candidate queued_blnd_xlm_token migration_status
+    local queued_candidate queued_blnd_xlm_token migration_state migration_status
 
     emitter_id="$(state_value emitter)"
     incumbent_id="$(state_value incumbent_backstop)"
@@ -1461,8 +1461,9 @@ begin_deployed_migration() {
     (( candidate_balance > incumbent_balance )) ||
         die "candidate does not strictly exceed the incumbent BLND:USDC LP balance"
 
-    migration_status="$(invoke_view \
-        "query-candidate-before-begin" "${candidate_id}" migration_status)"
+    migration_state="$(invoke_view \
+        "query-candidate-before-begin" "${candidate_id}" migration_state)"
+    migration_status="$(printf '%s' "${migration_state}" | jq -c '.status')"
     if printf '%s' "${migration_status}" | jq -e '
         . == "Pending" or
         (type == "object" and (has("Pending") or .tag? == "Pending"))
@@ -1477,17 +1478,17 @@ begin_deployed_migration() {
         fi
         invoke_transaction \
             "observe-migration-queue" "${candidate_id}" distribute >/dev/null
-        epoch_start="$(normalize_scalar "$(invoke_view \
-            "query-open-migration-epoch" \
-            "${candidate_id}" migration_epoch_start)")"
+        migration_state="$(invoke_view \
+            "query-open-migration-state" "${candidate_id}" migration_state)"
+        epoch_start="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
+            jq -c '.migration_epoch_start')")"
     elif printf '%s' "${migration_status}" | jq -e '
         . == "Open" or . == "Prepared" or
         (type == "object" and
             (has("Open") or has("Prepared") or .tag? == "Open" or .tag? == "Prepared"))
     ' >/dev/null; then
-        epoch_start="$(normalize_scalar "$(invoke_view \
-            "recover-open-migration-epoch" \
-            "${candidate_id}" migration_epoch_start)")"
+        epoch_start="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
+            jq -c '.migration_epoch_start')")"
     else
         die "cannot begin deployment from candidate migration state ${migration_status}"
     fi
@@ -2214,7 +2215,7 @@ EOF
 command_status() {
     local emitter_id incumbent_id candidate_id pool_id blnd_xlm_token_id blnd_usdc_token_id
     local unlock_time prepare_not_before phase
-    local emitter_backstop incumbent_balance candidate_balance queued_swap migration_status
+    local emitter_backstop incumbent_balance candidate_balance queued_swap migration_state
     local pool_operator pool_status now expiration
 
     validate_tools
@@ -2237,7 +2238,8 @@ command_status() {
     candidate_balance="$(normalize_scalar "$(invoke_view \
         "status-candidate-balance" "${blnd_usdc_token_id}" balance --id "${candidate_id}")")"
     queued_swap="$(invoke_view "status-emitter-queue" "${emitter_id}" get_queued_swap)"
-    migration_status="$(invoke_view "status-candidate-migration" "${candidate_id}" migration_status)"
+    migration_state="$(invoke_view \
+        "status-candidate-migration" "${candidate_id}" migration_state)"
     pool_operator="$(normalize_scalar "$(invoke_view \
         "status-pool-admin" "${pool_id}" get_admin)")"
     pool_status="$(invoke_view \
@@ -2263,7 +2265,7 @@ ${NETWORK_LABEL} migration status
   candidate: ${candidate_id}
   incumbent BLNDUSDC: ${incumbent_balance}
   candidate BLNDUSDC: ${candidate_balance}
-  candidate state: ${migration_status}
+  candidate state: ${migration_state}
   primary candidate pool: ${pool_id}
   candidate pool admin: ${pool_operator}
   candidate pool status: ${pool_status}
@@ -2360,7 +2362,7 @@ command_keepalive() {
     extend_contract_key_xdr "${prefix}-emitter-last-distro" \
         "${emitter_id}" "${last_distro_key}" >/dev/null
     invoke_forced_transaction "${prefix}-candidate" \
-        "${candidate_id}" migration_status >/dev/null
+        "${candidate_id}" migration_state >/dev/null
     invoke_forced_transaction "${prefix}-factory" \
         "${factory_id}" is_pool --pool_address "${pool_id}" >/dev/null
     invoke_forced_transaction "${prefix}-pool" \
@@ -2477,7 +2479,7 @@ command_recover() {
 }
 
 command_prepare() {
-    local candidate_id result migration_status verified_unlock
+    local candidate_id result migration_state migration_status verified_unlock
 
     validate_tools
     require_network
@@ -2486,14 +2488,15 @@ command_prepare() {
     result="$(normalize_scalar "$(invoke_transaction \
         "prepare-migration" "${candidate_id}" distribute)")"
     [[ "${result}" =~ ^[0-9]+$ ]] || die "invalid preparation distribution: ${result}"
-    migration_status="$(invoke_view \
-        "verify-prepared-migration" "${candidate_id}" migration_status)"
+    migration_state="$(invoke_view \
+        "verify-prepared-migration" "${candidate_id}" migration_state)"
+    migration_status="$(printf '%s' "${migration_state}" | jq -c '.status')"
     printf '%s' "${migration_status}" | jq -e '
         . == "Prepared" or
         (type == "object" and (has("Prepared") or .tag? == "Prepared"))
     ' >/dev/null || die "candidate did not enter Prepared state: ${migration_status}"
-    verified_unlock="$(normalize_scalar "$(invoke_view \
-        "verify-prepared-unlock" "${candidate_id}" verified_queue_unlock)")"
+    verified_unlock="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
+        jq -c '.verified_queue_unlock')")"
     [[ "${verified_unlock}" =~ ^[0-9]+$ ]] ||
         die "invalid verified queue unlock: ${verified_unlock}"
     state_set "phase" "prepared"
@@ -2503,7 +2506,7 @@ command_prepare() {
 }
 
 command_finalize() {
-    local emitter_id candidate_id emitter_backstop migration_status result
+    local emitter_id candidate_id emitter_backstop migration_state migration_status result
     local activated scheduled funded_raw funded
 
     validate_tools
@@ -2511,8 +2514,9 @@ command_finalize() {
     load_state
     emitter_id="$(state_value emitter)"
     candidate_id="$(state_value candidate_backstop)"
-    migration_status="$(invoke_view \
-        "query-finalize-candidate-state" "${candidate_id}" migration_status)"
+    migration_state="$(invoke_view \
+        "query-finalize-candidate-state" "${candidate_id}" migration_state)"
+    migration_status="$(printf '%s' "${migration_state}" | jq -c '.status')"
     if printf '%s' "${migration_status}" | jq -e '
         . == "Prepared" or
         (type == "object" and (has("Prepared") or .tag? == "Prepared"))
@@ -2533,23 +2537,25 @@ command_finalize() {
         die "cannot finalize deployment from candidate migration state ${migration_status}"
     fi
 
-    activated="$(normalize_scalar "$(invoke_view \
-        "read-activation-timestamp" "${candidate_id}" activated_at)")"
+    migration_state="$(invoke_view \
+        "read-finalized-migration-state" "${candidate_id}" migration_state)"
+    activated="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
+        jq -c '.activated_at')")"
     [[ "${activated}" =~ ^[0-9]+$ ]] || die "invalid activation timestamp: ${activated}"
     state_set "phase" "active"
     state_set "activated_at" "${activated}"
-    scheduled="$(normalize_scalar "$(invoke_view \
-        "read-scheduled-backfill" "${candidate_id}" scheduled_backfill)")"
+    scheduled="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
+        jq -c '.scheduled_backfill')")"
     [[ "${scheduled}" =~ ^[0-9]+$ ]] || die "invalid scheduled backfill: ${scheduled}"
     state_set "scheduled_backfill" "${scheduled}"
     if (( scheduled > 0 )); then
-        funded_raw="$(invoke_view \
-            "read-funded-backfill" "${candidate_id}" funded_backfill)"
+        funded_raw="$(printf '%s' "${migration_state}" | jq -c '.funded_backfill')"
         if printf '%s' "${funded_raw}" | jq -e '. == null' >/dev/null; then
             invoke_transaction \
                 "drop-scheduled-backfill" "${candidate_id}" drop >/dev/null
-            funded_raw="$(invoke_view \
-                "read-funded-backfill-after-drop" "${candidate_id}" funded_backfill)"
+            migration_state="$(invoke_view \
+                "read-funded-migration-state" "${candidate_id}" migration_state)"
+            funded_raw="$(printf '%s' "${migration_state}" | jq -c '.funded_backfill')"
         fi
         funded="$(normalize_scalar "${funded_raw}")"
         assert_equal "${scheduled}" "${funded}" "funded migration backfill"
@@ -2566,7 +2572,8 @@ command_verify() {
     local candidate_blnd_usdc_token candidate_blnd_xlm_token
     local factory_backstop pool_operator pool_registered pool_status
     local candidate_pool_data incumbent_balance candidate_balance queued_swap
-    local migration_status activated_at saved_phase scheduled_backfill funded_backfill
+    local migration_state migration_status activated_at saved_phase
+    local scheduled_backfill funded_backfill
 
     validate_tools
     require_network
@@ -2607,12 +2614,13 @@ command_verify() {
     candidate_balance="$(normalize_scalar "$(invoke_view \
         "verify-candidate-balance" "${blnd_usdc_token_id}" balance --id "${candidate_id}")")"
     queued_swap="$(invoke_view "verify-emitter-queue" "${emitter_id}" get_queued_swap)"
-    migration_status="$(invoke_view \
-        "verify-candidate-migration" "${candidate_id}" migration_status)"
-    activated_at="$(normalize_scalar "$(invoke_view \
-        "verify-candidate-activation" "${candidate_id}" activated_at)")"
-    scheduled_backfill="$(normalize_scalar "$(invoke_view \
-        "verify-scheduled-backfill" "${candidate_id}" scheduled_backfill)")"
+    migration_state="$(invoke_view \
+        "verify-candidate-migration" "${candidate_id}" migration_state)"
+    migration_status="$(printf '%s' "${migration_state}" | jq -c '.status')"
+    activated_at="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
+        jq -c '.activated_at')")"
+    scheduled_backfill="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
+        jq -c '.scheduled_backfill')")"
 
     assert_equal "${candidate_id}" "${emitter_backstop}" "emitter backstop"
     assert_equal "${blnd_usdc_token_id}" "${candidate_blnd_usdc_token}" "candidate BLND:USDC LP token"
@@ -2648,8 +2656,8 @@ command_verify() {
     [[ "${scheduled_backfill}" =~ ^[0-9]+$ ]] ||
         die "invalid scheduled backfill: ${scheduled_backfill}"
     if (( scheduled_backfill > 0 )); then
-        funded_backfill="$(normalize_scalar "$(invoke_view \
-            "verify-funded-backfill" "${candidate_id}" funded_backfill)")"
+        funded_backfill="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
+            jq -c '.funded_backfill')")"
         assert_equal "${scheduled_backfill}" "${funded_backfill}" \
             "funded migration backfill"
     else

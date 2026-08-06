@@ -171,7 +171,7 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
     env.ledger().set_timestamp(queued.unlock_time - 7 * DAY);
     assert_eq!(candidate.distribute(), 0);
     assert_eq!(
-        candidate.migration_status(),
+        candidate.migration_state().status,
         v3_backstop::MigrationStatus::Prepared
     );
 
@@ -182,10 +182,13 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
     assert_eq!(emitter.get_backstop(), candidate_id);
     assert!(emitter.get_queued_swap().is_none());
     assert_eq!(
-        candidate.migration_status(),
+        candidate.migration_state().status,
         v3_backstop::MigrationStatus::Active
     );
-    assert_eq!(candidate.activated_at(), Some(queued.unlock_time));
+    assert_eq!(
+        candidate.migration_state().activated_at,
+        Some(queued.unlock_time)
+    );
     assert_eq!(
         candidate.backstop_token(&v3_backstop::BackstopTier::BlndUsdc),
         blnd_usdc

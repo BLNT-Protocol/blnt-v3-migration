@@ -150,6 +150,10 @@ mutator. Permissionless `distribute()` drives its local lifecycle around the
 emitter's existing queue and swap operations, matching the v2 transition
 surface. Repeated calls MUST NOT duplicate value.
 
+The read-only `migration_state()` snapshot MUST expose the complete candidate
+lifecycle needed by permissionless callers and operators. Individual
+lifecycle fields MUST NOT require separate contract entry points.
+
 The synchronization deadline is seven days after the verified queue's unlock,
 not seven days after the direct swap. A direct swap performed late leaves only
 the remainder of that fixed grace period.

@@ -55,6 +55,8 @@ The cross-version suite MUST verify:
 - The candidate exposes v2-named `distribute() -> i128` and `drop()` migration
   entry points and no separate begin, prepare, finalize, synchronization, or
   backfill-funding mutator.
+- One read-only `migration_state()` snapshot exposes the complete candidate
+  lifecycle without separate per-field entry points.
 - A successful direct swap remains synchronizable after the candidate loses
   its former strict BLND:USDC majority.
 - The synchronization deadline is measured from the verified unlock, not from

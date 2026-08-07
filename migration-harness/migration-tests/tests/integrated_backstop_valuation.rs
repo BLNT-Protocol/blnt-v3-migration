@@ -287,6 +287,7 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
                 queued_value: 5 * SCALAR_7,
                 shares: 20 * SCALAR_7,
             },
+            q4w_percentage: 2_500_000,
             usdc: backstop::PoolTierData {
                 active_blnd: 0,
                 active_value: 0,

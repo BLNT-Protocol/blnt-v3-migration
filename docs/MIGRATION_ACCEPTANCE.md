@@ -120,9 +120,9 @@ It MUST additionally verify:
   eligible pool weight schedule no BLND.
 - The pre-migration 70% tranche is assigned only to BLND:USDC depositors; the
   30% tranche uses each pool's ordinary supply/borrow configuration.
-- Successful migration awards zero discretionary BLND. Candidate `drop()`
-  names only the candidate and requests exactly the scheduled backfill; the
-  remaining emitter allocation stays undistributed.
+- The test deployment supplies an empty discretionary recipient list.
+  Candidate `drop()` therefore names only the candidate for its scheduled
+  backfill, and the remaining emitter allocation stays undistributed.
 - Positive funding succeeds once only after an exact configured-BLND balance
   increase and rolls back on an unexpected delta or repeat.
 - No backstop or pool claim can consume the obligation before activation and

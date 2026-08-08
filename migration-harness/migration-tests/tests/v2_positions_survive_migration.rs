@@ -501,6 +501,7 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
             &usdc,
             &xlm,
             &v3_pool_factory_id,
+            Vec::<(Address, i128)>::new(&env),
         ),
     );
     let candidate = v3_backstop::Client::new(&env, &candidate_id);

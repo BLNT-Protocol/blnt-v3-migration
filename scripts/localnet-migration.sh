@@ -1693,7 +1693,8 @@ command_deploy() {
         --blnd_usdc_token "${blnd_usdc_token_id}" \
         --blnd_xlm_token "${blnd_xlm_token_id}" \
         --usdc_token "${usdc_token_id}" \
-        --xlm_token "${xlm_id}")"
+        --xlm_token "${xlm_id}" \
+        --drop_list "[]")"
     assert_equal "${candidate_id}" "${deployed_candidate_id}" \
         "candidate deterministic address"
 

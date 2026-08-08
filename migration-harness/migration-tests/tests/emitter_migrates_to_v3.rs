@@ -154,6 +154,7 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
             &usdc,
             &xlm,
             &factory,
+            Vec::<(Address, i128)>::new(&env),
         ),
     );
     let candidate = v3_backstop::Client::new(&env, &candidate_id);

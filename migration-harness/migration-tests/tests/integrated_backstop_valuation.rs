@@ -232,6 +232,7 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
             &usdc,
             &xlm,
             &factory_id,
+            Vec::<(Address, i128)>::new(&env),
         ),
     );
     let pool = env.register(MockPool, ());
@@ -278,6 +279,7 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
                 queued_shares: 5 * SCALAR_7,
                 queued_value: 5 * SCALAR_7,
                 shares: 20 * SCALAR_7,
+                total_value: 20 * SCALAR_7,
             },
             blnd_xlm: backstop::PoolTierData {
                 active_blnd: 240 * SCALAR_7,
@@ -286,6 +288,7 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
                 queued_shares: 5 * SCALAR_7,
                 queued_value: 5 * SCALAR_7,
                 shares: 20 * SCALAR_7,
+                total_value: 20 * SCALAR_7,
             },
             q4w_percentage: 2_500_000,
             usdc: backstop::PoolTierData {
@@ -295,6 +298,7 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
                 queued_shares: 0,
                 queued_value: 0,
                 shares: 0,
+                total_value: 0,
             },
             valuation_valid_until: u64::MAX,
         }

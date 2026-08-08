@@ -236,12 +236,15 @@ nothing after leaving active weight.
 The first post-swap `distribute()` checkpoints only through the verified
 unlock. After that cutoff, both tranches use the post-migration emission rules.
 
-Successful migration awards zero discretionary BLND. If scheduled backfill is
-positive, any caller MAY fund it once through candidate `drop()`, which invokes
-the emitter's initial drop. The
-candidate MUST name itself as the only recipient, request exactly the scheduled
-amount, and verify an equal increase in its configured BLND balance. The unused
-portion of the emitter's 50-million-BLND ceiling remains undistributed.
+The candidate constructor binds an immutable initial-drop recipient list. Its
+aggregate allocation plus the maximum 10-million-BLND backfill MUST NOT exceed
+the emitter's 50-million-BLND ceiling. Recipient selection, including an empty
+list, is a deployment decision.
+
+After activation, any caller MAY invoke candidate `drop()` once. It MUST submit
+the configured list and, when positive, append the candidate's exact scheduled
+backfill. The candidate MUST verify that its configured BLND balance increases
+by the total allocation directed to itself.
 
 Backstop and pool claims MUST remain disabled until migration is active and the
 entire positive schedule is funded. There is no separate backfill claim:

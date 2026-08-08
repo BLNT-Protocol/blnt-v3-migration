@@ -129,10 +129,12 @@ a side effect of work in this repository.
   replacement must use the deployed emitter's permissionless queue and swap
   mechanism. V2-compatible transferable pool administration is pool-local and
   is not a protocol-upgrade path.
-- A successful migration awards zero discretionary BLND. Any one-time BLND
-  distribution must exactly fund the scheduled emission-index backfill, use
-  the ordinary 70/30 split, and remain capped at 10 million BLND. Before
-  migration, only BLND:USDC is eligible for the backstop tranche.
+- The v3 constructor binds an immutable initial-drop recipient list. Its
+  allocation plus the maximum 10-million-BLND migration backfill must fit
+  within the emitter's 50-million-BLND ceiling. Recipient selection is a
+  deployment decision; migration test lanes use an empty list. Backfill uses
+  the ordinary 70/30 split, and before migration only BLND:USDC is eligible
+  for its backstop tranche.
 - Pool-status and reward-zone threshold decisions must use the same canonical
   activation valuation. Stored pool status is not an additional reward-zone
   eligibility gate.

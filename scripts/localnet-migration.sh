@@ -2726,66 +2726,58 @@ admit_modeled_v3_yieldblox_reward() {
 
 capture_ongoing_distribution() {
     local label="$1" candidate_id="$2"
-    local before after distributed
-    local before_total after_total before_backstop after_backstop
-    local before_pool after_pool backstop_delta pool_delta total_delta
-
-    before="$(invoke_view \
-        "${label}-state-before" "${candidate_id}" ongoing_emission_state)"
-    before_total="$(normalize_scalar "$(printf '%s' "${before}" |
-        jq -er '.total_distributed')")"
-    before_backstop="$(normalize_scalar "$(printf '%s' "${before}" |
-        jq -er '.backstop_allocated')")"
-    before_pool="$(normalize_scalar "$(printf '%s' "${before}" |
-        jq -er '.pool_allocated')")"
+    local distributed expected_backstop_tranche expected_pool_tranche
 
     distributed="$(normalize_scalar "$(invoke_transaction \
         "${label}" "${candidate_id}" distribute)")"
 
-    after="$(invoke_view \
-        "${label}-state-after" "${candidate_id}" ongoing_emission_state)"
-    after_total="$(normalize_scalar "$(printf '%s' "${after}" |
-        jq -er '.total_distributed')")"
-    after_backstop="$(normalize_scalar "$(printf '%s' "${after}" |
-        jq -er '.backstop_allocated')")"
-    after_pool="$(normalize_scalar "$(printf '%s' "${after}" |
-        jq -er '.pool_allocated')")"
-
-    for value in \
-        "${before_total}" "${after_total}" \
-        "${before_backstop}" "${after_backstop}" \
-        "${before_pool}" "${after_pool}" "${distributed}"
-    do
-        [[ "${value}" =~ ^[0-9]+$ ]] ||
-            die "${label} returned invalid ongoing emission accounting: ${value}"
-    done
-
-    total_delta=$((after_total - before_total))
-    backstop_delta=$((after_backstop - before_backstop))
-    pool_delta=$((after_pool - before_pool))
-    (( backstop_delta >= 0 && pool_delta >= 0 )) ||
-        die "${label} reduced cumulative ongoing emission allocations"
-    assert_equal "${distributed}" "${total_delta}" \
-        "${label} total distribution delta"
+    [[ "${distributed}" =~ ^[0-9]+$ ]] ||
+        die "${label} returned an invalid ongoing distribution: ${distributed}"
+    # The public v2-shaped ABI returns only the total. The deployed emitter
+    # releases whole BLND base-unit amounts, so the immutable 70/30 policy has
+    # no split dust in this lane. Tier claims and pool gulps below exercise the
+    # resulting obligations through their public entrypoints.
+    (( distributed % 10 == 0 )) ||
+        die "${label} distribution cannot be split exactly 70/30: ${distributed}"
+    expected_backstop_tranche=$((distributed * 7 / 10))
+    expected_pool_tranche=$((distributed * 3 / 10))
 
     jq -cn \
         --arg distributed "${distributed}" \
-        --arg backstop_allocated "${backstop_delta}" \
-        --arg pool_allocated "${pool_delta}" \
+        --arg expected_backstop_tranche "${expected_backstop_tranche}" \
+        --arg expected_pool_tranche "${expected_pool_tranche}" \
         '{
             distributed: ($distributed | tonumber),
-            backstop_allocated: ($backstop_allocated | tonumber),
-            pool_allocated: ($pool_allocated | tonumber)
+            expected_backstop_tranche: ($expected_backstop_tranche | tonumber),
+            expected_pool_tranche: ($expected_pool_tranche | tonumber)
         }'
+}
+
+read_claimable() {
+    local label="$1" candidate_id="$2" user="$3" pool="$4" tier="$5"
+    local amount
+
+    amount="$(normalize_scalar "$(invoke_view \
+        "${label}" "${candidate_id}" claimable \
+        --user "${user}" --pool "${pool}" --tier "${tier}")")"
+    [[ "${amount}" =~ ^[0-9]+$ ]] ||
+        die "${label} returned invalid claimable BLND: ${amount}"
+    printf '%s' "${amount}"
 }
 
 command_emissions() {
     local phase candidate_id pool_id depositor distribution received claim_refresh
-    local backstop_allocated pool_allocated pool_gulped stream expiration
+    local expected_backstop_tranche expected_pool_tranche pool_gulped stream expiration
     local fixed_blnd_usdc_lp fixed_blnd_xlm_lp
+    local fixed_blnd_usdc_claimable fixed_blnd_xlm_claimable
+    local fixed_blnd_usdc_before fixed_blnd_xlm_before
+    local fixed_blnd_usdc_ongoing fixed_blnd_xlm_ongoing
     local emission_reserve_token_id yieldblox_reward_status
-    local yield_pool yield_distribution yield_received yield_backstop_allocated
-    local yield_pool_allocated yield_blnd_usdc_lp yield_blnd_xlm_lp
+    local yield_pool yield_distribution yield_received yield_expected_backstop_tranche
+    local yield_expected_pool_tranche yield_blnd_usdc_lp yield_blnd_xlm_lp
+    local yield_blnd_usdc_claimable yield_blnd_xlm_claimable
+    local yield_blnd_usdc_before yield_blnd_xlm_before
+    local yield_blnd_usdc_ongoing yield_blnd_xlm_ongoing
     local yield_pool_gulped yield_stream
     local yield_expiration
 
@@ -2798,6 +2790,7 @@ command_emissions() {
         die "ongoing emissions require a verified migration; saved phase is ${phase}"
     candidate_id="$(state_value candidate_backstop)"
     pool_id="$(state_value v3_pool)"
+    yield_pool="$(state_value modeled_v3_yieldblox_pool)"
     depositor="$(state_value depositor)"
     emission_reserve_token_id="$(
         state_value primary_pool_emission_reserve_token_id
@@ -2805,33 +2798,45 @@ command_emissions() {
     [[ "${emission_reserve_token_id}" =~ ^[0-9]+$ ]] ||
         die "invalid primary-pool emission reserve token ID"
 
+    fixed_blnd_usdc_before="$(read_claimable \
+        "query-fixed-blnd-usdc-before-ongoing" "${candidate_id}" \
+        "${depositor}" "${pool_id}" BlndUsdc)"
+    fixed_blnd_xlm_before="$(read_claimable \
+        "query-fixed-blnd-xlm-before-ongoing" "${candidate_id}" \
+        "${depositor}" "${pool_id}" BlndXlm)"
+    yield_blnd_usdc_before="$(read_claimable \
+        "query-yieldblox-blnd-usdc-before-ongoing" "${candidate_id}" \
+        "${depositor}" "${yield_pool}" BlndUsdc)"
+    yield_blnd_xlm_before="$(read_claimable \
+        "query-yieldblox-blnd-xlm-before-ongoing" "${candidate_id}" \
+        "${depositor}" "${yield_pool}" BlndXlm)"
+
     note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds for a positive emitter interval..."
     sleep "${EMISSION_START_DELAY_SECONDS}"
     distribution="$(capture_ongoing_distribution \
         "distribute-ongoing-blnd" "${candidate_id}")"
     received="$(printf '%s' "${distribution}" | jq -er '.distributed | tostring')"
-    backstop_allocated="$(
-        printf '%s' "${distribution}" | jq -er '.backstop_allocated | tostring'
+    expected_backstop_tranche="$(
+        printf '%s' "${distribution}" | jq -er '.expected_backstop_tranche | tostring'
     )"
-    pool_allocated="$(
-        printf '%s' "${distribution}" | jq -er '.pool_allocated | tostring'
+    expected_pool_tranche="$(
+        printf '%s' "${distribution}" | jq -er '.expected_pool_tranche | tostring'
     )"
     if [[ ! "${received}" =~ ^[0-9]+$ ]] || (( received <= 0 )); then
         die "ongoing distribution did not receive positive BLND: ${distribution}"
     fi
-    if [[ ! "${backstop_allocated}" =~ ^[0-9]+$ ]] ||
-        (( backstop_allocated <= 0 ))
+    if [[ ! "${expected_backstop_tranche}" =~ ^[0-9]+$ ]] ||
+        (( expected_backstop_tranche <= 0 ))
     then
-        die "ongoing distribution did not allocate the backstop tranche: ${distribution}"
+        die "ongoing distribution did not produce a positive expected backstop tranche: ${distribution}"
     fi
-    if [[ ! "${pool_allocated}" =~ ^[0-9]+$ ]] ||
-        (( pool_allocated < SCALAR_7 ))
+    if [[ ! "${expected_pool_tranche}" =~ ^[0-9]+$ ]] ||
+        (( expected_pool_tranche < SCALAR_7 ))
     then
-        die "pool tranche is below the one-BLND gulp minimum: ${distribution}"
+        die "expected pool tranche is below the one-BLND gulp minimum: ${distribution}"
     fi
 
     admit_modeled_v3_yieldblox_reward "${candidate_id}"
-    yield_pool="$(state_value modeled_v3_yieldblox_pool)"
     yieldblox_reward_status="eligible and allocated after a shared distribution"
     note "Waiting ${MULTI_POOL_EMISSION_DELAY_SECONDS} seconds for a shared two-pool interval..."
     sleep "${MULTI_POOL_EMISSION_DELAY_SECONDS}"
@@ -2840,29 +2845,35 @@ command_emissions() {
         "${candidate_id}")"
     yield_received="$(printf '%s' "${yield_distribution}" |
         jq -er '.distributed | tostring')"
-    yield_backstop_allocated="$(printf '%s' "${yield_distribution}" |
-        jq -er '.backstop_allocated | tostring')"
-    yield_pool_allocated="$(printf '%s' "${yield_distribution}" |
-        jq -er '.pool_allocated | tostring')"
+    yield_expected_backstop_tranche="$(printf '%s' "${yield_distribution}" |
+        jq -er '.expected_backstop_tranche | tostring')"
+    yield_expected_pool_tranche="$(printf '%s' "${yield_distribution}" |
+        jq -er '.expected_pool_tranche | tostring')"
     if [[ ! "${yield_received}" =~ ^[0-9]+$ ]] ||
         (( yield_received <= 0 ))
     then
         die "shared distribution did not receive positive BLND: ${yield_distribution}"
     fi
-    if [[ ! "${yield_backstop_allocated}" =~ ^[0-9]+$ ]] ||
-        (( yield_backstop_allocated <= 0 ))
+    if [[ ! "${yield_expected_backstop_tranche}" =~ ^[0-9]+$ ]] ||
+        (( yield_expected_backstop_tranche <= 0 ))
     then
-        die "shared distribution did not allocate its backstop tranche: ${yield_distribution}"
+        die "shared distribution did not produce a positive expected backstop tranche: ${yield_distribution}"
     fi
-    if [[ ! "${yield_pool_allocated}" =~ ^[0-9]+$ ]] ||
-        (( yield_pool_allocated < 2 * SCALAR_7 ))
+    if [[ ! "${yield_expected_pool_tranche}" =~ ^[0-9]+$ ]] ||
+        (( yield_expected_pool_tranche < 2 * SCALAR_7 ))
     then
-        die "shared pool tranche is too small for two one-BLND gulps: ${yield_distribution}"
+        die "shared expected pool tranche is too small for two one-BLND gulps: ${yield_distribution}"
     fi
     received=$((received + yield_received))
-    backstop_allocated=$((backstop_allocated + yield_backstop_allocated))
-    pool_allocated=$((pool_allocated + yield_pool_allocated))
+    expected_backstop_tranche=$((expected_backstop_tranche + yield_expected_backstop_tranche))
+    expected_pool_tranche=$((expected_pool_tranche + yield_expected_pool_tranche))
 
+    fixed_blnd_usdc_claimable="$(read_claimable \
+        "query-fixed-blnd-usdc-claimable" "${candidate_id}" \
+        "${depositor}" "${pool_id}" BlndUsdc)"
+    fixed_blnd_usdc_ongoing=$((fixed_blnd_usdc_claimable - fixed_blnd_usdc_before))
+    (( fixed_blnd_usdc_ongoing > 0 )) ||
+        die "Fixed BLND:USDC claimable BLND did not increase during ongoing distribution"
     fixed_blnd_usdc_lp="$(normalize_scalar "$(invoke_transaction_as \
         "claim-backstop-ongoing-blnd" "${DEPOSITOR_IDENTITY}" \
         "${candidate_id}" claim \
@@ -2881,8 +2892,14 @@ command_emissions() {
     claim_refresh="$(capture_ongoing_distribution \
         "refresh-before-fixed-blnd-xlm-claim" "${candidate_id}")"
     received=$((received + $(printf '%s' "${claim_refresh}" | jq -er '.distributed | tonumber')))
-    backstop_allocated=$((backstop_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.backstop_allocated | tonumber')))
-    pool_allocated=$((pool_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.pool_allocated | tonumber')))
+    expected_backstop_tranche=$((expected_backstop_tranche + $(printf '%s' "${claim_refresh}" | jq -er '.expected_backstop_tranche | tonumber')))
+    expected_pool_tranche=$((expected_pool_tranche + $(printf '%s' "${claim_refresh}" | jq -er '.expected_pool_tranche | tonumber')))
+    fixed_blnd_xlm_claimable="$(read_claimable \
+        "query-fixed-blnd-xlm-claimable" "${candidate_id}" \
+        "${depositor}" "${pool_id}" BlndXlm)"
+    fixed_blnd_xlm_ongoing=$((fixed_blnd_xlm_claimable - fixed_blnd_xlm_before))
+    (( fixed_blnd_xlm_ongoing > 0 )) ||
+        die "Fixed BLND:XLM claimable BLND did not increase during ongoing distribution"
     fixed_blnd_xlm_lp="$(normalize_scalar "$(invoke_transaction_as \
         "claim-fixed-blnd-xlm-ongoing-blnd" "${DEPOSITOR_IDENTITY}" \
         "${candidate_id}" claim \
@@ -2901,8 +2918,14 @@ command_emissions() {
     claim_refresh="$(capture_ongoing_distribution \
         "refresh-before-yieldblox-blnd-usdc-claim" "${candidate_id}")"
     received=$((received + $(printf '%s' "${claim_refresh}" | jq -er '.distributed | tonumber')))
-    backstop_allocated=$((backstop_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.backstop_allocated | tonumber')))
-    pool_allocated=$((pool_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.pool_allocated | tonumber')))
+    expected_backstop_tranche=$((expected_backstop_tranche + $(printf '%s' "${claim_refresh}" | jq -er '.expected_backstop_tranche | tonumber')))
+    expected_pool_tranche=$((expected_pool_tranche + $(printf '%s' "${claim_refresh}" | jq -er '.expected_pool_tranche | tonumber')))
+    yield_blnd_usdc_claimable="$(read_claimable \
+        "query-yieldblox-blnd-usdc-claimable" "${candidate_id}" \
+        "${depositor}" "${yield_pool}" BlndUsdc)"
+    yield_blnd_usdc_ongoing=$((yield_blnd_usdc_claimable - yield_blnd_usdc_before))
+    (( yield_blnd_usdc_ongoing > 0 )) ||
+        die "YieldBlox BLND:USDC claimable BLND did not increase during ongoing distribution"
     yield_blnd_usdc_lp="$(normalize_scalar "$(invoke_transaction_as \
         "claim-yieldblox-backstop-ongoing-blnd" \
         "${DEPOSITOR_IDENTITY}" "${candidate_id}" claim \
@@ -2921,8 +2944,14 @@ command_emissions() {
     claim_refresh="$(capture_ongoing_distribution \
         "refresh-before-yieldblox-blnd-xlm-claim" "${candidate_id}")"
     received=$((received + $(printf '%s' "${claim_refresh}" | jq -er '.distributed | tonumber')))
-    backstop_allocated=$((backstop_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.backstop_allocated | tonumber')))
-    pool_allocated=$((pool_allocated + $(printf '%s' "${claim_refresh}" | jq -er '.pool_allocated | tonumber')))
+    expected_backstop_tranche=$((expected_backstop_tranche + $(printf '%s' "${claim_refresh}" | jq -er '.expected_backstop_tranche | tonumber')))
+    expected_pool_tranche=$((expected_pool_tranche + $(printf '%s' "${claim_refresh}" | jq -er '.expected_pool_tranche | tonumber')))
+    yield_blnd_xlm_claimable="$(read_claimable \
+        "query-yieldblox-blnd-xlm-claimable" "${candidate_id}" \
+        "${depositor}" "${yield_pool}" BlndXlm)"
+    yield_blnd_xlm_ongoing=$((yield_blnd_xlm_claimable - yield_blnd_xlm_before))
+    (( yield_blnd_xlm_ongoing > 0 )) ||
+        die "YieldBlox BLND:XLM claimable BLND did not increase during ongoing distribution"
     yield_blnd_xlm_lp="$(normalize_scalar "$(invoke_transaction_as \
         "claim-yieldblox-blnd-xlm-ongoing-blnd" \
         "${DEPOSITOR_IDENTITY}" "${candidate_id}" claim \
@@ -2968,8 +2997,16 @@ command_emissions() {
         die "YieldBlox pool emission stream has no expiration: ${yield_stream}"
 
     state_set "ongoing_received" "${received}"
-    state_set "ongoing_backstop_allocated" "${backstop_allocated}"
-    state_set "ongoing_pool_allocated" "${pool_allocated}"
+    state_set "ongoing_expected_backstop_tranche" "${expected_backstop_tranche}"
+    state_set "ongoing_expected_pool_tranche" "${expected_pool_tranche}"
+    state_set "ongoing_fixed_blnd_usdc_claimed_blnd" "${fixed_blnd_usdc_claimable}"
+    state_set "ongoing_fixed_blnd_xlm_claimed_blnd" "${fixed_blnd_xlm_claimable}"
+    state_set "ongoing_yieldblox_blnd_usdc_claimed_blnd" "${yield_blnd_usdc_claimable}"
+    state_set "ongoing_yieldblox_blnd_xlm_claimed_blnd" "${yield_blnd_xlm_claimable}"
+    state_set "ongoing_fixed_blnd_usdc_claimable_delta" "${fixed_blnd_usdc_ongoing}"
+    state_set "ongoing_fixed_blnd_xlm_claimable_delta" "${fixed_blnd_xlm_ongoing}"
+    state_set "ongoing_yieldblox_blnd_usdc_claimable_delta" "${yield_blnd_usdc_ongoing}"
+    state_set "ongoing_yieldblox_blnd_xlm_claimable_delta" "${yield_blnd_xlm_ongoing}"
     state_set "ongoing_fixed_blnd_usdc_lp_compounded" "${fixed_blnd_usdc_lp}"
     state_set "ongoing_fixed_blnd_xlm_lp_compounded" "${fixed_blnd_xlm_lp}"
     state_set "ongoing_yieldblox_blnd_usdc_lp_compounded" "${yield_blnd_usdc_lp}"
@@ -2989,12 +3026,12 @@ command_emissions() {
     cat <<EOF
 ${NETWORK_LABEL} post-migration emissions verified
   emitter BLND received: ${received}
-  backstop 70% allocated: ${backstop_allocated}
-  Fixed BLND:USDC LP compounded: ${fixed_blnd_usdc_lp}
-  Fixed BLND:XLM LP compounded: ${fixed_blnd_xlm_lp}
-  YieldBlox BLND:USDC LP compounded: ${yield_blnd_usdc_lp}
-  YieldBlox BLND:XLM LP compounded: ${yield_blnd_xlm_lp}
-  pool 30% allocated: ${pool_allocated}
+  expected backstop 70% tranche: ${expected_backstop_tranche}
+  Fixed BLND:USDC claimed/LP compounded: ${fixed_blnd_usdc_claimable}/${fixed_blnd_usdc_lp}
+  Fixed BLND:XLM claimed/LP compounded: ${fixed_blnd_xlm_claimable}/${fixed_blnd_xlm_lp}
+  YieldBlox BLND:USDC claimed/LP compounded: ${yield_blnd_usdc_claimable}/${yield_blnd_usdc_lp}
+  YieldBlox BLND:XLM claimed/LP compounded: ${yield_blnd_xlm_claimable}/${yield_blnd_xlm_lp}
+  expected pool 30% tranche: ${expected_pool_tranche}
   Fixed pool stream reserved: ${pool_gulped}
   YieldBlox pool stream reserved: ${yield_pool_gulped}
   final pool stream expiration: $(format_timestamp "${expiration}") (${expiration})

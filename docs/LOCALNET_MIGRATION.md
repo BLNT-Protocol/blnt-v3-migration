@@ -167,10 +167,11 @@ make localnet-emissions
 ```
 
 That command waits for positive emitter intervals, invokes the candidate's
-permissionless distribution, verifies positive 70% and 30% allocations,
-compounds both pools' BLND:USDC and BLND:XLM backstop accruals into their
-originating tiers, and gulps the two pool tranches into their seven-day
-reserve-token streams. After the reported expiration:
+permissionless distribution, derives its immutable 70/30 tranches from the
+public total, verifies positive tier-specific `claimable` increases, compounds
+both pools' BLND:USDC and BLND:XLM accruals into their originating tiers, and
+gulps the two pool tranches into their seven-day reserve-token streams. After
+the reported expiration:
 
 ```bash
 make localnet-claim-emissions

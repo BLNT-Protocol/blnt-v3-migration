@@ -349,10 +349,6 @@ struct MockPositions {
 
 #[contractimpl]
 impl MockV3Pool {
-    pub fn backstop_withdrawal_allowed(_env: Env, _backstop: Address) -> bool {
-        true
-    }
-
     pub fn get_positions(env: Env, _address: Address) -> MockPositions {
         MockPositions {
             liabilities: Map::new(&env),

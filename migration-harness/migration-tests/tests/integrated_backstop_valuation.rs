@@ -1,5 +1,5 @@
 use soroban_sdk::{
-    contract, contractimpl, contracttype, testutils::Address as _, vec, Address, Env, Vec,
+    contract, contractimpl, contracttype, testutils::Address as _, vec, Address, Env, Map, Vec,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -155,10 +155,22 @@ impl MockPoolFactory {
 #[contract]
 struct MockPool;
 
+#[derive(Clone)]
+#[contracttype]
+struct MockPositions {
+    liabilities: Map<u32, i128>,
+    collateral: Map<u32, i128>,
+    supply: Map<u32, i128>,
+}
+
 #[contractimpl]
 impl MockPool {
-    pub fn backstop_withdrawal_allowed(_env: Env, _backstop: Address) -> bool {
-        true
+    pub fn get_positions(env: Env, _address: Address) -> MockPositions {
+        MockPositions {
+            liabilities: Map::new(&env),
+            collateral: Map::new(&env),
+            supply: Map::new(&env),
+        }
     }
 }
 

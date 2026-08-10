@@ -36,35 +36,32 @@ The cross-version suite MUST verify:
 - Queue unlock occurs exactly 31 days after creation and cannot be bypassed.
 - The queue is created through the emitter's existing
   `queue_swap_backstop()` function.
-- The first pre-swap candidate `distribute()` observes the compatible queue
-  and opens its accounting epoch.
-- A candidate `distribute()` during the final seven days verifies the live
-  queue and permanently anchors the recovery horizon.
-- At most two replacement queues may be verified. Cancellation and requeueing
-  do not extend the 76-day recovery horizon or 138-day construction-anchored
-  deadline.
-- An unverified replacement queue cannot advance backfill beyond the original
-  or most recently verified unlock; a valid replacement catches up only after
-  final-window verification succeeds.
+- The first pre-swap candidate `distribute()` succeeds without a queue, opens
+  its accounting epoch at the invocation timestamp, and returns zero.
+- Every pre-swap candidate `distribute()` validates any live queue. Calls no
+  earlier than its final seven days attest its compatible recipient, token,
+  and unlock without introducing a separate preparation entry point.
+- Queue cancellation and requeueing do not start, pause, or reset backfill.
 - The queued recipient is the exact candidate and the next designated token is
   its configured BLND:XLM Comet LP.
+- A swap executed from an unattested or incompatible queue cannot activate the
+  candidate after the emitter deletes that queue.
 - The emitter's existing `swap_backstop()` performs the only replacement path.
 - The first candidate `distribute()` after that swap activates the candidate
-  during the fixed seven-day grace period and cannot synchronize a canceled or
-  incompatible queue.
+  only when the compatible queue was attested and the seven-day post-unlock
+  grace period has not expired.
 - The candidate exposes v2-named `distribute() -> i128` and `drop()` migration
   entry points and no separate begin, prepare, finalize, synchronization, or
   backfill-funding mutator.
-- One read-only `migration_state()` snapshot exposes the complete candidate
-  lifecycle without separate per-field entry points.
-- A successful direct swap remains synchronizable after the candidate loses
-  its former strict BLND:USDC majority.
-- The synchronization deadline is measured from the verified unlock, not from
-  a later direct swap.
-- While the emitter points to an unsynchronized Prepared candidate,
+- One read-only `migration_state()` snapshot exposes the simplified candidate
+  lifecycle without separate per-field entry points or a `Prepared` status.
+- A successful direct swap remains transitionable throughout the fixed grace
+  period despite a later loss of the candidate's former strict BLND:USDC
+  majority.
+- While the emitter points to a locally inactive candidate,
   BLND-bearing tier-weight mutations and reward-zone edits fail closed.
-- Queue creation, observation, preparation, emitter swap, and candidate
-  synchronization are permissionless and expose no governance, multisig,
+- Queue creation, observation, emitter swap, and candidate transition are
+  permissionless and expose no governance, multisig,
   administrator, emergency override, privileged WASM replacement, or alternate
   migration path.
 
@@ -101,36 +98,45 @@ It MUST additionally verify:
   and mint no shares or other entitlement.
 - BLND:XLM and plain USDC never affect the incumbent balance comparison or
   migration backfill.
-- Prefunding begins at candidate construction, and the original queue must
-  start within 31 days. Shares present when it starts accrue from that original
-  queue checkpoint rather than from construction.
-- Before migration, only active, nonqueued BLND:USDC in reward-zone pools
-  supplies pool and user weight. Later deposits start at the current index.
-- Queueing checkpoints already accrued BLND and stops future accrual for the
-  queued shares. Dequeueing resumes at the current index; withdrawal cannot
-  erase prior accrual.
+- Prefunding begins at candidate construction. The first pre-swap
+  `distribute()` starts the backfill clock rather than construction.
+- Before migration, only active, nonqueued BLND:USDC LP tokens in reward-zone
+  pools supply emission weight. Pool weight uses those LP-token amounts
+  directly rather than converting them to underlying BLND. The 70% allocation
+  becomes pending BLND:USDC until a pool gulp starts its seven-day stream.
+- Queueing checkpoints the tier stream and already accrued BLND, then stops
+  future pool and stream weight for the queued shares. Dequeueing resumes at
+  the current index; withdrawal cannot erase prior streamed accrual.
 - BLND:XLM becomes emission-eligible only after migration. Plain USDC remains
   ineligible before and after.
-- The first post-swap candidate `distribute()` caps backfill at the verified
-  unlock, so no interval receives both backfill and ongoing emissions.
-- Eligible backfill accrues at one BLND per second from the original queue
-  start, uses the ordinary fixed 70/30 split and cumulative indexes, remains
-  capped at 10 million BLND, and reaches at most 8,640,000 BLND under the
-  bounded 100-day verified-unlock lifecycle. Intervals with no positive
-  eligible pool weight schedule no BLND.
-- The pre-migration 70% tranche is assigned only to BLND:USDC depositors; the
-  30% tranche uses each pool's ordinary supply/borrow configuration.
+- The first post-swap candidate `distribute()` ends backfill at the latest
+  completed pre-swap checkpoint and resets ongoing accounting to the emitter's
+  candidate checkpoint. The intervening gap is omitted, so no interval receives
+  both backfill and ongoing emissions.
+- Eligible backfill accrues at one BLND per second from the first
+  pre-replacement `distribute()`, uses the ordinary fixed 70/30 split and
+  pending-pool accounting, remains capped at 10 million BLND, and can reach
+  that cap after 10,000,000 continuously eligible seconds regardless of queue
+  timing. Intervals with no positive eligible pool weight schedule no BLND.
+- The pre-migration 70% tranche enters only the BLND:USDC seven-day stream; the
+  30% tranche uses each pool's ordinary supply/borrow stream.
 - The test deployment supplies an empty discretionary recipient list.
   Candidate `drop()` therefore names only the candidate for its scheduled
   backfill, and the remaining emitter allocation stays undistributed.
 - Positive funding succeeds once only after an exact configured-BLND balance
   increase and rolls back on an unexpected delta or repeat.
-- No backstop or pool claim can consume the obligation before activation and
+- No backstop-tier claim can consume the obligation before activation and
   complete funding. Thereafter backfilled BLND uses the same tier-compounding
   and pool-allowance claim paths as ongoing BLND; no separate backfill claim
   exists.
 - Aggregate allocations, scoped rounding carries, granted pool allowances,
   backstop claims, and the unfunded amount conserve the scheduled drop exactly.
+- One Protocol-27 differential test MUST run the same prefunding,
+  distribution/gulp, queue, partial dequeue, withdrawal, reward-zone removal,
+  emitter replacement, funding, and claim timeline through the exact deployed
+  v2 backstop and optimized v3 backstop. Scheduled BLND, the 30% pool tranche,
+  and withdrawn LP MUST match exactly; depositor claims may differ only by the
+  explicitly retained v3 rounding carries.
 
 ## Transition to ongoing BLND
 
@@ -156,7 +162,7 @@ originating pool tier.
 
 | Environment | Required evidence |
 | --- | --- |
-| Native Soroban `Env` | Accelerated lifecycle, retry horizons, boundary values, and rollback |
+| Native Soroban `Env` | Accelerated lifecycle, queue attestation, cancellation, grace boundaries, and rollback |
 | Optimized WASM | Contract ABI, serialization, cross-contract behavior, and resource limits |
 | Protocol-27 compatibility harness | Exact deployed SDK-22 v2 and emitter WASM interacting with optimized v3 WASM |
 | Local Quickstart | Unshortened production queue, resumability, TTL keepalive, transaction costs, and final invariants |
@@ -167,8 +173,8 @@ point through the Protocol-27 host and complete the deployed-emitter swap into
 optimized v3 WASM. It MUST NOT rebuild v2 against SDK 27 or substitute a local
 SDK-22 build for the recorded deployed artifacts.
 
-Native tests MUST cover the full retry horizon and the candidate's migration
-TTL policy without shortening production constants.
+Native tests MUST cover queue replacement, attestation and activation-grace
+boundaries, the 10-million-BLND cap, and post-swap fail-closed accounting.
 
 ## Network evidence
 
@@ -207,10 +213,10 @@ The candidate may be described as migration-ready only when:
 
 1. every contract-suite prerequisite passes;
 2. the direct emitter-swap and candidate-distribution path passes;
-3. cancellation, expiry, balance-race, retry, and repeated-call cases pass;
+3. cancellation, balance-race, delayed-transition, and repeated-call cases pass;
 4. incumbent positions remain unchanged and operational;
 5. migration capital, backfill, and ongoing BLND remain conserved;
-6. maximum migration bounds fit Protocol-27 resource limits;
+6. migration operations fit Protocol-27 resource limits;
 7. an isolated local-network migration completes; and
 8. an isolated public-testnet migration exercises production transaction
    assembly and operational monitoring.

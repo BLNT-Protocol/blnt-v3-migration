@@ -167,6 +167,12 @@ struct MockEmitter;
 
 #[derive(Clone)]
 #[contracttype]
+enum EmitterKey {
+    Backstop,
+}
+
+#[derive(Clone)]
+#[contracttype]
 struct EmitterSwap {
     new_backstop: Address,
     new_backstop_token: Address,
@@ -175,14 +181,18 @@ struct EmitterSwap {
 
 #[contractimpl]
 impl MockEmitter {
-    pub fn __constructor(_env: Env) {}
+    pub fn __constructor(env: Env, backstop: Address) {
+        env.storage()
+            .instance()
+            .set(&EmitterKey::Backstop, &backstop);
+    }
 
     pub fn get_queued_swap(_env: Env) -> Option<EmitterSwap> {
         None
     }
 
-    pub fn get_backstop(_env: Env) -> Address {
-        panic!("not migrated")
+    pub fn get_backstop(env: Env) -> Address {
+        env.storage().instance().get(&EmitterKey::Backstop).unwrap()
     }
 }
 
@@ -220,7 +230,8 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
     );
     let candidate_id = Address::generate(&env);
     let factory_id = env.register(MockPoolFactory, (&candidate_id,));
-    let emitter_id = env.register(MockEmitter, ());
+    let incumbent = Address::generate(&env);
+    let emitter_id = env.register(MockEmitter, (&incumbent,));
     env.register_at(
         &candidate_id,
         backstop::WASM,

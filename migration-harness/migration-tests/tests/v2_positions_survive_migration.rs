@@ -1,8 +1,9 @@
 use soroban_sdk::{
+    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
     contract, contractclient, contractimpl, contracttype,
     testutils::{Address as _, Ledger},
     token::{StellarAssetClient, TokenClient},
-    Address, BytesN, Env, String, Symbol, Vec,
+    vec, Address, BytesN, Env, IntoVal, Map, String, Symbol, Val, Vec,
 };
 
 mod deployed_emitter {
@@ -33,7 +34,6 @@ mod v3_backstop {
 }
 
 const SCALAR_7: i128 = 10_000_000;
-const PREPARATION_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 #[derive(Clone)]
 #[contracttype]
@@ -177,6 +177,74 @@ impl MockComet {
             &to_balance.checked_add(amount).unwrap(),
         );
     }
+
+    pub fn dep_tokn_amt_in_get_lp_tokns_out(
+        env: Env,
+        token: Address,
+        amount: i128,
+        min_lp_tokens_out: i128,
+        to: Address,
+    ) -> i128 {
+        // A deterministic 1:1 LP output makes each claim return the exact BLND
+        // amount consumed, so the differential test compares emission
+        // accounting rather than Comet slippage.
+        if amount <= 0 || amount < min_lp_tokens_out {
+            panic!("invalid single-sided deposit");
+        }
+        let comet = env.current_contract_address();
+        let approval_ledger = (env.ledger().sequence() / 100_000 + 1) * 100_000;
+        TokenClient::new(&env, &token).approve(&to, &comet, &amount, &approval_ledger);
+        let transfer_args: Vec<Val> = vec![
+            &env,
+            comet.clone().into_val(&env),
+            to.clone().into_val(&env),
+            comet.clone().into_val(&env),
+            amount.into_val(&env),
+        ];
+        env.authorize_as_current_contract(vec![
+            &env,
+            InvokerContractAuthEntry::Contract(SubContractInvocation {
+                context: ContractContext {
+                    contract: token.clone(),
+                    fn_name: Symbol::new(&env, "transfer_from"),
+                    args: transfer_args,
+                },
+                sub_invocations: vec![&env],
+            }),
+        ]);
+        TokenClient::new(&env, &token).transfer_from(&comet, &to, &comet, &amount);
+
+        let balance = Self::balance(env.clone(), to.clone());
+        env.storage().instance().set(
+            &MockCometKey::Balance(to),
+            &balance.checked_add(amount).unwrap(),
+        );
+        let supply: i128 = env
+            .storage()
+            .instance()
+            .get(&MockCometKey::TotalSupply)
+            .unwrap();
+        env.storage().instance().set(
+            &MockCometKey::TotalSupply,
+            &supply.checked_add(amount).unwrap(),
+        );
+
+        let blnd: Address = env.storage().instance().get(&MockCometKey::Blnd).unwrap();
+        let reserve_key = if token == blnd {
+            MockCometKey::BlndReserve
+        } else {
+            let paired: Address = env.storage().instance().get(&MockCometKey::Paired).unwrap();
+            if token != paired {
+                panic!("unsupported single-sided token");
+            }
+            MockCometKey::PairedReserve
+        };
+        let reserve: i128 = env.storage().instance().get(&reserve_key).unwrap();
+        env.storage()
+            .instance()
+            .set(&reserve_key, &reserve.checked_add(amount).unwrap());
+        amount
+    }
 }
 
 #[derive(Clone)]
@@ -271,10 +339,26 @@ impl MockV3PoolFactory {
 #[contract]
 struct MockV3Pool;
 
+#[derive(Clone)]
+#[contracttype]
+struct MockPositions {
+    liabilities: Map<u32, i128>,
+    collateral: Map<u32, i128>,
+    supply: Map<u32, i128>,
+}
+
 #[contractimpl]
 impl MockV3Pool {
     pub fn backstop_withdrawal_allowed(_env: Env, _backstop: Address) -> bool {
         true
+    }
+
+    pub fn get_positions(env: Env, _address: Address) -> MockPositions {
+        MockPositions {
+            liabilities: Map::new(&env),
+            collateral: Map::new(&env),
+            supply: Map::new(&env),
+        }
     }
 }
 
@@ -345,6 +429,401 @@ fn assert_backstop_pool_unchanged(
     assert_eq!(after.blnd, before.blnd);
     assert_eq!(after.usdc, before.usdc);
     assert_eq!(after.token_spot_price, before.token_spot_price);
+}
+
+const DAY: u64 = 24 * 60 * 60;
+const USER_A_LP: i128 = 30_000 * SCALAR_7;
+const USER_B_LP: i128 = 20_000 * SCALAR_7;
+const QUEUED_LP: i128 = 10_000 * SCALAR_7;
+const DEQUEUED_LP: i128 = 5_000 * SCALAR_7;
+const REMOVAL_QUEUE_B_LP: i128 = 7_001 * SCALAR_7;
+
+struct BackfillFixture {
+    env: Env,
+    blnd: Address,
+    usdc: Address,
+    xlm: Address,
+    blnd_usdc: Address,
+    blnd_xlm: Address,
+    emitter: Address,
+    candidate: Address,
+    factory: Address,
+    pool: Address,
+    user_a: Address,
+    user_b: Address,
+}
+
+#[derive(Debug)]
+struct BackfillOutcome {
+    scheduled: i128,
+    pool_tranche: i128,
+    user_a_lp: i128,
+    user_b_lp: i128,
+    withdrawn_lp: i128,
+}
+
+fn create_backfill_fixture() -> BackfillFixture {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+    env.ledger().set_timestamp(1_000);
+
+    let token_admin = Address::generate(&env);
+    let blnd = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let usdc = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let xlm = env
+        .register_stellar_asset_contract_v2(token_admin)
+        .address();
+    let blnd_usdc = env.register(
+        MockComet,
+        (
+            &blnd,
+            &usdc,
+            &(120_000 * SCALAR_7),
+            &(1_200_012 * SCALAR_7),
+            &(30_000 * SCALAR_7),
+        ),
+    );
+    let blnd_xlm = env.register(
+        MockComet,
+        (
+            &blnd,
+            &xlm,
+            &(120_000 * SCALAR_7),
+            &(960_000 * SCALAR_7),
+            &(240_000 * SCALAR_7),
+        ),
+    );
+
+    let incumbent = Address::generate(&env);
+    let candidate = Address::generate(&env);
+    let emitter = env.register(DEPLOYED_EMITTER_WASM, ());
+    DeployedEmitterClient::new(&env, &emitter).initialize(&blnd, &incumbent, &blnd_usdc);
+    StellarAssetClient::new(&env, &blnd).set_admin(&emitter);
+
+    let factory = env.register(MockV3PoolFactory, (&candidate,));
+    let pool = env.register(MockV3Pool, ());
+    MockV3PoolFactoryClient::new(&env, &factory).set_pool(&pool);
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let lp = MockCometClient::new(&env, &blnd_usdc);
+    // The candidate withdraws all but 7,999 LP before replacement. Preserve
+    // the emitter's strict direct-balance majority through those withdrawals.
+    lp.mint(
+        &incumbent,
+        &(USER_A_LP + USER_B_LP - DEQUEUED_LP - USER_A_LP - REMOVAL_QUEUE_B_LP - 1),
+    );
+    lp.mint(&user_a, &USER_A_LP);
+    lp.mint(&user_b, &USER_B_LP);
+
+    BackfillFixture {
+        env,
+        blnd,
+        usdc,
+        xlm,
+        blnd_usdc,
+        blnd_xlm,
+        emitter,
+        candidate,
+        factory,
+        pool,
+        user_a,
+        user_b,
+    }
+}
+
+fn run_v2_backfill_timeline() -> BackfillOutcome {
+    let fixture = create_backfill_fixture();
+    let env = &fixture.env;
+    env.register_at(
+        &fixture.candidate,
+        v2_backstop::WASM,
+        (
+            &fixture.blnd_usdc,
+            &fixture.emitter,
+            &fixture.blnd,
+            &fixture.usdc,
+            &fixture.factory,
+            Vec::<(Address, i128)>::new(env),
+        ),
+    );
+    let backstop = v2_backstop::Client::new(env, &fixture.candidate);
+    let emitter = DeployedEmitterClient::new(env, &fixture.emitter);
+    assert_eq!(
+        backstop.deposit(&fixture.user_a, &fixture.pool, &USER_A_LP),
+        USER_A_LP
+    );
+    assert_eq!(
+        backstop.deposit(&fixture.user_b, &fixture.pool, &USER_B_LP),
+        USER_B_LP
+    );
+    backstop.add_reward(&fixture.pool, &None);
+
+    let start = env.ledger().timestamp();
+    assert_eq!(backstop.distribute(), 0);
+    emitter.queue_swap_backstop(&fixture.candidate, &fixture.blnd_xlm);
+    let unlock = emitter.get_queued_swap().unwrap().unlock_time;
+    assert_eq!(unlock, start + 31 * DAY);
+
+    let mut scheduled = 0_i128;
+    let mut pool_tranche = 0_i128;
+
+    env.ledger().set_timestamp(start + DAY);
+    scheduled += backstop.distribute();
+    pool_tranche += backstop.gulp_emissions(&fixture.pool);
+
+    env.ledger().set_timestamp(start + 4 * DAY);
+    scheduled += backstop.distribute();
+    backstop.queue_withdrawal(&fixture.user_b, &fixture.pool, &QUEUED_LP);
+    pool_tranche += backstop.gulp_emissions(&fixture.pool);
+
+    env.ledger().set_timestamp(start + 5 * DAY);
+    scheduled += backstop.distribute();
+    backstop.dequeue_withdrawal(&fixture.user_b, &fixture.pool, &DEQUEUED_LP);
+    pool_tranche += backstop.gulp_emissions(&fixture.pool);
+    backstop.queue_withdrawal(&fixture.user_a, &fixture.pool, &USER_A_LP);
+    backstop.queue_withdrawal(&fixture.user_b, &fixture.pool, &REMOVAL_QUEUE_B_LP);
+
+    env.ledger().set_timestamp(start + 25 * DAY);
+    scheduled += backstop.distribute();
+    let mut withdrawn_lp = backstop.withdraw(&fixture.user_b, &fixture.pool, &DEQUEUED_LP);
+    pool_tranche += backstop.gulp_emissions(&fixture.pool);
+
+    env.ledger().set_timestamp(unlock);
+    scheduled += backstop.distribute();
+    pool_tranche += backstop.gulp_emissions(&fixture.pool);
+    withdrawn_lp += backstop.withdraw(&fixture.user_a, &fixture.pool, &USER_A_LP);
+    withdrawn_lp += backstop.withdraw(&fixture.user_b, &fixture.pool, &REMOVAL_QUEUE_B_LP);
+    backstop.remove_reward(&fixture.pool);
+    assert!(backstop.reward_zone().is_empty());
+    emitter.swap_backstop();
+    assert_eq!(backstop.distribute(), 0);
+    backstop.drop();
+
+    env.ledger().set_timestamp(unlock + 7 * DAY);
+    let user_a_lp = backstop.claim(
+        &fixture.user_a,
+        &soroban_sdk::vec![env, fixture.pool.clone()],
+        &0,
+    );
+    let user_b_lp = backstop.claim(
+        &fixture.user_b,
+        &soroban_sdk::vec![env, fixture.pool.clone()],
+        &0,
+    );
+
+    BackfillOutcome {
+        scheduled,
+        pool_tranche,
+        user_a_lp,
+        user_b_lp,
+        withdrawn_lp,
+    }
+}
+
+fn run_v3_backfill_timeline() -> BackfillOutcome {
+    let fixture = create_backfill_fixture();
+    let env = &fixture.env;
+    env.register_at(
+        &fixture.candidate,
+        v3_backstop::WASM,
+        (
+            &fixture.blnd_usdc,
+            &fixture.blnd_xlm,
+            &fixture.emitter,
+            &fixture.blnd,
+            &fixture.usdc,
+            &fixture.xlm,
+            &fixture.factory,
+            Vec::<(Address, i128)>::new(env),
+        ),
+    );
+    let backstop = v3_backstop::Client::new(env, &fixture.candidate);
+    let emitter = DeployedEmitterClient::new(env, &fixture.emitter);
+    assert_eq!(
+        backstop.deposit(
+            &v3_backstop::BackstopTier::BlndUsdc,
+            &fixture.user_a,
+            &fixture.pool,
+            &USER_A_LP,
+        ),
+        USER_A_LP
+    );
+    assert_eq!(
+        backstop.deposit(
+            &v3_backstop::BackstopTier::BlndUsdc,
+            &fixture.user_b,
+            &fixture.pool,
+            &USER_B_LP,
+        ),
+        USER_B_LP
+    );
+    backstop.add_reward(&fixture.pool, &None);
+
+    let start = env.ledger().timestamp();
+    assert_eq!(backstop.distribute(), 0);
+    emitter.queue_swap_backstop(&fixture.candidate, &fixture.blnd_xlm);
+    let unlock = emitter.get_queued_swap().unwrap().unlock_time;
+    assert_eq!(unlock, start + 31 * DAY);
+
+    let mut scheduled = 0_i128;
+    let mut pool_tranche = 0_i128;
+
+    env.ledger().set_timestamp(start + DAY);
+    scheduled += backstop.distribute();
+    pool_tranche += backstop.gulp_emissions(&fixture.pool);
+
+    env.ledger().set_timestamp(start + 4 * DAY);
+    scheduled += backstop.distribute();
+    backstop.queue_withdrawal(
+        &v3_backstop::BackstopTier::BlndUsdc,
+        &fixture.user_b,
+        &fixture.pool,
+        &QUEUED_LP,
+    );
+    pool_tranche += backstop.gulp_emissions(&fixture.pool);
+
+    env.ledger().set_timestamp(start + 5 * DAY);
+    scheduled += backstop.distribute();
+    backstop.dequeue_withdrawal(
+        &v3_backstop::BackstopTier::BlndUsdc,
+        &fixture.user_b,
+        &fixture.pool,
+        &DEQUEUED_LP,
+    );
+    pool_tranche += backstop.gulp_emissions(&fixture.pool);
+    backstop.queue_withdrawal(
+        &v3_backstop::BackstopTier::BlndUsdc,
+        &fixture.user_a,
+        &fixture.pool,
+        &USER_A_LP,
+    );
+    backstop.queue_withdrawal(
+        &v3_backstop::BackstopTier::BlndUsdc,
+        &fixture.user_b,
+        &fixture.pool,
+        &REMOVAL_QUEUE_B_LP,
+    );
+
+    env.ledger().set_timestamp(start + 25 * DAY);
+    scheduled += backstop.distribute();
+    let mut withdrawn_lp = backstop.withdraw(
+        &v3_backstop::BackstopTier::BlndUsdc,
+        &fixture.user_b,
+        &fixture.pool,
+        &DEQUEUED_LP,
+        &fixture.user_b,
+    );
+    pool_tranche += backstop.gulp_emissions(&fixture.pool);
+
+    env.ledger().set_timestamp(unlock);
+    scheduled += backstop.distribute();
+    pool_tranche += backstop.gulp_emissions(&fixture.pool);
+    withdrawn_lp += backstop.withdraw(
+        &v3_backstop::BackstopTier::BlndUsdc,
+        &fixture.user_a,
+        &fixture.pool,
+        &USER_A_LP,
+        &fixture.user_a,
+    );
+    withdrawn_lp += backstop.withdraw(
+        &v3_backstop::BackstopTier::BlndUsdc,
+        &fixture.user_b,
+        &fixture.pool,
+        &REMOVAL_QUEUE_B_LP,
+        &fixture.user_b,
+    );
+    backstop.remove_reward(&fixture.pool);
+    assert!(backstop.reward_zone().is_empty());
+    assert_eq!(backstop.migration_state().scheduled_backfill, scheduled);
+    emitter.swap_backstop();
+    assert_eq!(backstop.distribute(), 0);
+    backstop.drop();
+    assert_eq!(backstop.migration_state().funded_backfill, Some(scheduled));
+
+    env.ledger().set_timestamp(unlock + 7 * DAY);
+    let user_a_lp = backstop.claim(
+        &v3_backstop::BackstopTier::BlndUsdc,
+        &fixture.user_a,
+        &fixture.pool,
+        &0,
+    );
+    let user_b_lp = backstop.claim(
+        &v3_backstop::BackstopTier::BlndUsdc,
+        &fixture.user_b,
+        &fixture.pool,
+        &0,
+    );
+
+    BackfillOutcome {
+        scheduled,
+        pool_tranche,
+        user_a_lp,
+        user_b_lp,
+        withdrawn_lp,
+    }
+}
+
+fn assert_near(left: i128, right: i128, tolerance: i128, label: &str) {
+    let difference = if left >= right {
+        left - right
+    } else {
+        right - left
+    };
+    assert!(
+        difference <= tolerance,
+        "{label}: {left} differs from {right} by {difference}, tolerance {tolerance}"
+    );
+}
+
+#[test]
+fn deployed_v2_and_optimized_v3_backfill_accounting_remain_equivalent() {
+    let v2 = run_v2_backfill_timeline();
+    let v3 = run_v3_backfill_timeline();
+
+    assert_eq!(v2.scheduled, i128::from(31 * DAY) * SCALAR_7);
+    assert_eq!(v3.scheduled, v2.scheduled);
+    assert_eq!(v3.pool_tranche, v2.pool_tranche);
+    assert_eq!(
+        v2.withdrawn_lp,
+        DEQUEUED_LP + USER_A_LP + REMOVAL_QUEUE_B_LP
+    );
+    assert_eq!(v3.withdrawn_lp, v2.withdrawn_lp);
+
+    // V3 carries stream, index, and user rounding remainders that deployed v2
+    // floors away. Everything else in this matched BLND:USDC backfill timeline
+    // must remain equal, and the carry improvement may differ only by dust.
+    const ROUNDING_TOLERANCE: i128 = 16;
+    assert_near(
+        v3.user_a_lp,
+        v2.user_a_lp,
+        ROUNDING_TOLERANCE,
+        "user A backfill claim",
+    );
+    assert_near(
+        v3.user_b_lp,
+        v2.user_b_lp,
+        ROUNDING_TOLERANCE,
+        "user B backfill claim",
+    );
+    let expected_backstop = v2.scheduled * 7 / 10;
+    assert_near(
+        v2.user_a_lp + v2.user_b_lp,
+        expected_backstop,
+        ROUNDING_TOLERANCE,
+        "v2 total backfill claim",
+    );
+    assert_near(
+        v3.user_a_lp + v3.user_b_lp,
+        expected_backstop,
+        ROUNDING_TOLERANCE,
+        "v3 total backfill claim",
+    );
+    assert_eq!(v2.pool_tranche, v2.scheduled * 3 / 10);
 }
 
 #[test]
@@ -521,22 +1000,18 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
         blnd_usdc_lp_client.balance(&v2_backstop_id) + 1
     );
 
-    let queue_start = env.ledger().timestamp();
-    emitter.queue_swap_backstop(&candidate_id, &next_lp);
+    let backfill_start = env.ledger().timestamp();
     assert_eq!(candidate.distribute(), 0);
     assert_eq!(
         candidate.migration_state().migration_epoch_start,
-        Some(queue_start)
+        Some(backfill_start)
     );
-    let unlock_time = emitter.get_queued_swap().unwrap().unlock_time;
-    env.ledger()
-        .set_timestamp(unlock_time - PREPARATION_WINDOW_SECONDS);
+
+    emitter.queue_swap_backstop(&candidate_id, &next_lp);
     assert_eq!(candidate.distribute(), 0);
-    assert_eq!(
-        candidate.migration_state().verified_queue_unlock,
-        Some(unlock_time)
-    );
+    let unlock_time = emitter.get_queued_swap().unwrap().unlock_time;
     env.ledger().set_timestamp(unlock_time);
+    assert_eq!(candidate.distribute(), 0);
 
     // Snapshot all incumbent economic state immediately before the only call
     // that changes the emitter's registered backstop.

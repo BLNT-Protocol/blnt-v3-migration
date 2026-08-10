@@ -46,13 +46,15 @@ permissionless queue and swap mechanism; it deploys no governance, multisig,
 administrator recovery, or alternate upgrade path.
 
 This test deployment configures the candidate with an empty discretionary
-recipient list. During the queue, the candidate accrues up to 10 million BLND
-through its ordinary 70/30 emission indexes: the backstop tranche is
-BLND:USDC-only, while the pool tranche follows each pool's supply/borrow
-configuration. After activation, permissionless candidate `drop()` funds
-exactly that schedule through the emitter's initial drop; the finalize command
-invokes and verifies it when the schedule is positive. The otherwise available
-discretionary allocation remains undistributed in this deployment.
+recipient list. Its first candidate distribution starts the independent
+backfill clock immediately before the queue. Backfill accrues through the
+ordinary 70/30 pending-and-stream pipeline: the backstop tranche enters only
+the BLND:USDC seven-day stream, while the pool tranche follows each pool's
+supply/borrow configuration. After
+activation, permissionless candidate `drop()` funds exactly that schedule
+through the emitter's initial drop; the finalize command invokes and verifies
+it when the schedule is positive. The otherwise available discretionary
+allocation remains undistributed in this deployment.
 
 ## Prerequisites
 
@@ -125,21 +127,26 @@ make localnet-recover
 If the Colima VM or Quickstart container itself was stopped, the ephemeral
 ledger is gone and cannot be recovered.
 
-During the final seven days before the queued unlock:
+During the final seven days before unlock:
 
 ```bash
 make localnet-prepare
 ```
 
-At or after the unlock:
+This records the compatible candidate, BLND:XLM token, and unlock without
+changing the contract's v2-named migration surface.
+
+At or after unlock, and no later than seven days afterward:
 
 ```bash
 make localnet-finalize
 ```
 
-`localnet-finalize` is resumable across the v2-style sequence: it invokes the
-emitter's existing swap, calls candidate `distribute()` to synchronize, calls
-candidate `drop()` for a positive backfill schedule, and then verifies:
+`localnet-finalize` is resumable across the v2-style sequence: it checkpoints
+backfill and refreshes the queue attestation, invokes the emitter's existing
+swap, calls candidate `distribute()` within the grace period to transition to
+ongoing accounting, calls candidate `drop()` for a positive backfill schedule,
+and then verifies:
 
 - The emitter points to the candidate.
 - The emitter queue is empty.
@@ -168,10 +175,10 @@ make localnet-emissions
 
 That command waits for positive emitter intervals, invokes the candidate's
 permissionless distribution, derives its immutable 70/30 tranches from the
-public total, verifies positive tier-specific `claimable` increases, compounds
-both pools' BLND:USDC and BLND:XLM accruals into their originating tiers, and
-gulps the two pool tranches into their seven-day reserve-token streams. After
-the reported expiration:
+public total, and gulps both pools. Each gulp starts the BLND:USDC and BLND:XLM
+backstop streams and the pool's reserve-token streams. After the reported
+seven-day expiration, the next command compounds both backstop-tier accruals
+and claims both pool streams:
 
 ```bash
 make localnet-claim-emissions
@@ -203,5 +210,5 @@ Secrets are held only in the isolated ignored Stellar CLI configuration and
 are never copied into `state.json` or the transaction logs.
 
 Native and WASM compatibility tests remain the fast time-travel lane. They
-advance the full queue and retry horizon without changing the production
-constants used by this local-network exercise.
+advance the full queue and exercise delayed and canceled migration paths
+without changing the emitter's production delay.

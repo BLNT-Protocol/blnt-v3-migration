@@ -76,7 +76,7 @@ DEPOSITOR_USDC_MINT=$((ACTIVATION_USDC_BALANCE + POOL_SUPPLY_BALANCE + 500 * SCA
 DEPOSITOR_XLM_MINT=$((COMET_INITIAL_PAIR_TOKEN))
 FIXTURE_ORACLE_RESOLUTION=300
 FIXTURE_ORACLE_RECORDS=7
-PREPARATION_WINDOW_SECONDS=$((7 * 24 * 60 * 60))
+QUEUE_ATTESTATION_WINDOW_SECONDS=$((7 * 24 * 60 * 60))
 EMISSION_START_DELAY_SECONDS=5
 MULTI_POOL_EMISSION_DELAY_SECONDS=10
 # Explicitly renewed deployed-emitter and v2 entries get ten wall-clock days
@@ -132,18 +132,19 @@ Commands:
   verify-modeled-pools
             Verify modeled pool configs, registration, status, and backstops.
   recover   Restart stalled local Stellar Core without replacing state.
-  prepare   Checkpoint backfill and verify the queue in its final seven-day window.
-  finalize  Swap through the emitter, synchronize through distribute, and drop backfill.
+  prepare   Attest the compatible queue during its final seven days.
+  finalize  Checkpoint backfill, swap through the emitter, transition, and drop backfill.
   verify    Assert final bindings, balances, and migration state.
-  emissions Exercise the immediate post-migration 70/30 emission distribution.
+  emissions Start the post-migration seven-day 70/30 emission streams.
   claim-emissions
-            Claim the completed seven-day pool emission stream.
+            Claim completed backstop-tier and pool emission streams.
   stop      Stop the named local Quickstart container.
 
-The runner never weakens the production 31-day queue. Call prepare and finalize
-at the timestamps reported by status. The contract retains v2's distribute/drop
-migration surface. Generated configuration, public state, results, and cost
-logs live below the network-specific ignored work directory.
+The runner never weakens the production 31-day queue. Call prepare during its
+final seven days and finalize from unlock through the following seven-day grace
+period. The contract retains v2's distribute/drop migration surface. Generated
+configuration, public state, results, and cost logs live below the
+network-specific ignored work directory.
 EOF
 }
 
@@ -1394,14 +1395,14 @@ Deployment:
   5. Deploy ${pool_description} with transferable v2-style admins.
   6. Fund them with ${pool_funding_description}, activate them, add them to their reward zones, and configure their selected reserve-position emissions.
   7. ${incumbent_funding_description}
-  8. Assert strict candidate qualification, queue the emitter swap, and call distribute.
+  8. Assert strict candidate qualification, start backfill through distribute, queue the emitter swap, and observe it through distribute.
 
 Time-gated continuation:
-  9. Call distribute during the final seven days to prepare the queue.
- 10. Call the emitter swap and then distribute at or after unlock.
+  9. During the final seven days, attest the compatible queue through distribute.
+ 10. At or after unlock, checkpoint backfill, call the emitter swap, and transition through distribute.
  11. Verify the emitter, candidate, pool, balances, and cleared queue.
- 12. Distribute ongoing BLND, compound both backstop tiers, and gulp both pool tranches.
- 13. Claim both pool streams after their seven-day vesting period.
+ 12. Distribute ongoing BLND and gulp both backstop-tier and pool tranches.
+ 13. Claim all completed streams after their seven-day vesting period.
 
 Mutation is limited to ${NETWORK_LABEL} and ${WORK_DIR}.
 EOF
@@ -1468,24 +1469,19 @@ begin_deployed_migration() {
         . == "Pending" or
         (type == "object" and (has("Pending") or .tag? == "Pending"))
     ' >/dev/null; then
-        queued_swap="$(invoke_view \
-            "query-emitter-queue-before-begin" "${emitter_id}" get_queued_swap)"
-        if printf '%s' "${queued_swap}" | jq -e '. == null' >/dev/null; then
+        if printf '%s' "${migration_state}" | jq -e \
+            '.migration_epoch_start == null' >/dev/null
+        then
             invoke_transaction \
-                "queue-migration" "${emitter_id}" queue_swap_backstop \
-                --new_backstop "${candidate_id}" \
-                --new_backstop_token "${blnd_xlm_token_id}" >/dev/null
+                "start-backfill-clock" "${candidate_id}" distribute >/dev/null
+            migration_state="$(invoke_view \
+                "query-started-backfill-state" "${candidate_id}" migration_state)"
         fi
-        invoke_transaction \
-            "observe-migration-queue" "${candidate_id}" distribute >/dev/null
-        migration_state="$(invoke_view \
-            "query-open-migration-state" "${candidate_id}" migration_state)"
         epoch_start="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
             jq -c '.migration_epoch_start')")"
     elif printf '%s' "${migration_status}" | jq -e '
-        . == "Open" or . == "Prepared" or
-        (type == "object" and
-            (has("Open") or has("Prepared") or .tag? == "Open" or .tag? == "Prepared"))
+        . == "Open" or
+        (type == "object" and (has("Open") or .tag? == "Open"))
     ' >/dev/null; then
         epoch_start="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
             jq -c '.migration_epoch_start')")"
@@ -1494,6 +1490,16 @@ begin_deployed_migration() {
     fi
     [[ "${epoch_start}" =~ ^[0-9]+$ ]] ||
         die "invalid migration epoch start: ${epoch_start}"
+    queued_swap="$(invoke_view \
+        "query-emitter-queue-before-begin" "${emitter_id}" get_queued_swap)"
+    if printf '%s' "${queued_swap}" | jq -e '. == null' >/dev/null; then
+        invoke_transaction \
+            "queue-migration" "${emitter_id}" queue_swap_backstop \
+            --new_backstop "${candidate_id}" \
+            --new_backstop_token "${blnd_xlm_token_id}" >/dev/null
+    fi
+    invoke_transaction \
+        "observe-migration-queue" "${candidate_id}" distribute >/dev/null
     queued_swap="$(invoke_view \
         "query-open-emitter-queue" "${emitter_id}" get_queued_swap)"
     unlock_time="$(printf '%s' "${queued_swap}" | jq -er '.unlock_time')"
@@ -1507,7 +1513,7 @@ begin_deployed_migration() {
     state_set "migration_epoch_start" "${epoch_start}"
     state_set "unlock_time" "${unlock_time}"
     state_set "prepare_not_before" \
-        "$((unlock_time - PREPARATION_WINDOW_SECONDS))"
+        "$((unlock_time - QUEUE_ATTESTATION_WINDOW_SECONDS))"
     state_set "incumbent_balance" "${AGGREGATE_INCUMBENT_BALANCE}"
     state_set "candidate_balance" "${AGGREGATE_CANDIDATE_BALANCE}"
     state_set "activation_usdc_balance" "${ACTIVATION_USDC_BALANCE}"
@@ -1753,9 +1759,9 @@ command_deploy() {
         --requests "[{\"address\":\"${usdc_token_id}\",\"amount\":\"${POOL_SUPPLY_BALANCE}\",\"request_type\":0}]" >/dev/null
     ensure_fixed_v3_eurc_borrow "${pool_id}"
 
-    # Complete both modeled v2/v3 pool pairs before opening the migration
-    # epoch, so both candidate BLND:USDC positions are prefunded before
-    # backfill begins. The setup command is idempotent and remains available
+    # Complete both modeled v2/v3 pool pairs before starting the backfill
+    # clock, so both candidate BLND:USDC positions are prefunded before
+    # accrual begins. The setup command is idempotent and remains available
     # to resume an interrupted deployment.
     state_set "phase" "deploying"
     command_deploy_modeled_pools
@@ -1776,9 +1782,8 @@ command_deploy_modeled_pools() {
     load_state
     require_modeled_pool_support
     phase="$(state_value phase)"
-    [[ "${phase}" == "deploying" || "${phase}" == "open" ||
-        "${phase}" == "prepared" ]] ||
-        die "modeled pre-migration pools require a deploying, open, or prepared migration; saved phase is ${phase}"
+    [[ "${phase}" == "deploying" || "${phase}" == "open" ]] ||
+        die "modeled pre-migration pools require a deploying or open migration; saved phase is ${phase}"
 
     record_modeled_pools_provenance deployment
     state_set "modeled_pools_fixture_sha256" \
@@ -2215,7 +2220,8 @@ EOF
 
 command_status() {
     local emitter_id incumbent_id candidate_id pool_id blnd_xlm_token_id blnd_usdc_token_id
-    local unlock_time prepare_not_before phase
+    local unlock_time prepare_not_before activation_deadline phase
+    local verified_queue_unlock verified_unlock_raw
     local emitter_backstop incumbent_balance candidate_balance queued_swap migration_state
     local pool_operator pool_status now expiration
 
@@ -2230,6 +2236,7 @@ command_status() {
     blnd_usdc_token_id="$(state_value blnd_usdc_token)"
     unlock_time="$(state_value unlock_time)"
     prepare_not_before="$(state_value prepare_not_before)"
+    activation_deadline=$((unlock_time + QUEUE_ATTESTATION_WINDOW_SECONDS))
     phase="$(state_value phase)"
 
     emitter_backstop="$(normalize_scalar "$(invoke_view \
@@ -2241,6 +2248,13 @@ command_status() {
     queued_swap="$(invoke_view "status-emitter-queue" "${emitter_id}" get_queued_swap)"
     migration_state="$(invoke_view \
         "status-candidate-migration" "${candidate_id}" migration_state)"
+    verified_unlock_raw="$(printf '%s' "${migration_state}" | \
+        jq -c '.verified_queue_unlock')"
+    if printf '%s' "${verified_unlock_raw}" | jq -e '. == null' >/dev/null; then
+        verified_queue_unlock=""
+    else
+        verified_queue_unlock="$(normalize_scalar "${verified_unlock_raw}")"
+    fi
     pool_operator="$(normalize_scalar "$(invoke_view \
         "status-pool-admin" "${pool_id}" get_admin)")"
     pool_status="$(invoke_view \
@@ -2251,7 +2265,8 @@ command_status() {
     if [[ "${queued_swap}" != "null" ]]; then
         assert_queued_swap_matches \
             "${queued_swap}" "${candidate_id}" "${blnd_xlm_token_id}" "${unlock_time}"
-    elif [[ "${phase}" != "active" &&
+    elif [[ "${emitter_backstop}" != "${candidate_id}" &&
+        "${phase}" != "active" &&
         "${phase}" != "verified" &&
         "${phase}" != "emissions_streaming" &&
         "${phase}" != "emissions_claimed" ]]
@@ -2271,12 +2286,21 @@ ${NETWORK_LABEL} migration status
   candidate pool admin: ${pool_operator}
   candidate pool status: ${pool_status}
   queued swap: ${queued_swap}
-  prepare not before: $(format_timestamp "${prepare_not_before}") (${prepare_not_before})
+  queue attestation: ${verified_queue_unlock:-none}
+  attest not before: $(format_timestamp "${prepare_not_before}") (${prepare_not_before})
   unlock: $(format_timestamp "${unlock_time}") (${unlock_time})
+  activation deadline: $(format_timestamp "${activation_deadline}") (${activation_deadline})
 EOF
 
     if [[ "${queued_swap}" == "null" ]]; then
         case "${phase}" in
+            deploying|open|prepared)
+                if (( now > activation_deadline )); then
+                    note "Emitter replacement completed, but the candidate activation grace period has expired."
+                else
+                    note "Emitter replacement completed externally. Next action: run finalize to transition and fund backfill."
+                fi
+                ;;
             active)
                 note "Emitter swap completed. Next action: run verify."
                 ;;
@@ -2286,9 +2310,9 @@ EOF
             emissions_streaming)
                 expiration="$(state_value pool_emission_expiration)"
                 if (( now < expiration )); then
-                    note "Pool emissions are streaming. Claim opens in $((expiration - now)) seconds."
+                    note "Backstop and pool emissions are streaming. Claims open in $((expiration - now)) seconds."
                 else
-                    note "Pool emission stream has expired. Next action: run claim-emissions."
+                    note "Emission streams have expired. Next action: run claim-emissions."
                 fi
                 ;;
             emissions_claimed)
@@ -2296,11 +2320,15 @@ EOF
                 ;;
         esac
     elif (( now < prepare_not_before )); then
-        note "Next action: checkpoint and prepare in $((prepare_not_before - now)) seconds."
+        note "Queue attestation opens in $((prepare_not_before - now)) seconds."
+    elif (( now > activation_deadline )); then
+        note "Queue attestation and candidate activation grace period expired."
+    elif [[ -z "${verified_queue_unlock}" ]]; then
+        note "Queue attestation is open. Next action: run prepare."
     elif (( now < unlock_time )); then
-        note "Next action: run prepare now; the emitter swap opens in $((unlock_time - now)) seconds."
+        note "Queue attested. The emitter swap opens in $((unlock_time - now)) seconds."
     else
-        note "Queue is unlocked. If prepared, run finalize to swap, synchronize, and drop backfill."
+        note "Queue is unlocked. Run finalize to checkpoint, swap, transition, and drop backfill."
     fi
 }
 
@@ -2480,34 +2508,31 @@ command_recover() {
 }
 
 command_prepare() {
-    local candidate_id result migration_state migration_status verified_unlock
+    local candidate_id unlock_time result migration_state verified_unlock
 
     validate_tools
     require_network
     load_state
     candidate_id="$(state_value candidate_backstop)"
+    unlock_time="$(state_value unlock_time)"
     result="$(normalize_scalar "$(invoke_transaction \
-        "prepare-migration" "${candidate_id}" distribute)")"
-    [[ "${result}" =~ ^[0-9]+$ ]] || die "invalid preparation distribution: ${result}"
+        "attest-migration-queue" "${candidate_id}" distribute)")"
+    [[ "${result}" =~ ^[0-9]+$ ]] ||
+        die "invalid attestation distribution: ${result}"
     migration_state="$(invoke_view \
-        "verify-prepared-migration" "${candidate_id}" migration_state)"
-    migration_status="$(printf '%s' "${migration_state}" | jq -c '.status')"
-    printf '%s' "${migration_status}" | jq -e '
-        . == "Prepared" or
-        (type == "object" and (has("Prepared") or .tag? == "Prepared"))
-    ' >/dev/null || die "candidate did not enter Prepared state: ${migration_status}"
+        "verify-attested-migration" "${candidate_id}" migration_state)"
     verified_unlock="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
         jq -c '.verified_queue_unlock')")"
-    [[ "${verified_unlock}" =~ ^[0-9]+$ ]] ||
-        die "invalid verified queue unlock: ${verified_unlock}"
+    assert_equal "${unlock_time}" "${verified_unlock}" "attested queue unlock"
     state_set "phase" "prepared"
     state_set "prepared_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    note "Migration queue prepared at unlock ${verified_unlock}; distributed ${result} backfill base units."
+    note "Migration queue attested at unlock ${verified_unlock}; distributed ${result} backfill base units."
     command_status
 }
 
 command_finalize() {
     local emitter_id candidate_id emitter_backstop migration_state migration_status result
+    local unlock_time activation_deadline now verified_raw verified_unlock
     local activated scheduled funded_raw funded
 
     validate_tools
@@ -2515,21 +2540,39 @@ command_finalize() {
     load_state
     emitter_id="$(state_value emitter)"
     candidate_id="$(state_value candidate_backstop)"
+    unlock_time="$(state_value unlock_time)"
+    activation_deadline=$((unlock_time + QUEUE_ATTESTATION_WINDOW_SECONDS))
     migration_state="$(invoke_view \
         "query-finalize-candidate-state" "${candidate_id}" migration_state)"
     migration_status="$(printf '%s' "${migration_state}" | jq -c '.status')"
     if printf '%s' "${migration_status}" | jq -e '
-        . == "Prepared" or
-        (type == "object" and (has("Prepared") or .tag? == "Prepared"))
+        . == "Pending" or . == "Open" or
+        (type == "object" and
+            (has("Pending") or has("Open") or .tag? == "Pending" or .tag? == "Open"))
     ' >/dev/null; then
         emitter_backstop="$(normalize_scalar "$(invoke_view \
             "query-finalize-emitter-backstop" "${emitter_id}" get_backstop)")"
         if [[ "${emitter_backstop}" != "${candidate_id}" ]]; then
+            result="$(normalize_scalar "$(invoke_transaction \
+                "checkpoint-before-emitter-swap" "${candidate_id}" distribute)")"
+            [[ "${result}" =~ ^[0-9]+$ ]] ||
+                die "invalid pre-swap backfill distribution: ${result}"
+            migration_state="$(invoke_view \
+                "verify-finalize-queue-attestation" \
+                "${candidate_id}" migration_state)"
+            verified_raw="$(printf '%s' "${migration_state}" | \
+                jq -c '.verified_queue_unlock')"
+            verified_unlock="$(normalize_scalar "${verified_raw}")"
+            assert_equal "${unlock_time}" "${verified_unlock}" \
+                "finalize queue attestation"
+            now="$(date +%s)"
+            (( now <= activation_deadline )) ||
+                die "candidate activation grace period expired at ${activation_deadline}"
             invoke_transaction \
                 "swap-emitter-backstop" "${emitter_id}" swap_backstop >/dev/null
         fi
         result="$(normalize_scalar "$(invoke_transaction \
-            "synchronize-migration" "${candidate_id}" distribute)")"
+            "transition-candidate-emissions" "${candidate_id}" distribute)")"
         assert_equal "0" "${result}" "first post-swap distribution"
     elif ! printf '%s' "${migration_status}" | jq -e '
         . == "Active" or
@@ -2765,19 +2808,30 @@ read_claimable() {
     printf '%s' "${amount}"
 }
 
+read_pool_tier_assets() {
+    local label="$1" candidate_id="$2" pool="$3" tier="$4"
+    local selector assets
+
+    case "${tier}" in
+        BlndUsdc) selector='.blnd_usdc.assets' ;;
+        BlndXlm) selector='.blnd_xlm.assets' ;;
+        *) die "${label} cannot read non-BLND emission tier ${tier}" ;;
+    esac
+    assets="$(invoke_view "${label}" "${candidate_id}" pool_data \
+        --pool "${pool}" | jq -er "${selector} | tostring")"
+    [[ "${assets}" =~ ^[0-9]+$ ]] ||
+        die "${label} returned invalid tier assets: ${assets}"
+    printf '%s' "${assets}"
+}
+
 command_emissions() {
-    local phase candidate_id pool_id depositor distribution received claim_refresh
+    local phase candidate_id pool_id depositor distribution received
     local expected_backstop_tranche expected_pool_tranche pool_gulped stream expiration
-    local fixed_blnd_usdc_lp fixed_blnd_xlm_lp
-    local fixed_blnd_usdc_claimable fixed_blnd_xlm_claimable
     local fixed_blnd_usdc_before fixed_blnd_xlm_before
-    local fixed_blnd_usdc_ongoing fixed_blnd_xlm_ongoing
     local emission_reserve_token_id yieldblox_reward_status
     local yield_pool yield_distribution yield_received yield_expected_backstop_tranche
-    local yield_expected_pool_tranche yield_blnd_usdc_lp yield_blnd_xlm_lp
-    local yield_blnd_usdc_claimable yield_blnd_xlm_claimable
+    local yield_expected_pool_tranche
     local yield_blnd_usdc_before yield_blnd_xlm_before
-    local yield_blnd_usdc_ongoing yield_blnd_xlm_ongoing
     local yield_pool_gulped yield_stream
     local yield_expiration
 
@@ -2868,103 +2922,6 @@ command_emissions() {
     expected_backstop_tranche=$((expected_backstop_tranche + yield_expected_backstop_tranche))
     expected_pool_tranche=$((expected_pool_tranche + yield_expected_pool_tranche))
 
-    fixed_blnd_usdc_claimable="$(read_claimable \
-        "query-fixed-blnd-usdc-claimable" "${candidate_id}" \
-        "${depositor}" "${pool_id}" BlndUsdc)"
-    fixed_blnd_usdc_ongoing=$((fixed_blnd_usdc_claimable - fixed_blnd_usdc_before))
-    (( fixed_blnd_usdc_ongoing > 0 )) ||
-        die "Fixed BLND:USDC claimable BLND did not increase during ongoing distribution"
-    fixed_blnd_usdc_lp="$(normalize_scalar "$(invoke_transaction_as \
-        "claim-backstop-ongoing-blnd" "${DEPOSITOR_IDENTITY}" \
-        "${candidate_id}" claim \
-        --tier BlndUsdc \
-        --user "${depositor}" \
-        --pool "${pool_id}" \
-        --min_lp_tokens_out 0)")"
-    if [[ ! "${fixed_blnd_usdc_lp}" =~ ^[0-9]+$ ]] ||
-        (( fixed_blnd_usdc_lp <= 0 ))
-    then
-        die "Fixed backstop depositor did not compound positive BLND:USDC LP: ${fixed_blnd_usdc_lp}"
-    fi
-
-    note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds to refresh the checkpoint for the next tier claim..."
-    sleep "${EMISSION_START_DELAY_SECONDS}"
-    claim_refresh="$(capture_ongoing_distribution \
-        "refresh-before-fixed-blnd-xlm-claim" "${candidate_id}")"
-    received=$((received + $(printf '%s' "${claim_refresh}" | jq -er '.distributed | tonumber')))
-    expected_backstop_tranche=$((expected_backstop_tranche + $(printf '%s' "${claim_refresh}" | jq -er '.expected_backstop_tranche | tonumber')))
-    expected_pool_tranche=$((expected_pool_tranche + $(printf '%s' "${claim_refresh}" | jq -er '.expected_pool_tranche | tonumber')))
-    fixed_blnd_xlm_claimable="$(read_claimable \
-        "query-fixed-blnd-xlm-claimable" "${candidate_id}" \
-        "${depositor}" "${pool_id}" BlndXlm)"
-    fixed_blnd_xlm_ongoing=$((fixed_blnd_xlm_claimable - fixed_blnd_xlm_before))
-    (( fixed_blnd_xlm_ongoing > 0 )) ||
-        die "Fixed BLND:XLM claimable BLND did not increase during ongoing distribution"
-    fixed_blnd_xlm_lp="$(normalize_scalar "$(invoke_transaction_as \
-        "claim-fixed-blnd-xlm-ongoing-blnd" "${DEPOSITOR_IDENTITY}" \
-        "${candidate_id}" claim \
-        --tier BlndXlm \
-        --user "${depositor}" \
-        --pool "${pool_id}" \
-        --min_lp_tokens_out 0)")"
-    if [[ ! "${fixed_blnd_xlm_lp}" =~ ^[0-9]+$ ]] ||
-        (( fixed_blnd_xlm_lp <= 0 ))
-    then
-        die "Fixed backstop depositor did not compound positive BLND:XLM LP: ${fixed_blnd_xlm_lp}"
-    fi
-
-    note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds to refresh the YieldBlox claim checkpoint..."
-    sleep "${EMISSION_START_DELAY_SECONDS}"
-    claim_refresh="$(capture_ongoing_distribution \
-        "refresh-before-yieldblox-blnd-usdc-claim" "${candidate_id}")"
-    received=$((received + $(printf '%s' "${claim_refresh}" | jq -er '.distributed | tonumber')))
-    expected_backstop_tranche=$((expected_backstop_tranche + $(printf '%s' "${claim_refresh}" | jq -er '.expected_backstop_tranche | tonumber')))
-    expected_pool_tranche=$((expected_pool_tranche + $(printf '%s' "${claim_refresh}" | jq -er '.expected_pool_tranche | tonumber')))
-    yield_blnd_usdc_claimable="$(read_claimable \
-        "query-yieldblox-blnd-usdc-claimable" "${candidate_id}" \
-        "${depositor}" "${yield_pool}" BlndUsdc)"
-    yield_blnd_usdc_ongoing=$((yield_blnd_usdc_claimable - yield_blnd_usdc_before))
-    (( yield_blnd_usdc_ongoing > 0 )) ||
-        die "YieldBlox BLND:USDC claimable BLND did not increase during ongoing distribution"
-    yield_blnd_usdc_lp="$(normalize_scalar "$(invoke_transaction_as \
-        "claim-yieldblox-backstop-ongoing-blnd" \
-        "${DEPOSITOR_IDENTITY}" "${candidate_id}" claim \
-        --tier BlndUsdc \
-        --user "${depositor}" \
-        --pool "${yield_pool}" \
-        --min_lp_tokens_out 0)")"
-    if [[ ! "${yield_blnd_usdc_lp}" =~ ^[0-9]+$ ]] ||
-        (( yield_blnd_usdc_lp <= 0 ))
-    then
-        die "YieldBlox backstop depositor did not compound positive BLND:USDC LP: ${yield_blnd_usdc_lp}"
-    fi
-
-    note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds to refresh the final tier claim checkpoint..."
-    sleep "${EMISSION_START_DELAY_SECONDS}"
-    claim_refresh="$(capture_ongoing_distribution \
-        "refresh-before-yieldblox-blnd-xlm-claim" "${candidate_id}")"
-    received=$((received + $(printf '%s' "${claim_refresh}" | jq -er '.distributed | tonumber')))
-    expected_backstop_tranche=$((expected_backstop_tranche + $(printf '%s' "${claim_refresh}" | jq -er '.expected_backstop_tranche | tonumber')))
-    expected_pool_tranche=$((expected_pool_tranche + $(printf '%s' "${claim_refresh}" | jq -er '.expected_pool_tranche | tonumber')))
-    yield_blnd_xlm_claimable="$(read_claimable \
-        "query-yieldblox-blnd-xlm-claimable" "${candidate_id}" \
-        "${depositor}" "${yield_pool}" BlndXlm)"
-    yield_blnd_xlm_ongoing=$((yield_blnd_xlm_claimable - yield_blnd_xlm_before))
-    (( yield_blnd_xlm_ongoing > 0 )) ||
-        die "YieldBlox BLND:XLM claimable BLND did not increase during ongoing distribution"
-    yield_blnd_xlm_lp="$(normalize_scalar "$(invoke_transaction_as \
-        "claim-yieldblox-blnd-xlm-ongoing-blnd" \
-        "${DEPOSITOR_IDENTITY}" "${candidate_id}" claim \
-        --tier BlndXlm \
-        --user "${depositor}" \
-        --pool "${yield_pool}" \
-        --min_lp_tokens_out 0)")"
-    if [[ ! "${yield_blnd_xlm_lp}" =~ ^[0-9]+$ ]] ||
-        (( yield_blnd_xlm_lp <= 0 ))
-    then
-        die "YieldBlox backstop depositor did not compound positive BLND:XLM LP: ${yield_blnd_xlm_lp}"
-    fi
-
     pool_gulped="$(normalize_scalar "$(invoke_transaction \
         "gulp-pool-ongoing-blnd" "${pool_id}" gulp_emissions)")"
     if [[ ! "${pool_gulped}" =~ ^[0-9]+$ ]] ||
@@ -2999,18 +2956,10 @@ command_emissions() {
     state_set "ongoing_received" "${received}"
     state_set "ongoing_expected_backstop_tranche" "${expected_backstop_tranche}"
     state_set "ongoing_expected_pool_tranche" "${expected_pool_tranche}"
-    state_set "ongoing_fixed_blnd_usdc_claimed_blnd" "${fixed_blnd_usdc_claimable}"
-    state_set "ongoing_fixed_blnd_xlm_claimed_blnd" "${fixed_blnd_xlm_claimable}"
-    state_set "ongoing_yieldblox_blnd_usdc_claimed_blnd" "${yield_blnd_usdc_claimable}"
-    state_set "ongoing_yieldblox_blnd_xlm_claimed_blnd" "${yield_blnd_xlm_claimable}"
-    state_set "ongoing_fixed_blnd_usdc_claimable_delta" "${fixed_blnd_usdc_ongoing}"
-    state_set "ongoing_fixed_blnd_xlm_claimable_delta" "${fixed_blnd_xlm_ongoing}"
-    state_set "ongoing_yieldblox_blnd_usdc_claimable_delta" "${yield_blnd_usdc_ongoing}"
-    state_set "ongoing_yieldblox_blnd_xlm_claimable_delta" "${yield_blnd_xlm_ongoing}"
-    state_set "ongoing_fixed_blnd_usdc_lp_compounded" "${fixed_blnd_usdc_lp}"
-    state_set "ongoing_fixed_blnd_xlm_lp_compounded" "${fixed_blnd_xlm_lp}"
-    state_set "ongoing_yieldblox_blnd_usdc_lp_compounded" "${yield_blnd_usdc_lp}"
-    state_set "ongoing_yieldblox_blnd_xlm_lp_compounded" "${yield_blnd_xlm_lp}"
+    state_set "ongoing_fixed_blnd_usdc_claimable_before" "${fixed_blnd_usdc_before}"
+    state_set "ongoing_fixed_blnd_xlm_claimable_before" "${fixed_blnd_xlm_before}"
+    state_set "ongoing_yieldblox_blnd_usdc_claimable_before" "${yield_blnd_usdc_before}"
+    state_set "ongoing_yieldblox_blnd_xlm_claimable_before" "${yield_blnd_xlm_before}"
     state_set "ongoing_fixed_pool_gulped" "${pool_gulped}"
     state_set "ongoing_yieldblox_pool_gulped" "${yield_pool_gulped}"
     state_set "ongoing_pool_gulped" "$((pool_gulped + yield_pool_gulped))"
@@ -3027,17 +2976,102 @@ command_emissions() {
 ${NETWORK_LABEL} post-migration emissions verified
   emitter BLND received: ${received}
   expected backstop 70% tranche: ${expected_backstop_tranche}
-  Fixed BLND:USDC claimed/LP compounded: ${fixed_blnd_usdc_claimable}/${fixed_blnd_usdc_lp}
-  Fixed BLND:XLM claimed/LP compounded: ${fixed_blnd_xlm_claimable}/${fixed_blnd_xlm_lp}
-  YieldBlox BLND:USDC claimed/LP compounded: ${yield_blnd_usdc_claimable}/${yield_blnd_usdc_lp}
-  YieldBlox BLND:XLM claimed/LP compounded: ${yield_blnd_xlm_claimable}/${yield_blnd_xlm_lp}
   expected pool 30% tranche: ${expected_pool_tranche}
-  Fixed pool stream reserved: ${pool_gulped}
-  YieldBlox pool stream reserved: ${yield_pool_gulped}
-  final pool stream expiration: $(format_timestamp "${expiration}") (${expiration})
+  Fixed pool tranche streamed: ${pool_gulped}
+  YieldBlox pool tranche streamed: ${yield_pool_gulped}
+  backstop and pool stream expiration: $(format_timestamp "${expiration}") (${expiration})
   YieldBlox v3 reward status: ${yieldblox_reward_status}
-  next action: run claim-emissions after the stream expires
+  next action: claim backstop and pool emissions after the streams expire
 EOF
+}
+
+claim_backstop_tier_resumable() {
+    local label="$1" candidate_id="$2" user="$3" pool="$4" tier="$5"
+    local baseline_key="$6" result_key="$7"
+    local baseline claimable delta completed lp_out
+    local expected_key delta_key assets_key expected expected_delta
+    local assets_before assets_current assets_after assets_delta
+
+    completed="$(state_optional "${result_key}")"
+    if [[ -n "${completed}" ]]; then
+        [[ "${completed}" =~ ^[0-9]+$ ]] ||
+            die "${label} saved LP result is invalid: ${completed}"
+        printf '%s\n' "${completed}"
+        return
+    fi
+
+    expected_key="${result_key}_expected_blnd"
+    delta_key="${result_key}_expected_delta"
+    assets_key="${result_key}_assets_before"
+    expected="$(state_optional "${expected_key}")"
+    expected_delta="$(state_optional "${delta_key}")"
+    assets_before="$(state_optional "${assets_key}")"
+    if [[ -z "${expected}" || -z "${expected_delta}" || -z "${assets_before}" ]]; then
+        baseline="$(state_value "${baseline_key}")"
+        [[ "${baseline}" =~ ^[0-9]+$ ]] ||
+            die "${label} saved baseline claimable is invalid: ${baseline}"
+        claimable="$(read_claimable \
+            "query-${label}-completed-backstop-stream" \
+            "${candidate_id}" "${user}" "${pool}" "${tier}")"
+        delta=$((claimable - baseline))
+        (( delta > 0 )) ||
+            die "${label} seven-day backstop stream produced no new claimable BLND"
+        assets_before="$(read_pool_tier_assets \
+            "query-${label}-tier-assets-before-claim" \
+            "${candidate_id}" "${pool}" "${tier}")"
+        expected="${claimable}"
+        expected_delta="${delta}"
+        state_set "${expected_key}" "${expected}"
+        state_set "${delta_key}" "${expected_delta}"
+        state_set "${assets_key}" "${assets_before}"
+    fi
+    if [[ ! "${expected}" =~ ^[0-9]+$ ]] || (( expected <= 0 )); then
+        die "${label} saved expected BLND claim is invalid: ${expected}"
+    fi
+    if [[ ! "${expected_delta}" =~ ^[0-9]+$ ]] || (( expected_delta <= 0 )); then
+        die "${label} saved expected claimable delta is invalid: ${expected_delta}"
+    fi
+    [[ "${assets_before}" =~ ^[0-9]+$ ]] ||
+        die "${label} saved pre-claim tier assets are invalid: ${assets_before}"
+
+    assets_current="$(read_pool_tier_assets \
+        "query-${label}-tier-assets-current" \
+        "${candidate_id}" "${pool}" "${tier}")"
+    assets_delta=$((assets_current - assets_before))
+    if (( assets_delta > 0 )); then
+        claimable="$(read_claimable \
+            "reconcile-${label}-completed-backstop-stream" \
+            "${candidate_id}" "${user}" "${pool}" "${tier}")"
+        (( claimable == 0 )) ||
+            die "${label} claim has ambiguous tier-assets and claimable deltas"
+        state_set "${result_key}_claimed_blnd" "${expected}"
+        state_set "${result_key}_claimable_delta" "${expected_delta}"
+        state_set "${result_key}" "${assets_delta}"
+        printf '%s\n' "${assets_delta}"
+        return
+    fi
+    (( assets_delta == 0 )) ||
+        die "${label} tier assets decreased unexpectedly: ${assets_delta}"
+
+    lp_out="$(normalize_scalar "$(invoke_transaction_as \
+        "claim-${label}-backstop-stream" "${DEPOSITOR_IDENTITY}" \
+        "${candidate_id}" claim \
+        --tier "${tier}" \
+        --user "${user}" \
+        --pool "${pool}" \
+        --min_lp_tokens_out 0)")"
+    if [[ ! "${lp_out}" =~ ^[0-9]+$ ]] || (( lp_out <= 0 )); then
+        die "${label} backstop claim did not compound positive LP: ${lp_out}"
+    fi
+    assets_after="$(read_pool_tier_assets \
+        "query-${label}-tier-assets-after-claim" \
+        "${candidate_id}" "${pool}" "${tier}")"
+    assert_equal "${lp_out}" "$((assets_after - assets_before))" \
+        "${label} compounded tier-assets delta"
+    state_set "${result_key}_claimed_blnd" "${expected}"
+    state_set "${result_key}_claimable_delta" "${expected_delta}"
+    state_set "${result_key}" "${lp_out}"
+    printf '%s\n' "${lp_out}"
 }
 
 claim_pool_emissions_resumable() {
@@ -3119,8 +3153,10 @@ claim_pool_emissions_resumable() {
 }
 
 command_claim_emissions() {
-    local phase pool_id expiration now claimed emission_reserve_token_id
-    local yield_pool yield_claimed
+    local phase candidate_id depositor pool_id expiration now claimed
+    local emission_reserve_token_id yield_pool yield_claimed
+    local fixed_blnd_usdc_lp fixed_blnd_xlm_lp
+    local yield_blnd_usdc_lp yield_blnd_xlm_lp
 
     validate_tools
     require_network
@@ -3137,13 +3173,51 @@ command_claim_emissions() {
     expiration="$(state_value pool_emission_expiration)"
     now="$(date +%s)"
     (( now >= expiration )) ||
-        die "pool emission stream remains locked for $((expiration - now)) seconds"
+        die "emission streams remain locked for $((expiration - now)) seconds"
+
+    candidate_id="$(state_value candidate_backstop)"
+    depositor="$(state_value depositor)"
+
+    note "Refreshing the distribution checkpoint before tier compounding..."
+    capture_ongoing_distribution \
+        "refresh-before-fixed-blnd-usdc-stream-claim" "${candidate_id}" >/dev/null
+    fixed_blnd_usdc_lp="$(claim_backstop_tier_resumable \
+        fixed-blnd-usdc "${candidate_id}" "${depositor}" "${pool_id}" BlndUsdc \
+        ongoing_fixed_blnd_usdc_claimable_before \
+        ongoing_fixed_blnd_usdc_lp_compounded)"
+
+    note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds before the next tier checkpoint..."
+    sleep "${EMISSION_START_DELAY_SECONDS}"
+    capture_ongoing_distribution \
+        "refresh-before-fixed-blnd-xlm-stream-claim" "${candidate_id}" >/dev/null
+    fixed_blnd_xlm_lp="$(claim_backstop_tier_resumable \
+        fixed-blnd-xlm "${candidate_id}" "${depositor}" "${pool_id}" BlndXlm \
+        ongoing_fixed_blnd_xlm_claimable_before \
+        ongoing_fixed_blnd_xlm_lp_compounded)"
+
+    yield_pool="$(state_value modeled_v3_yieldblox_pool)"
+    state_value modeled_v3_yieldblox_reward_enabled_at >/dev/null
+    note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds before the YieldBlox tier checkpoint..."
+    sleep "${EMISSION_START_DELAY_SECONDS}"
+    capture_ongoing_distribution \
+        "refresh-before-yieldblox-blnd-usdc-stream-claim" "${candidate_id}" >/dev/null
+    yield_blnd_usdc_lp="$(claim_backstop_tier_resumable \
+        yieldblox-blnd-usdc "${candidate_id}" "${depositor}" "${yield_pool}" BlndUsdc \
+        ongoing_yieldblox_blnd_usdc_claimable_before \
+        ongoing_yieldblox_blnd_usdc_lp_compounded)"
+
+    note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds before the final tier checkpoint..."
+    sleep "${EMISSION_START_DELAY_SECONDS}"
+    capture_ongoing_distribution \
+        "refresh-before-yieldblox-blnd-xlm-stream-claim" "${candidate_id}" >/dev/null
+    yield_blnd_xlm_lp="$(claim_backstop_tier_resumable \
+        yieldblox-blnd-xlm "${candidate_id}" "${depositor}" "${yield_pool}" BlndXlm \
+        ongoing_yieldblox_blnd_xlm_claimable_before \
+        ongoing_yieldblox_blnd_xlm_lp_compounded)"
 
     claimed="$(claim_pool_emissions_resumable \
         fixed "${pool_id}" "${emission_reserve_token_id}" \
         ongoing_fixed_pool_claimed)"
-    yield_pool="$(state_value modeled_v3_yieldblox_pool)"
-    state_value modeled_v3_yieldblox_reward_enabled_at >/dev/null
     yield_claimed="$(claim_pool_emissions_resumable \
         yieldblox "${yield_pool}" 3 ongoing_yieldblox_pool_claimed)"
     state_set "ongoing_fixed_pool_claimed" "${claimed}"
@@ -3152,7 +3226,7 @@ command_claim_emissions() {
     state_set "phase" "emissions_claimed"
     state_set "emissions_claimed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-    note "${NETWORK_LABEL} seven-day pool emission claims succeeded: Fixed ${claimed}, YieldBlox ${yield_claimed} BLND base units."
+    note "${NETWORK_LABEL} seven-day emissions claimed: Fixed tiers ${fixed_blnd_usdc_lp}/${fixed_blnd_xlm_lp} LP, YieldBlox tiers ${yield_blnd_usdc_lp}/${yield_blnd_xlm_lp} LP, pool tranches ${claimed}/${yield_claimed} BLND base units."
 }
 
 command_stop() {

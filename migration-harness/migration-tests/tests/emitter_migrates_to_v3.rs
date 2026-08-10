@@ -60,7 +60,6 @@ impl MockPoolFactory {
     }
 }
 
-const DAY: u64 = 24 * 60 * 60;
 const SCALAR_7: i128 = 10_000_000;
 
 fn create_asset(env: &Env, admin: &Address) -> Address {
@@ -163,20 +162,29 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
     blnd_usdc_token.mint(&incumbent, &(100 * SCALAR_7));
     blnd_usdc_token.mint(&candidate_id, &(100 * SCALAR_7 + 1));
 
+    let backfill_start = env.ledger().timestamp();
+    assert_eq!(candidate.distribute(), 0);
+    assert_eq!(
+        candidate.migration_state().migration_epoch_start,
+        Some(backfill_start)
+    );
     emitter.queue_swap_backstop(&candidate_id, &blnd_xlm);
     assert_eq!(candidate.distribute(), 0);
     let queued = emitter.get_queued_swap().unwrap();
     assert_eq!(queued.new_backstop, candidate_id);
     assert_eq!(queued.new_backstop_token, blnd_xlm);
 
-    env.ledger().set_timestamp(queued.unlock_time - 7 * DAY);
-    assert_eq!(candidate.distribute(), 0);
     assert_eq!(
         candidate.migration_state().status,
-        v3_backstop::MigrationStatus::Prepared
+        v3_backstop::MigrationStatus::Open
     );
 
     env.ledger().set_timestamp(queued.unlock_time);
+    assert_eq!(candidate.distribute(), 0);
+    assert_eq!(
+        candidate.migration_state().verified_queue_unlock,
+        Some(queued.unlock_time)
+    );
     emitter.swap_backstop();
     assert_eq!(candidate.distribute(), 0);
 

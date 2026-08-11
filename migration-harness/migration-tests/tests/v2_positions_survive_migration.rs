@@ -745,13 +745,13 @@ fn run_v3_backfill_timeline() -> BackfillOutcome {
     let user_a_lp = backstop.claim(
         &v3_backstop::BackstopTier::BlndUsdc,
         &fixture.user_a,
-        &fixture.pool,
+        &vec![env, fixture.pool.clone()],
         &0,
     );
     let user_b_lp = backstop.claim(
         &v3_backstop::BackstopTier::BlndUsdc,
         &fixture.user_b,
-        &fixture.pool,
+        &vec![env, fixture.pool.clone()],
         &0,
     );
 

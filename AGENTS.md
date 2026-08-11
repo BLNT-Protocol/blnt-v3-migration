@@ -38,7 +38,7 @@ choose a new economic policy.
 
 ## Local source policy
 
-Initialize the pinned deployed-v2 source after cloning:
+Initialize the pinned source repositories after cloning:
 
 ```bash
 git submodule update --init --recursive
@@ -46,6 +46,8 @@ git submodule update --init --recursive
 
 - `blend-contracts-v2` is the authoritative SDK-22 source submodule.
 - `blend-contracts-v3` is the sole production v3 contract source submodule.
+- `blend-sdk-js` and `blend-ui` are pinned client-integration source
+  submodules.
 - `deployed-artifacts/mainnet` contains exact deployed mainnet WASM compatibility
   fixtures, verified by `make verify-deployed-artifacts`.
 - `migration-harness` contains cross-version tests and test-only support

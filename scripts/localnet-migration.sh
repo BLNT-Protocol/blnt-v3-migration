@@ -2798,11 +2798,13 @@ capture_ongoing_distribution() {
 
 read_claimable() {
     local label="$1" candidate_id="$2" user="$3" pool="$4" tier="$5"
-    local amount
+    local amount pool_addresses
 
+    pool_addresses="$(jq -cn --arg pool "${pool}" '[ $pool ]')"
     amount="$(normalize_scalar "$(invoke_view \
         "${label}" "${candidate_id}" claimable \
-        --user "${user}" --pool "${pool}" --tier "${tier}")")"
+        --tier "${tier}" --user "${user}" \
+        --pool_addresses "${pool_addresses}")")"
     [[ "${amount}" =~ ^[0-9]+$ ]] ||
         die "${label} returned invalid claimable BLND: ${amount}"
     printf '%s' "${amount}"
@@ -2990,7 +2992,9 @@ claim_backstop_tier_resumable() {
     local baseline_key="$6" result_key="$7"
     local baseline claimable delta completed lp_out
     local expected_key delta_key assets_key expected expected_delta
-    local assets_before assets_current assets_after assets_delta
+    local assets_before assets_current assets_after assets_delta pool_addresses
+
+    pool_addresses="$(jq -cn --arg pool "${pool}" '[ $pool ]')"
 
     completed="$(state_optional "${result_key}")"
     if [[ -n "${completed}" ]]; then
@@ -3057,8 +3061,8 @@ claim_backstop_tier_resumable() {
         "claim-${label}-backstop-stream" "${DEPOSITOR_IDENTITY}" \
         "${candidate_id}" claim \
         --tier "${tier}" \
-        --user "${user}" \
-        --pool "${pool}" \
+        --from "${user}" \
+        --pool_addresses "${pool_addresses}" \
         --min_lp_tokens_out 0)")"
     if [[ ! "${lp_out}" =~ ^[0-9]+$ ]] || (( lp_out <= 0 )); then
         die "${label} backstop claim did not compound positive LP: ${lp_out}"

@@ -9,6 +9,7 @@ This repository owns:
 
 - the pinned frozen v2 source and deployed-WASM compatibility fixtures;
 - the pinned `blend-contracts-v3` production-contract submodule;
+- the pinned SDK and UI client-integration source submodules;
 - cross-version compatibility and migration-only test contracts;
 - localnet and public-testnet migration orchestration;
 - integrated Comet-derived backstop valuation evidence; and

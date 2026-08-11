@@ -10,16 +10,16 @@ This is not an official or production-ready Blend release.
 
 ## Baseline
 
-Initialize both pinned contract-source submodules after cloning:
+Initialize all pinned source submodules after cloning:
 
 ```bash
 git submodule update --init --recursive
 ```
 
 The deployed v2 source baseline is Blend Protocol v2 commit
-`ba22b487b2c5057a4ecc28b05b5193c28e4bd117`. The source submodules use the
-GitHub SSH URLs `git@github.com:blend-capital/blend-contracts-v2.git` and
-`git@github.com:levinson/blend-contracts-v3.git`.
+`ba22b487b2c5057a4ecc28b05b5193c28e4bd117`. The contract submodules are
+`blend-contracts-v2/` and `blend-contracts-v3/`. The client-integration
+submodules are `blend-sdk-js/` and `blend-ui/`.
 
 Exact mainnet emitter, v2 backstop, pool-factory, and pool WASMs are checked in
 under `deployed-artifacts/mainnet/` with their contract IDs and SHA-256 digests. These
@@ -27,8 +27,9 @@ deployed bytes, rather than a local rebuild, are the authoritative
 compatibility and isolated-migration fixtures. Run `make verify-deployed-artifacts` to
 verify both inputs.
 
-GitHub Actions requires a fine-grained `SUBMODULES_TOKEN` repository secret
-with read access to the private `blend-contracts-v3` repository.
+GitHub Actions requires a `SUBMODULES_TOKEN` repository secret with read
+access to the private `blend-contracts-v3`, `blend-sdk-js`, and `blend-ui`
+repositories.
 
 The emitter migration does not upgrade the deployed v2 contracts or move
 their supplier, borrower, or backstop positions. Immediately before switching

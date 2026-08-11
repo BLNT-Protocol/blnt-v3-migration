@@ -270,8 +270,13 @@ network_healthy() {
 }
 
 require_network() {
-    network_healthy ||
-        die "${NETWORK_LABEL} RPC is unavailable or stale at ${RPC_URL}"
+    for _ in {1..12}; do
+        if network_healthy; then
+            return
+        fi
+        sleep 2
+    done
+    die "${NETWORK_LABEL} RPC is unavailable or stale at ${RPC_URL}"
 }
 
 wait_for_network() {
@@ -286,20 +291,76 @@ wait_for_network() {
 }
 
 fund_and_wait_for_account() {
-    local account="$1"
+    local account="$1" now visible_since=""
 
     for _ in {1..120}; do
         if curl --fail --silent --show-error --max-time 5 \
-            "${HORIZON_URL}/accounts/${account}" >/dev/null 2>&1
+            "${HORIZON_URL}/accounts/${account}" >/dev/null 2>&1 &&
+            stellar_cli ledger entry fetch account \
+                --account "${account}" \
+                --rpc-url "${RPC_URL}" \
+                --network-passphrase "${NETWORK_PASSPHRASE}" \
+                --output json 2>/dev/null |
+                jq -e '.entries | length == 1' >/dev/null 2>&1
         then
-            return
+            now="$(date +%s)"
+            if [[ -z "${visible_since}" ]]; then
+                visible_since="${now}"
+            elif (( now - visible_since >= 3 * LEDGER_SECONDS )); then
+                return
+            fi
+        else
+            visible_since=""
+            curl --fail --silent --show-error --max-time 10 \
+                --get --data-urlencode "addr=${account}" \
+                "${FRIENDBOT_URL}" >/dev/null 2>&1 || true
         fi
-        curl --fail --silent --show-error --max-time 10 \
-            --get --data-urlencode "addr=${account}" \
-            "${FRIENDBOT_URL}" >/dev/null 2>&1 || true
         sleep 1
     done
     die "funded account did not become visible through Horizon: ${account}"
+}
+
+horizon_account_sequence() {
+    local account="$1" sequence
+
+    for _ in {1..30}; do
+        sequence="$(curl --fail --silent --show-error --max-time 5 \
+            "${HORIZON_URL}/accounts/${account}" 2>/dev/null | \
+            jq -er '.sequence' 2>/dev/null || true)"
+        if [[ "${sequence}" =~ ^[0-9]+$ ]]; then
+            printf '%s\n' "${sequence}"
+            return
+        fi
+        sleep 1
+    done
+    die "unable to read ${account} sequence from Horizon"
+}
+
+wait_for_testnet_sequence_convergence() {
+    local account="$1" previous_sequence="$2"
+    local horizon_sequence rpc_sequence confirmations=0
+
+    [[ "${NETWORK_MODE}" == "testnet" ]] || return
+    for _ in {1..120}; do
+        horizon_sequence="$(horizon_account_sequence "${account}")"
+        rpc_sequence="$(stellar_cli ledger entry fetch account \
+            --account "${account}" \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" \
+            --output json 2>/dev/null | \
+            jq -er '.entries[0].val.account.seq_num' 2>/dev/null || true)"
+        if [[ "${rpc_sequence}" =~ ^[0-9]+$ &&
+            "${rpc_sequence}" == "${horizon_sequence}" ]] &&
+            (( rpc_sequence > previous_sequence ))
+        then
+            confirmations=$((confirmations + 1))
+            (( confirmations >= 3 )) && return
+        else
+            confirmations=0
+        fi
+        sleep 1
+    done
+    die "Soroban RPC account sequence did not converge for ${account}"
 }
 
 new_run_dir() {
@@ -390,7 +451,27 @@ initialize_state() {
 capture() {
     local label="$1"
     local stdout_file stderr_file timestamp original_label suffix command_status
+    local source_identity="" source_account="" sequence_before="" read_only=false
+    local argument_index
+    local -a command
     shift
+    command=("$@")
+    for ((argument_index = 0; argument_index < ${#command[@]}; argument_index++)); do
+        case "${command[argument_index]}" in
+            --source-account)
+                source_identity="${command[argument_index + 1]:-}"
+                ;;
+            --send)
+                [[ "${command[argument_index + 1]:-}" == "no" ]] && read_only=true
+                ;;
+        esac
+    done
+    if [[ "${NETWORK_MODE}" == "testnet" && -n "${source_identity}" &&
+        "${read_only}" == "false" ]]
+    then
+        source_account="$(stellar_cli keys public-key "${source_identity}")"
+        sequence_before="$(horizon_account_sequence "${source_account}")"
+    fi
     stdout_file="${RUN_DIR}/${label}.out"
     stderr_file="${RUN_DIR}/${label}.cost.log"
 
@@ -414,6 +495,12 @@ capture() {
         command_status=0
     else
         command_status=$?
+    fi
+    if (( command_status == 0 )) && [[ -n "${sequence_before}" ]] &&
+        [[ "$(<"${stderr_file}")" == *"Signing transaction:"* ]]
+    then
+        wait_for_testnet_sequence_convergence \
+            "${source_account}" "${sequence_before}"
     fi
     cat "${stdout_file}"
     return "${command_status}"

@@ -5,6 +5,9 @@ use soroban_sdk::{
     Address, Env, Vec,
 };
 
+mod support;
+use support::{migration_state, MigrationStatus};
+
 mod deployed_emitter {
     soroban_sdk::contractimport!(file = "../../deployed-artifacts/mainnet/emitter.wasm");
 }
@@ -165,7 +168,7 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
     let backfill_start = env.ledger().timestamp();
     assert_eq!(candidate.distribute(), 0);
     assert_eq!(
-        candidate.migration_state().migration_epoch_start,
+        migration_state(&env, &candidate_id).migration_epoch_start,
         Some(backfill_start)
     );
     emitter.queue_swap_backstop(&candidate_id, &blnd_xlm);
@@ -175,14 +178,14 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
     assert_eq!(queued.new_backstop_token, blnd_xlm);
 
     assert_eq!(
-        candidate.migration_state().status,
-        v3_backstop::MigrationStatus::Open
+        migration_state(&env, &candidate_id).status,
+        MigrationStatus::Open
     );
 
     env.ledger().set_timestamp(queued.unlock_time);
     assert_eq!(candidate.distribute(), 0);
     assert_eq!(
-        candidate.migration_state().verified_queue_unlock,
+        migration_state(&env, &candidate_id).verified_queue_unlock,
         Some(queued.unlock_time)
     );
     emitter.swap_backstop();
@@ -191,11 +194,11 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
     assert_eq!(emitter.get_backstop(), candidate_id);
     assert!(emitter.get_queued_swap().is_none());
     assert_eq!(
-        candidate.migration_state().status,
-        v3_backstop::MigrationStatus::Active
+        migration_state(&env, &candidate_id).status,
+        MigrationStatus::Active
     );
     assert_eq!(
-        candidate.migration_state().activated_at,
+        migration_state(&env, &candidate_id).activated_at,
         Some(queued.unlock_time)
     );
     assert_eq!(

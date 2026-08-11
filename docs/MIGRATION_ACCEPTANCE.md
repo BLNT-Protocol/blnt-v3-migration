@@ -53,8 +53,9 @@ The cross-version suite MUST verify:
 - The candidate exposes v2-named `distribute() -> i128` and `drop()` migration
   entry points and no separate begin, prepare, finalize, synchronization, or
   backfill-funding mutator.
-- One read-only `migration_state()` snapshot exposes the simplified candidate
-  lifecycle without separate per-field entry points or a `Prepared` status.
+- The SDK reconstructs the exact simplified candidate lifecycle from one
+  contract-instance ledger entry, without migration-state contract views or a
+  `Prepared` status.
 - A successful direct swap remains transitionable throughout the fixed grace
   period despite a later loss of the candidate's former strict BLND:USDC
   majority.

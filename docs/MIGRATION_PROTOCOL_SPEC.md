@@ -143,11 +143,11 @@ mutator. Permissionless `distribute()` drives its local lifecycle around the
 emitter's existing queue and swap operations, matching the v2 transition
 surface. Repeated calls MUST NOT duplicate value.
 
-The read-only `migration_state()` snapshot MUST expose the epoch start,
-attested queue unlock, activation and backfill-end timestamps, scheduled and
-funded backfill, BLND binding verification, and `Pending`, `Open`, or `Active`
-status. Individual lifecycle fields MUST NOT require separate contract entry
-points.
+The SDK MUST reconstruct an exact migration snapshot from the candidate's
+contract-instance storage, including the epoch start, attested queue unlock,
+activation and backfill-end timestamps, scheduled and funded backfill, BLND
+binding verification, and derived `Pending`, `Open`, or `Active` status. The
+contract MUST NOT add migration-state view entry points.
 
 Like v2, an uncheckpointed interval between the final pre-swap candidate call
 and the emitter swap receives no backfill. The emitter's candidate checkpoint

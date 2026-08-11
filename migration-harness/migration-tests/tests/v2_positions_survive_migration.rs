@@ -6,6 +6,9 @@ use soroban_sdk::{
     vec, Address, BytesN, Env, IntoVal, Map, String, Symbol, Val, Vec,
 };
 
+mod support;
+use support::migration_state;
+
 mod deployed_emitter {
     soroban_sdk::contractimport!(file = "../../deployed-artifacts/mainnet/emitter.wasm");
 }
@@ -735,11 +738,17 @@ fn run_v3_backfill_timeline() -> BackfillOutcome {
     );
     backstop.remove_reward(&fixture.pool);
     assert!(backstop.reward_zone().is_empty());
-    assert_eq!(backstop.migration_state().scheduled_backfill, scheduled);
+    assert_eq!(
+        migration_state(env, &fixture.candidate).scheduled_backfill,
+        scheduled
+    );
     emitter.swap_backstop();
     assert_eq!(backstop.distribute(), 0);
     backstop.drop();
-    assert_eq!(backstop.migration_state().funded_backfill, Some(scheduled));
+    assert_eq!(
+        migration_state(env, &fixture.candidate).funded_backfill,
+        Some(scheduled)
+    );
 
     env.ledger().set_timestamp(unlock + 7 * DAY);
     let user_a_lp = backstop.claim(
@@ -999,7 +1008,7 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
     let backfill_start = env.ledger().timestamp();
     assert_eq!(candidate.distribute(), 0);
     assert_eq!(
-        candidate.migration_state().migration_epoch_start,
+        migration_state(&env, &candidate_id).migration_epoch_start,
         Some(backfill_start)
     );
 

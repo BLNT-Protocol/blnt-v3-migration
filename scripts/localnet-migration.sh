@@ -651,6 +651,47 @@ invoke_view_as() {
         -- "${function_name}" "$@"
 }
 
+read_migration_state() {
+    local label="$1" candidate_id="$2" instance
+
+    instance="$(capture "${label}" \
+        stellar_cli ledger entry fetch contract-data \
+        --contract "${candidate_id}" \
+        --instance \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" \
+        --output json)"
+    printf '%s' "${instance}" | jq -ce '
+        .entries[0].val.contract_data.val.contract_instance.storage as $storage |
+        def key_name:
+            if .key.symbol? != null then .key.symbol
+            elif .key.vec? != null then .key.vec[0].symbol
+            else null
+            end;
+        def stored($name):
+            first($storage[] | select(key_name == $name) | .val) // null;
+        {
+            activated_at: (stored("ActivatedAt") | if . == null then null else .u64 end),
+            backfill_end: (stored("BackfillEnd") | if . == null then null else .u64 end),
+            blnd_binding_verified:
+                (stored("BlndBound") | if . == null then false else .bool end),
+            funded_backfill:
+                (stored("BFundAmt") | if . == null then null else .i128 end),
+            migration_epoch_start:
+                (stored("MigrationEpochStart") | if . == null then null else .u64 end),
+            scheduled_backfill:
+                (stored("ScheduledBackfill") | if . == null then "0" else .i128 end),
+            verified_queue_unlock:
+                (stored("VerifiedQueueUnlock") | if . == null then null else .u64 end)
+        }
+        | .status =
+            (if .activated_at != null then "Active"
+             elif .migration_epoch_start != null then "Open"
+             else "Pending"
+             end)
+    '
+}
+
 invoke_forced_transaction() {
     local label="$1" contract_id="$2" function_name="$3"
     shift 3
@@ -1549,8 +1590,8 @@ begin_deployed_migration() {
     (( candidate_balance > incumbent_balance )) ||
         die "candidate does not strictly exceed the incumbent BLND:USDC LP balance"
 
-    migration_state="$(invoke_view \
-        "query-candidate-before-begin" "${candidate_id}" migration_state)"
+    migration_state="$(read_migration_state \
+        "query-candidate-before-begin" "${candidate_id}")"
     migration_status="$(printf '%s' "${migration_state}" | jq -c '.status')"
     if printf '%s' "${migration_status}" | jq -e '
         . == "Pending" or
@@ -1561,8 +1602,8 @@ begin_deployed_migration() {
         then
             invoke_transaction \
                 "start-backfill-clock" "${candidate_id}" distribute >/dev/null
-            migration_state="$(invoke_view \
-                "query-started-backfill-state" "${candidate_id}" migration_state)"
+            migration_state="$(read_migration_state \
+                "query-started-backfill-state" "${candidate_id}")"
         fi
         epoch_start="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
             jq -c '.migration_epoch_start')")"
@@ -2333,8 +2374,8 @@ command_status() {
     candidate_balance="$(normalize_scalar "$(invoke_view \
         "status-candidate-balance" "${blnd_usdc_token_id}" balance --id "${candidate_id}")")"
     queued_swap="$(invoke_view "status-emitter-queue" "${emitter_id}" get_queued_swap)"
-    migration_state="$(invoke_view \
-        "status-candidate-migration" "${candidate_id}" migration_state)"
+    migration_state="$(read_migration_state \
+        "status-candidate-migration" "${candidate_id}")"
     verified_unlock_raw="$(printf '%s' "${migration_state}" | \
         jq -c '.verified_queue_unlock')"
     if printf '%s' "${verified_unlock_raw}" | jq -e '. == null' >/dev/null; then
@@ -2477,8 +2518,8 @@ command_keepalive() {
     fi
     extend_contract_key_xdr "${prefix}-emitter-last-distro" \
         "${emitter_id}" "${last_distro_key}" >/dev/null
-    invoke_forced_transaction "${prefix}-candidate" \
-        "${candidate_id}" migration_state >/dev/null
+    extend_contract_instance "${prefix}-candidate-instance" \
+        "${candidate_id}" >/dev/null
     invoke_forced_transaction "${prefix}-factory" \
         "${factory_id}" is_pool --pool_address "${pool_id}" >/dev/null
     invoke_forced_transaction "${prefix}-pool" \
@@ -2606,8 +2647,8 @@ command_prepare() {
         "attest-migration-queue" "${candidate_id}" distribute)")"
     [[ "${result}" =~ ^[0-9]+$ ]] ||
         die "invalid attestation distribution: ${result}"
-    migration_state="$(invoke_view \
-        "verify-attested-migration" "${candidate_id}" migration_state)"
+    migration_state="$(read_migration_state \
+        "verify-attested-migration" "${candidate_id}")"
     verified_unlock="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
         jq -c '.verified_queue_unlock')")"
     assert_equal "${unlock_time}" "${verified_unlock}" "attested queue unlock"
@@ -2629,8 +2670,8 @@ command_finalize() {
     candidate_id="$(state_value candidate_backstop)"
     unlock_time="$(state_value unlock_time)"
     activation_deadline=$((unlock_time + QUEUE_ATTESTATION_WINDOW_SECONDS))
-    migration_state="$(invoke_view \
-        "query-finalize-candidate-state" "${candidate_id}" migration_state)"
+    migration_state="$(read_migration_state \
+        "query-finalize-candidate-state" "${candidate_id}")"
     migration_status="$(printf '%s' "${migration_state}" | jq -c '.status')"
     if printf '%s' "${migration_status}" | jq -e '
         . == "Pending" or . == "Open" or
@@ -2644,9 +2685,8 @@ command_finalize() {
                 "checkpoint-before-emitter-swap" "${candidate_id}" distribute)")"
             [[ "${result}" =~ ^[0-9]+$ ]] ||
                 die "invalid pre-swap backfill distribution: ${result}"
-            migration_state="$(invoke_view \
-                "verify-finalize-queue-attestation" \
-                "${candidate_id}" migration_state)"
+            migration_state="$(read_migration_state \
+                "verify-finalize-queue-attestation" "${candidate_id}")"
             verified_raw="$(printf '%s' "${migration_state}" | \
                 jq -c '.verified_queue_unlock')"
             verified_unlock="$(normalize_scalar "${verified_raw}")"
@@ -2668,8 +2708,8 @@ command_finalize() {
         die "cannot finalize deployment from candidate migration state ${migration_status}"
     fi
 
-    migration_state="$(invoke_view \
-        "read-finalized-migration-state" "${candidate_id}" migration_state)"
+    migration_state="$(read_migration_state \
+        "read-finalized-migration-state" "${candidate_id}")"
     activated="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
         jq -c '.activated_at')")"
     [[ "${activated}" =~ ^[0-9]+$ ]] || die "invalid activation timestamp: ${activated}"
@@ -2684,8 +2724,8 @@ command_finalize() {
         if printf '%s' "${funded_raw}" | jq -e '. == null' >/dev/null; then
             invoke_transaction \
                 "drop-scheduled-backfill" "${candidate_id}" drop >/dev/null
-            migration_state="$(invoke_view \
-                "read-funded-migration-state" "${candidate_id}" migration_state)"
+            migration_state="$(read_migration_state \
+                "read-funded-migration-state" "${candidate_id}")"
             funded_raw="$(printf '%s' "${migration_state}" | jq -c '.funded_backfill')"
         fi
         funded="$(normalize_scalar "${funded_raw}")"
@@ -2745,8 +2785,8 @@ command_verify() {
     candidate_balance="$(normalize_scalar "$(invoke_view \
         "verify-candidate-balance" "${blnd_usdc_token_id}" balance --id "${candidate_id}")")"
     queued_swap="$(invoke_view "verify-emitter-queue" "${emitter_id}" get_queued_swap)"
-    migration_state="$(invoke_view \
-        "verify-candidate-migration" "${candidate_id}" migration_state)"
+    migration_state="$(read_migration_state \
+        "verify-candidate-migration" "${candidate_id}")"
     migration_status="$(printf '%s' "${migration_state}" | jq -c '.status')"
     activated_at="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
         jq -c '.activated_at')")"
@@ -2883,18 +2923,14 @@ capture_ongoing_distribution() {
         }'
 }
 
-read_claimable() {
-    local label="$1" candidate_id="$2" user="$3" pool="$4" tier="$5"
-    local amount pool_addresses
+read_token_balance() {
+    local label="$1" token_id="$2" account_id="$3" balance
 
-    pool_addresses="$(jq -cn --arg pool "${pool}" '[ $pool ]')"
-    amount="$(normalize_scalar "$(invoke_view \
-        "${label}" "${candidate_id}" claimable \
-        --tier "${tier}" --user "${user}" \
-        --pool_addresses "${pool_addresses}")")"
-    [[ "${amount}" =~ ^[0-9]+$ ]] ||
-        die "${label} returned invalid claimable BLND: ${amount}"
-    printf '%s' "${amount}"
+    balance="$(normalize_scalar "$(invoke_view \
+        "${label}" "${token_id}" balance --id "${account_id}")")"
+    [[ "${balance}" =~ ^[0-9]+$ ]] ||
+        die "${label} returned invalid token balance: ${balance}"
+    printf '%s' "${balance}"
 }
 
 read_pool_tier_assets() {
@@ -2913,14 +2949,23 @@ read_pool_tier_assets() {
     printf '%s' "${assets}"
 }
 
+read_user_tier_shares() {
+    local label="$1" candidate_id="$2" pool="$3" tier="$4" user="$5" shares
+
+    shares="$(invoke_view "${label}" "${candidate_id}" user_balance \
+        --tier "${tier}" --pool "${pool}" --user "${user}" | \
+        jq -er '.shares | tostring')"
+    [[ "${shares}" =~ ^[0-9]+$ ]] ||
+        die "${label} returned invalid user tier shares: ${shares}"
+    printf '%s' "${shares}"
+}
+
 command_emissions() {
-    local phase candidate_id pool_id depositor distribution received
+    local phase candidate_id pool_id distribution received
     local expected_backstop_tranche expected_pool_tranche pool_gulped stream expiration
-    local fixed_blnd_usdc_before fixed_blnd_xlm_before
     local emission_reserve_token_id yieldblox_reward_status
     local yield_pool yield_distribution yield_received yield_expected_backstop_tranche
     local yield_expected_pool_tranche
-    local yield_blnd_usdc_before yield_blnd_xlm_before
     local yield_pool_gulped yield_stream
     local yield_expiration
 
@@ -2934,25 +2979,11 @@ command_emissions() {
     candidate_id="$(state_value candidate_backstop)"
     pool_id="$(state_value v3_pool)"
     yield_pool="$(state_value modeled_v3_yieldblox_pool)"
-    depositor="$(state_value depositor)"
     emission_reserve_token_id="$(
         state_value primary_pool_emission_reserve_token_id
     )"
     [[ "${emission_reserve_token_id}" =~ ^[0-9]+$ ]] ||
         die "invalid primary-pool emission reserve token ID"
-
-    fixed_blnd_usdc_before="$(read_claimable \
-        "query-fixed-blnd-usdc-before-ongoing" "${candidate_id}" \
-        "${depositor}" "${pool_id}" BlndUsdc)"
-    fixed_blnd_xlm_before="$(read_claimable \
-        "query-fixed-blnd-xlm-before-ongoing" "${candidate_id}" \
-        "${depositor}" "${pool_id}" BlndXlm)"
-    yield_blnd_usdc_before="$(read_claimable \
-        "query-yieldblox-blnd-usdc-before-ongoing" "${candidate_id}" \
-        "${depositor}" "${yield_pool}" BlndUsdc)"
-    yield_blnd_xlm_before="$(read_claimable \
-        "query-yieldblox-blnd-xlm-before-ongoing" "${candidate_id}" \
-        "${depositor}" "${yield_pool}" BlndXlm)"
 
     note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds for a positive emitter interval..."
     sleep "${EMISSION_START_DELAY_SECONDS}"
@@ -3045,10 +3076,6 @@ command_emissions() {
     state_set "ongoing_received" "${received}"
     state_set "ongoing_expected_backstop_tranche" "${expected_backstop_tranche}"
     state_set "ongoing_expected_pool_tranche" "${expected_pool_tranche}"
-    state_set "ongoing_fixed_blnd_usdc_claimable_before" "${fixed_blnd_usdc_before}"
-    state_set "ongoing_fixed_blnd_xlm_claimable_before" "${fixed_blnd_xlm_before}"
-    state_set "ongoing_yieldblox_blnd_usdc_claimable_before" "${yield_blnd_usdc_before}"
-    state_set "ongoing_yieldblox_blnd_xlm_claimable_before" "${yield_blnd_xlm_before}"
     state_set "ongoing_fixed_pool_gulped" "${pool_gulped}"
     state_set "ongoing_yieldblox_pool_gulped" "${yield_pool_gulped}"
     state_set "ongoing_pool_gulped" "$((pool_gulped + yield_pool_gulped))"
@@ -3076,12 +3103,12 @@ EOF
 
 claim_backstop_tier_resumable() {
     local label="$1" candidate_id="$2" user="$3" pool="$4" tier="$5"
-    local baseline_key="$6" result_key="$7"
-    local baseline claimable delta completed lp_out
-    local expected_key delta_key assets_key expected expected_delta
-    local assets_before assets_current assets_after assets_delta pool_addresses
+    local result_key="$6" blnd_id completed lp_out claimed_blnd
+    local assets_key balance_key shares_key assets_before assets_current assets_after assets_delta
+    local blnd_before blnd_current blnd_after shares_before shares_current shares_after pool_addresses
 
     pool_addresses="$(jq -cn --arg pool "${pool}" '[ $pool ]')"
+    blnd_id="$(state_value blnd_token)"
 
     completed="$(state_optional "${result_key}")"
     if [[ -n "${completed}" ]]; then
@@ -3091,58 +3118,63 @@ claim_backstop_tier_resumable() {
         return
     fi
 
-    expected_key="${result_key}_expected_blnd"
-    delta_key="${result_key}_expected_delta"
     assets_key="${result_key}_assets_before"
-    expected="$(state_optional "${expected_key}")"
-    expected_delta="$(state_optional "${delta_key}")"
+    balance_key="${result_key}_blnd_before"
+    shares_key="${result_key}_shares_before"
     assets_before="$(state_optional "${assets_key}")"
-    if [[ -z "${expected}" || -z "${expected_delta}" || -z "${assets_before}" ]]; then
-        baseline="$(state_value "${baseline_key}")"
-        [[ "${baseline}" =~ ^[0-9]+$ ]] ||
-            die "${label} saved baseline claimable is invalid: ${baseline}"
-        claimable="$(read_claimable \
-            "query-${label}-completed-backstop-stream" \
-            "${candidate_id}" "${user}" "${pool}" "${tier}")"
-        delta=$((claimable - baseline))
-        (( delta > 0 )) ||
-            die "${label} seven-day backstop stream produced no new claimable BLND"
+    blnd_before="$(state_optional "${balance_key}")"
+    shares_before="$(state_optional "${shares_key}")"
+    if [[ -z "${assets_before}" || -z "${blnd_before}" || -z "${shares_before}" ]]; then
         assets_before="$(read_pool_tier_assets \
             "query-${label}-tier-assets-before-claim" \
             "${candidate_id}" "${pool}" "${tier}")"
-        expected="${claimable}"
-        expected_delta="${delta}"
-        state_set "${expected_key}" "${expected}"
-        state_set "${delta_key}" "${expected_delta}"
+        blnd_before="$(read_token_balance \
+            "query-${label}-blnd-before-claim" \
+            "${blnd_id}" "${candidate_id}")"
+        shares_before="$(read_user_tier_shares \
+            "query-${label}-shares-before-claim" \
+            "${candidate_id}" "${pool}" "${tier}" "${user}")"
         state_set "${assets_key}" "${assets_before}"
-    fi
-    if [[ ! "${expected}" =~ ^[0-9]+$ ]] || (( expected <= 0 )); then
-        die "${label} saved expected BLND claim is invalid: ${expected}"
-    fi
-    if [[ ! "${expected_delta}" =~ ^[0-9]+$ ]] || (( expected_delta <= 0 )); then
-        die "${label} saved expected claimable delta is invalid: ${expected_delta}"
+        state_set "${balance_key}" "${blnd_before}"
+        state_set "${shares_key}" "${shares_before}"
     fi
     [[ "${assets_before}" =~ ^[0-9]+$ ]] ||
         die "${label} saved pre-claim tier assets are invalid: ${assets_before}"
+    [[ "${blnd_before}" =~ ^[0-9]+$ ]] ||
+        die "${label} saved pre-claim BLND balance is invalid: ${blnd_before}"
+    [[ "${shares_before}" =~ ^[0-9]+$ ]] ||
+        die "${label} saved pre-claim tier shares are invalid: ${shares_before}"
 
     assets_current="$(read_pool_tier_assets \
         "query-${label}-tier-assets-current" \
         "${candidate_id}" "${pool}" "${tier}")"
+    blnd_current="$(read_token_balance \
+        "query-${label}-blnd-current" "${blnd_id}" "${candidate_id}")"
+    shares_current="$(read_user_tier_shares \
+        "query-${label}-shares-current" \
+        "${candidate_id}" "${pool}" "${tier}" "${user}")"
     assets_delta=$((assets_current - assets_before))
     if (( assets_delta > 0 )); then
-        claimable="$(read_claimable \
-            "reconcile-${label}-completed-backstop-stream" \
-            "${candidate_id}" "${user}" "${pool}" "${tier}")"
-        (( claimable == 0 )) ||
-            die "${label} claim has ambiguous tier-assets and claimable deltas"
-        state_set "${result_key}_claimed_blnd" "${expected}"
-        state_set "${result_key}_claimable_delta" "${expected_delta}"
+        (( shares_current > shares_before )) ||
+            die "${label} tier assets increased without crediting user shares"
+        claimed_blnd=$((blnd_before - blnd_current))
+        (( claimed_blnd > 0 )) ||
+            die "${label} compounded tier assets without consuming BLND"
+        state_set "${result_key}_claimed_blnd" "${claimed_blnd}"
         state_set "${result_key}" "${assets_delta}"
         printf '%s\n' "${assets_delta}"
         return
     fi
     (( assets_delta == 0 )) ||
         die "${label} tier assets decreased unexpectedly: ${assets_delta}"
+    assert_equal "${shares_before}" "${shares_current}" \
+        "${label} unchanged pre-claim tier shares"
+    (( blnd_current >= blnd_before )) ||
+        die "${label} BLND decreased without a compounded tier-assets delta"
+    if (( blnd_current > blnd_before )); then
+        blnd_before="${blnd_current}"
+        state_set "${balance_key}" "${blnd_before}"
+    fi
 
     lp_out="$(normalize_scalar "$(invoke_transaction_as \
         "claim-${label}-backstop-stream" "${DEPOSITOR_IDENTITY}" \
@@ -3157,10 +3189,19 @@ claim_backstop_tier_resumable() {
     assets_after="$(read_pool_tier_assets \
         "query-${label}-tier-assets-after-claim" \
         "${candidate_id}" "${pool}" "${tier}")"
+    blnd_after="$(read_token_balance \
+        "query-${label}-blnd-after-claim" "${blnd_id}" "${candidate_id}")"
+    shares_after="$(read_user_tier_shares \
+        "query-${label}-shares-after-claim" \
+        "${candidate_id}" "${pool}" "${tier}" "${user}")"
     assert_equal "${lp_out}" "$((assets_after - assets_before))" \
         "${label} compounded tier-assets delta"
-    state_set "${result_key}_claimed_blnd" "${expected}"
-    state_set "${result_key}_claimable_delta" "${expected_delta}"
+    claimed_blnd=$((blnd_before - blnd_after))
+    (( claimed_blnd > 0 )) ||
+        die "${label} backstop claim did not consume positive BLND"
+    (( shares_after > shares_before )) ||
+        die "${label} backstop claim did not credit positive user shares"
+    state_set "${result_key}_claimed_blnd" "${claimed_blnd}"
     state_set "${result_key}" "${lp_out}"
     printf '%s\n' "${lp_out}"
 }
@@ -3274,7 +3315,6 @@ command_claim_emissions() {
         "refresh-before-fixed-blnd-usdc-stream-claim" "${candidate_id}" >/dev/null
     fixed_blnd_usdc_lp="$(claim_backstop_tier_resumable \
         fixed-blnd-usdc "${candidate_id}" "${depositor}" "${pool_id}" BlndUsdc \
-        ongoing_fixed_blnd_usdc_claimable_before \
         ongoing_fixed_blnd_usdc_lp_compounded)"
 
     note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds before the next tier checkpoint..."
@@ -3283,7 +3323,6 @@ command_claim_emissions() {
         "refresh-before-fixed-blnd-xlm-stream-claim" "${candidate_id}" >/dev/null
     fixed_blnd_xlm_lp="$(claim_backstop_tier_resumable \
         fixed-blnd-xlm "${candidate_id}" "${depositor}" "${pool_id}" BlndXlm \
-        ongoing_fixed_blnd_xlm_claimable_before \
         ongoing_fixed_blnd_xlm_lp_compounded)"
 
     yield_pool="$(state_value modeled_v3_yieldblox_pool)"
@@ -3294,7 +3333,6 @@ command_claim_emissions() {
         "refresh-before-yieldblox-blnd-usdc-stream-claim" "${candidate_id}" >/dev/null
     yield_blnd_usdc_lp="$(claim_backstop_tier_resumable \
         yieldblox-blnd-usdc "${candidate_id}" "${depositor}" "${yield_pool}" BlndUsdc \
-        ongoing_yieldblox_blnd_usdc_claimable_before \
         ongoing_yieldblox_blnd_usdc_lp_compounded)"
 
     note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds before the final tier checkpoint..."
@@ -3303,7 +3341,6 @@ command_claim_emissions() {
         "refresh-before-yieldblox-blnd-xlm-stream-claim" "${candidate_id}" >/dev/null
     yield_blnd_xlm_lp="$(claim_backstop_tier_resumable \
         yieldblox-blnd-xlm "${candidate_id}" "${depositor}" "${yield_pool}" BlndXlm \
-        ongoing_yieldblox_blnd_xlm_claimable_before \
         ongoing_yieldblox_blnd_xlm_lp_compounded)"
 
     claimed="$(claim_pool_emissions_resumable \

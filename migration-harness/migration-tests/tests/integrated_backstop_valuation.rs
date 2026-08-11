@@ -323,7 +323,6 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
                 shares: 0,
                 total_value: 0,
             },
-            valuation_valid_until: u64::MAX,
         }
     );
     let resources = env.cost_estimate().resources();

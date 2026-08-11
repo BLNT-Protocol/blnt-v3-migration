@@ -294,7 +294,7 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
     env.cost_estimate().budget().reset_unlimited();
     assert_eq!(
         candidate.pool_data(&pool),
-        backstop::PoolData {
+        backstop::PoolBackstopData {
             blnd_usdc: backstop::PoolTierData {
                 active_blnd: 240 * SCALAR_7,
                 active_value: 15 * SCALAR_7,

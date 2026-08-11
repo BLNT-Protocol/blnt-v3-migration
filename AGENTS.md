@@ -98,13 +98,12 @@ a side effect of work in this repository.
 - Assets counted as backstop capital must be available to the specified loss
   waterfall.
 - Bad-debt auctions use at most one backstop tier at a time in strict
-  BLND:XLM, BLND:USDC, then plain-USDC order. A tier is auction-eligible only
-  when its available capital has at least 100 USDC of verified value; equality
-  qualifies and there is no exception for a smaller tier that could cover the
-  current debt. A successfully valued smaller tier is skipped, but a failed or
-  unavailable valuation is not exhaustion. Supplier loss begins only after all
-  three tiers are below that threshold. Once a lot is committed, later price
-  movement across the threshold does not cancel it.
+  BLND:XLM, BLND:USDC, then plain-USDC order. Every tier with positive
+  available capital and verified value is auction-eligible; zero-value tiers
+  are skipped, while negative, inconsistent, failed, or unavailable valuation
+  is not exhaustion. Supplier loss begins only after all three tiers have no
+  usable value. Once a lot is committed, later price movement does not cancel
+  it.
 - A bad-debt fill transfers only its time-scaled tier-token lot to the
   authenticated filler and impairs the pool-tier exchange rate by exactly that
   transferred amount. The percentage-selected base lot, not the smaller
@@ -116,7 +115,7 @@ a side effect of work in this repository.
   requires no active bad-debt auction. It restarts strict tier selection and
   must reuse an earlier tier while that tier remains eligible.
 - Supplier loss is permitted only after the configured backstop successfully
-  reports that all three tiers are below the $100 minimum. It must accrue each
+  reports that all three tiers have no usable value. It must accrue each
   affected reserve and apply Blend v2's ceiling-rounded bToken exchange-rate
   loss with intentional saturation at zero; invalid or unavailable valuation
   fails closed.

@@ -2802,11 +2802,10 @@ command_verify() {
     assert_equal "0" "${pool_status}" "active v3 pool status"
     assert_equal "true" "${pool_registered}" "v3 pool registration"
     printf '%s' "${candidate_pool_data}" | jq -e '
-        (.blnd_usdc.active_blnd | tonumber) > 0 and
-        (.blnd_xlm.active_blnd | tonumber) > 0 and
-        (.blnd_usdc.active_value | tonumber) > 0 and
-        (.blnd_xlm.active_value | tonumber) > 0 and
-        (.usdc.active_value | tonumber) > 0
+        (.active_value | tonumber) > 0 and
+        (.blnd_usdc.value | tonumber) > 0 and
+        (.blnd_xlm.value | tonumber) > 0 and
+        (.usdc.value | tonumber) > 0
     ' >/dev/null ||
         die "integrated candidate pool valuation is not positive for every tier: ${candidate_pool_data}"
     [[ "${incumbent_balance}" =~ ^[0-9]+$ ]] ||
@@ -2938,8 +2937,8 @@ read_pool_tier_assets() {
     local selector assets
 
     case "${tier}" in
-        BlndUsdc) selector='.blnd_usdc.assets' ;;
-        BlndXlm) selector='.blnd_xlm.assets' ;;
+        BlndUsdc) selector='.blnd_usdc.tokens' ;;
+        BlndXlm) selector='.blnd_xlm.tokens' ;;
         *) die "${label} cannot read non-BLND emission tier ${tier}" ;;
     esac
     assets="$(invoke_view "${label}" "${candidate_id}" pool_data \

@@ -295,33 +295,22 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
     assert_eq!(
         candidate.pool_data(&pool),
         backstop::PoolBackstopData {
+            active_value: 30 * SCALAR_7,
             blnd_usdc: backstop::PoolTierData {
-                active_blnd: 240 * SCALAR_7,
-                active_value: 15 * SCALAR_7,
-                assets: 20 * SCALAR_7,
-                queued_shares: 5 * SCALAR_7,
-                queued_value: 5 * SCALAR_7,
+                tokens: 20 * SCALAR_7,
                 shares: 20 * SCALAR_7,
-                total_value: 20 * SCALAR_7,
+                value: 20 * SCALAR_7,
             },
             blnd_xlm: backstop::PoolTierData {
-                active_blnd: 240 * SCALAR_7,
-                active_value: 15 * SCALAR_7,
-                assets: 20 * SCALAR_7,
-                queued_shares: 5 * SCALAR_7,
-                queued_value: 5 * SCALAR_7,
+                tokens: 20 * SCALAR_7,
                 shares: 20 * SCALAR_7,
-                total_value: 20 * SCALAR_7,
+                value: 20 * SCALAR_7,
             },
-            q4w_percentage: 2_500_000,
+            q4w_pct: 2_500_000,
             usdc: backstop::PoolTierData {
-                active_blnd: 0,
-                active_value: 0,
-                assets: 0,
-                queued_shares: 0,
-                queued_value: 0,
+                tokens: 0,
                 shares: 0,
-                total_value: 0,
+                value: 0,
             },
         }
     );

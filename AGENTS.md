@@ -13,7 +13,7 @@ require an explicit justification tied to the three-tier backstop, emitter
 migration compatibility, Protocol 27 compatibility, a conservation/safety
 fix, or a separately approved exception recorded in the v3 specification.
 Carrying integer dust forward at the same accounting scope and the
-12,500-USDC entry / 10,000-USDC maintenance hysteresis are approved exceptions.
+12,500-USDC activation threshold are approved exceptions.
 
 This is financial smart-contract software. Prefer explicit invariants,
 conservative state transitions, deterministic accounting, and tests over
@@ -158,7 +158,7 @@ a side effect of work in this repository.
   lifecycle. The current admin may update the v2-compatible pool parameters,
   queue or cancel reserve configuration, and set relative supply/borrow
   emission weights. The admin cannot change the three backstop tiers,
-  activation thresholds, `4:3:2` take-rate weighting in loss order, loss
+  activation threshold, `4:3:2` take-rate weighting in loss order, loss
   waterfall, migration
   policy, 70/30 emission split, contract WASM, or any protocol-wide rule.
 - Preserve the v2-compatible reward-zone shape: at most 30 pools,

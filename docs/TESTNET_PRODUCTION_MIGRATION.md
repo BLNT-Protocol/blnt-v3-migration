@@ -81,6 +81,45 @@ make testnet-production-verify
 make testnet-production-emissions
 ```
 
+## Run the emissions keeper
+
+Soroban contracts do not execute on their own. While the emitter still targets
+v2, the permissionless keeper first calls the emitter's `distribute()`. It then
+calls each deployed v2 and v3 backstop's `distribute()` and
+`gulp_emissions()` on every corresponding modeled pool. This keeps incumbent
+v2 emissions moving before migration while also checkpointing v3 backfill.
+After migration, the v3 candidate advances the emitter from its own
+`distribute()`; v2 stops receiving new BLND while any existing pool streams
+remain governed by v2.
+
+Preview one complete pass without mutation, submit one pass, or run the keeper
+continuously in the foreground:
+
+```bash
+make testnet-production-keeper-plan
+make testnet-production-keeper-once
+make testnet-production-keeper
+```
+
+Continuous mode performs its first pass immediately and schedules subsequent
+passes hourly without allowing overlapping passes. Override the interval, in
+seconds, when a faster isolated test schedule is useful:
+
+```bash
+BLEND_KEEPER_INTERVAL_SECONDS=300 make testnet-production-keeper
+```
+
+Stop continuous mode with `Ctrl-C` or `SIGTERM`. An unexpected call failure is
+reported without preventing the other configured pools from being serviced;
+continuous mode retries on its next interval. Known v2/v3 no-work and timing
+errors are treated as idempotent skips. The configured source account only
+pays transaction fees and receives no protocol privilege. The keeper never
+invokes emitter swap, migration `drop()`, claims, or pool-admin operations.
+
+The internal scheduler runs only while the process and host remain running. A
+service manager such as `launchd` can supervise it for unattended operation,
+but should not add a second periodic schedule.
+
 After the seven-day backstop-tier and pool streams expire:
 
 ```bash

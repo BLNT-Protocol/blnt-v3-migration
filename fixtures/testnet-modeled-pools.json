@@ -16,7 +16,7 @@
   },
   "pools": {
     "fixed": {
-      "name": "Fixed Pool v2 model",
+      "name": "Fixed",
       "backstop_take_rate": 2000000,
       "max_positions": 6,
       "min_collateral": 50000000,
@@ -69,7 +69,7 @@
       ]
     },
     "yieldblox": {
-      "name": "YieldBlox Pool v2 model",
+      "name": "YieldBlox",
       "backstop_take_rate": 2000000,
       "max_positions": 6,
       "min_collateral": 50000000,

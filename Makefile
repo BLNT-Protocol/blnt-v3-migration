@@ -106,6 +106,15 @@ testnet-production-emissions:
 testnet-production-claim-emissions:
 	bash scripts/testnet-production-migration.sh claim-emissions
 
+testnet-production-keeper-plan:
+	bash scripts/emissions-keeper.sh plan
+
+testnet-production-keeper-once:
+	bash scripts/emissions-keeper.sh once
+
+testnet-production-keeper:
+	bash scripts/emissions-keeper.sh run
+
 build-v3:
 	$(MAKE) -C $(V3_DIR) build
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked

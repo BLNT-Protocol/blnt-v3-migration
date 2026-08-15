@@ -126,10 +126,10 @@ extend the independent backfill clock. A changed or absent queue, or a
 checkpoint after the grace period, invalidates any stale attestation. There is
 no candidate retry counter or multi-queue recovery deadline.
 
-After the first distribution starts the epoch, every BLND-bearing weight
-mutation MUST require a current distribution checkpoint. This prevents later
-weight from receiving retroactive backfill without tying accrual to queue
-state.
+As in v2, ordinary BLND-bearing weight mutations require no current global
+distribution checkpoint. They checkpoint the affected pool-tier stream and
+user where applicable, while the next `distribute()` samples current active
+weight for its complete elapsed interval.
 
 ### 5.3 Emitter swap and candidate transition
 
@@ -226,9 +226,9 @@ At most once per 24 hours, a permissionless pool gulp starts or refreshes the
 BLND:USDC depositor stream and the pool's configured reserve streams. Pending
 BLND and unfinished emissions combine into fresh seven-day schedules. Pool,
 tier-stream, user-index, and split rounding carry forward at their ordinary
-scopes. A sufficiently recent distribution checkpoint MUST precede weight
-changes. Queueing preserves already streamed accrual but ends participation in
-the remaining stream.
+scopes. Ordinary weight changes require no global checkpoint, matching v2's
+sampling behavior. Queueing preserves already streamed accrual and removes the
+shares from the active weight sampled by the next distribution.
 
 The first post-swap `distribute()` preserves the latest completed pre-swap
 checkpoint as the backfill cutoff. After that cutoff, both tranches use the

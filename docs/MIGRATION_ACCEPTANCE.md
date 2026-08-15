@@ -105,6 +105,9 @@ It MUST additionally verify:
   pools supply emission weight. Pool weight uses those LP-token amounts
   directly rather than converting them to underlying BLND. The 70% allocation
   becomes pending BLND:USDC until a pool gulp starts its seven-day stream.
+- Ordinary BLND:USDC mutations succeed without a recent global distribution
+  checkpoint. The next backfill distribution samples the resulting active
+  weight for its complete elapsed interval, matching v2.
 - Queueing checkpoints the tier stream and already accrued BLND, then stops
   future pool and stream weight for the queued shares. Dequeueing resumes at
   the current index; withdrawal cannot erase prior streamed accrual.

@@ -146,6 +146,10 @@ a side effect of work in this repository.
   BLND:XLM 80:20 Comets. BLND:USDC is the USDC anchor and plain USDC is valued
   one-for-one. Do not introduce a backstop price oracle or caller-supplied
   production values.
+- Plain-USDC interest-auction payments credit 99% to that tier and reserve an
+  exact cumulative 1% for bounded swaps through the canonical BLND:USDC Comet
+  followed by an exact BLND burn. Buyback failure must not unwind or block the
+  completed interest settlement.
 - Candidate construction must validate its immutable BLND, USDC, XLM,
   BLND:USDC, and BLND:XLM bindings exactly.
 - Pool status preserves v2 codes and hard Q4W thresholds: normal On-Ice at

@@ -88,6 +88,8 @@ v2, the permissionless keeper first calls the emitter's `distribute()`. It then
 calls each deployed v2 and v3 backstop's `distribute()` and
 `gulp_emissions()` on every corresponding modeled pool. This keeps incumbent
 v2 emissions moving before migration while also checkpointing v3 backfill.
+Each pass also simulates v3 `buy_and_burn()` and submits one bounded canonical
+Comet swap only when pending USDC exists.
 After migration, the v3 candidate advances the emitter from its own
 `distribute()`; v2 stops receiving new BLND while any existing pool streams
 remain governed by v2.

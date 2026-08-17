@@ -23,8 +23,9 @@ Commands:
 
 Each pass advances the incumbent emitter when it still targets v2, checkpoints
 the v2 and v3 backstops, then gulps every modeled pool for the corresponding
-protocol version. The default run interval is one hour. Configuration may be
-overridden with BLEND_KEEPER_REGISTRY,
+protocol version. It also processes one bounded pending-USDC buy-and-burn batch
+when work is available. The default run interval is one hour. Configuration
+may be overridden with BLEND_KEEPER_REGISTRY,
 BLEND_KEEPER_CONFIG_DIR, BLEND_KEEPER_SOURCE_ACCOUNT, BLEND_KEEPER_RPC_URL,
 BLEND_KEEPER_INCLUSION_FEE, and BLEND_KEEPER_INTERVAL_SECONDS.
 EOF
@@ -177,6 +178,61 @@ run_call() {
     fi
 }
 
+is_zero_i128_result() {
+    local output="$1"
+
+    printf '%s' "${output}" | jq -e '
+        (type == "number" and . == 0) or
+        (type == "string" and . == "0")
+    ' >/dev/null 2>&1
+}
+
+is_positive_i128_result() {
+    local output="$1"
+
+    printf '%s' "${output}" | jq -e '
+        (type == "number" and . > 0) or
+        (type == "string" and test("^[1-9][0-9]*$"))
+    ' >/dev/null 2>&1
+}
+
+plan_buy_and_burn() {
+    local output
+
+    if ! output="$(capture_invoke no "${V3_BACKSTOP_ID}" buy_and_burn)"; then
+        die "v3 buy and burn simulation failed: ${output}"
+    fi
+    if is_zero_i128_result "${output}"; then
+        note "v3 buy and burn: no pending USDC"
+    elif is_positive_i128_result "${output}"; then
+        note "v3 buy and burn: ready (${output} BLND)"
+    else
+        die "v3 buy and burn returned an invalid amount: ${output}"
+    fi
+}
+
+run_buy_and_burn() {
+    local output
+
+    if ! output="$(capture_invoke no "${V3_BACKSTOP_ID}" buy_and_burn)"; then
+        note "v3 buy and burn simulation failed: ${output}"
+        return 1
+    fi
+    if is_zero_i128_result "${output}"; then
+        note "v3 buy and burn: no pending USDC"
+        return 0
+    fi
+    if ! is_positive_i128_result "${output}"; then
+        note "v3 buy and burn returned an invalid amount: ${output}"
+        return 1
+    fi
+    if ! output="$(capture_invoke yes "${V3_BACKSTOP_ID}" buy_and_burn)"; then
+        note "v3 buy and burn submission failed: ${output}"
+        return 1
+    fi
+    note "v3 buy and burn: submitted (${output} BLND)"
+}
+
 load_configuration() {
     local pool_name pool_id
 
@@ -239,6 +295,7 @@ plan_pass() {
             "v3 gulp ${V3_POOL_NAMES[index]} pool ${V3_POOLS[index]}" \
             "${V3_POOLS[index]}" gulp_emissions 1034 1200
     done
+    plan_buy_and_burn
     note "Plan only: pool simulations reflect current state before either simulated distribution."
 }
 
@@ -273,6 +330,7 @@ run_pass() {
             "v3 gulp ${V3_POOL_NAMES[index]} pool ${V3_POOLS[index]}" \
             "${V3_POOLS[index]}" gulp_emissions 1034 1200 || failed=1
     done
+    run_buy_and_burn || failed=1
 
     if (( failed != 0 )); then
         note "Emissions pass completed with one or more unexpected failures."

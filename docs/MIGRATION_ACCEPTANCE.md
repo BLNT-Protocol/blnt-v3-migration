@@ -90,15 +90,15 @@ relevant token balances. Immediately afterward it MUST prove that:
 
 The suite MUST prove that accounted BLND:USDC is one continuous candidate
 backstop position before and after migration. The same custody and shares
-provide second-loss capital and the direct balance used by the emitter; no
+provide configured waterfall capital and the direct balance used by the emitter; no
 temporary migration-only shares or involuntary conversion may exist.
 
 It MUST additionally verify:
 
 - Direct BLND:USDC transfers affect only the emitter's raw balance comparison
   and mint no shares or other entitlement.
-- BLND:XLM and plain USDC never affect the incumbent balance comparison or
-  migration backfill.
+- BLND:XLM and every other non-BLND:USDC tier never affect the incumbent
+  balance comparison or migration backfill.
 - Prefunding begins at candidate construction. The first pre-swap
   `distribute()` starts the backfill clock rather than construction.
 - Before migration, only active, nonqueued BLND:USDC LP tokens in reward-zone
@@ -111,8 +111,8 @@ It MUST additionally verify:
 - Queueing checkpoints the tier stream and already accrued BLND, then stops
   future pool and stream weight for the queued shares. Dequeueing resumes at
   the current index; withdrawal cannot erase prior streamed accrual.
-- BLND:XLM becomes emission-eligible only after migration. Plain USDC remains
-  ineligible before and after.
+- Exact canonical BLND:XLM becomes emission-eligible only after migration.
+  Plain-USDC and plain-XLM tiers remain ineligible before and after.
 - The first post-swap candidate `distribute()` ends backfill at the latest
   completed pre-swap checkpoint and resets ongoing accounting to the emitter's
   candidate checkpoint. The intervening gap is omitted, so no interval receives
@@ -185,7 +185,7 @@ boundaries, the 10-million-BLND cap, and post-swap fail-closed accounting.
 Localnet and public-testnet runners MUST:
 
 - use the production migration constants;
-- deploy and prefund matched Fixed and YieldBlox v2/v3 pools before opening
+- deploy and prefund matched Fixed and Custom v2/v3 pools before opening
   the emitter queue;
 - verify source commits and every deployed artifact digest;
 - use independently issued test assets instead of depending on official test

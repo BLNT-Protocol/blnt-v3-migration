@@ -21,16 +21,17 @@ The runner creates:
 - a real 80:20 BLND:XLM Comet initialized with 1,000 BLND and 100 native XLM;
 - bounded, authenticated, test-only SEP-40 lending oracles for the modeled
   pools;
-- the optimized candidate backstop bound immutably to the three assets and
+- the optimized candidate backstop bound immutably to the canonical assets and
   both Comets;
-- matched Fixed and YieldBlox v2/v3 lending pools; and
-- three-tier candidate and single-tier incumbent backstop positions for both
-  pool pairs.
+- matched Fixed and Custom v2/v3 lending pools;
+- Fixed v3 BLND:XLM, BLND:USDC, and USDC tiers with 4:3:2 weights; and
+- Custom v3 XLM and USDC tiers with 2:1 weights, plus single-tier incumbent
+  backstop positions for both v2 pools.
 
-The BLND:USDC Comet is the backstop's USDC anchor. The backstop uses its current
-80:20 reserve ratio to value both LP tiers and does not call an oracle. The
-controlled SEP-40 contracts are used only by the modeled lending pools for
-reserve pricing.
+The BLND:USDC Comet is the backstop's USDC anchor. The backstop uses current
+reserves from both 80:20 Comets to value the LP assets and plain XLM, values
+plain USDC one-for-one, and does not call an oracle. The controlled SEP-40
+contracts are used only by the modeled lending pools for reserve pricing.
 
 ## Start the isolated migration
 
@@ -86,10 +87,10 @@ make testnet-production-emissions
 Soroban contracts do not execute on their own. While the emitter still targets
 v2, the permissionless keeper first calls the emitter's `distribute()`. It then
 calls each deployed v2 and v3 backstop's `distribute()` and
-`gulp_emissions()` on every corresponding modeled pool. This keeps incumbent
+`gulp_emissions()` on every corresponding reward-zone modeled pool. This keeps incumbent
 v2 emissions moving before migration while also checkpointing v3 backfill.
-Each pass also simulates v3 `buy_and_burn()` and submits one bounded canonical
-Comet swap only when pending USDC exists.
+Each pass also simulates v3 `buy_and_burn(asset)` for USDC and XLM and submits
+each bounded canonical-Comet swap only when that asset has a pending balance.
 After migration, the v3 candidate advances the emitter from its own
 `distribute()`; v2 stops receiving new BLND while any existing pool streams
 remain governed by v2.
@@ -133,16 +134,24 @@ lending oracles are test fixtures, not acceptable mainnet providers.
 
 ## Modeled lending pools
 
-Every fresh deployment creates the side-by-side lending-pool fixtures whose
-reserve parameters were captured from mainnet Fixed Pool v2 and YieldBlox Pool
-v2. The setup finishes before the emitter queue and first candidate
-`distribute()`, so both candidate pools are prefunded before the backfill clock
+Every fresh deployment creates side-by-side Fixed and synthetic Custom
+lending-pool fixtures. Fixed reserve parameters were captured from mainnet
+Fixed Pool v2; Custom uses XLM, USDC, and PYUSD reserves. The setup
+finishes before the emitter queue and first candidate `distribute()`, so both
+candidate pools are prefunded before the backfill clock
 begins. If the pool portion of deployment is interrupted, its idempotent setup
 can be resumed; verification may also be repeated independently:
 
 ```bash
 make testnet-production-deploy-modeled-pools
 make testnet-production-verify-modeled-pools
+```
+
+If deployment is interrupted after modeled-pool verification but before the
+emitter queue opens, resume only the queue step with:
+
+```bash
+make testnet-production-begin
 ```
 
 Reserve initialization is resumable across the v2 two-transaction
@@ -152,11 +161,12 @@ finalized directly; otherwise the runner queues and then finalizes it. This
 avoids v2's rejection of a duplicate queued reserve after an interrupted run.
 
 The completed fixture has two SDK-22 v2 pools against the incumbent single
-BLND:USDC backstop, plus equivalent SDK-27 v3 pools against the candidate's
-BLND:XLM → BLND:USDC → USDC waterfall. Each matched v2/v3 pool receives
-22,000 BLND:USDC LP. On a fresh deployment, Fixed v3 receives one additional
-base unit to preserve the strict aggregate migration majority. Each v3 pool
-also receives 10 BLND:XLM LP and 12,500 USDC.
+BLND:USDC backstop. Each v2 pool receives 22,000 BLND:USDC LP. Fixed v3 uses
+the BLND:XLM → BLND:USDC → USDC waterfall and holds the full 44,000 LP plus one
+base unit required for a strict aggregate migration majority. It also receives
+10 BLND:XLM LP and 12,500 USDC. Custom v3 uses XLM → USDC with 2:1 take-rate
+weights and receives 1,000 XLM plus 12,250 USDC, worth $12,500 at the fixture
+price.
 
 The v2 balance exceeds the v2 activation formula at the controlled Comet
 ratio. The runner sets both v2 pools to Admin Active, configures their 30% pool
@@ -168,31 +178,22 @@ Rerunning the modeled-pool setup command renews a missing or expired stream;
 standalone verification rejects a null, zero-rate, or expired stream instead
 of reporting it as emitting.
 
-The v3 pools use distinct 30% pool-tranche configurations. Fixed v3 directs
-the tranche to EURC borrowers; its deterministic exercise supplies 500 EURC
-of liquidity, supplies 1,000 USDC as collateral, and borrows 100 EURC.
-YieldBlox v3 directs the tranche to USDC suppliers and is seeded with 1,000
-USDC. Both Fixed v3 and YieldBlox v3 enter the candidate reward zone during
-prefunding. The first candidate distribution then starts queue-independent
-backfill through the ordinary 70/30 pending-and-stream pipeline: only
-BLND:USDC receives the backstop tranche, while both pool configurations receive
-their proportional pool tranche. After activation,
-BLND:XLM also becomes eligible and reward-zone edits retain the one-hour
-checkpoint guard. The finalize command funds the complete positive schedule
-through candidate `drop()` before backstop-tier claims. The exercise gulps the
-two backstop tiers and pool tranche together, then later claims the Fixed
-EURC-borrow and YieldBlox USDC-supply streams independently. It also claims each
-pool's two backstop-tier streams separately and compounds BLND into the
-originating BLND:USDC or BLND:XLM Comet position.
+Fixed v3 directs its 30% pool tranche to EURC borrowers; its deterministic
+exercise supplies 500 EURC of liquidity, supplies 1,000 USDC as collateral,
+and borrows 100 EURC. It enters the candidate reward zone and receives the
+queue-independent backfill and ongoing 70/30 distributions. Custom v3 is
+seeded with 1,000 USDC of lending supply and also exposes XLM and PYUSD. It
+enters an open reward-zone slot but has no BLND-bearing backstop tier, so its
+emission weight and BLND allocation remain zero. The finalize and claim exercises therefore
+gulp and claim only Fixed's BLND:USDC, BLND:XLM, and EURC-borrow streams.
 
 The controlled lending-oracle fixtures use seven-decimal USD prices. Their
 price setters require authorization from the isolated runner operator bound at
 construction, and verification checks that immutable
 binding. Other public-testnet accounts cannot rewrite the fixtures. They make
 the pools usable for functional test transactions but are not suitable price
-sources for production. Synthetic EURC, AQUA, USDGLO, USTRY, CETES, and PYUSD
-are issued only by the isolated runner identity. The exact captured pool
-configuration and source contract IDs are recorded in
+sources for production. Synthetic EURC and PYUSD are issued only by the
+isolated runner identity. The exact pool configuration and source provenance are recorded in
 [`../fixtures/testnet-modeled-pools.json`](../fixtures/testnet-modeled-pools.json).
 
 ## Live deployment state

@@ -1,55 +1,51 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-15T03:02:14Z",
+  "generated_at": "2026-08-18T06:05:38Z",
   "network": {
     "name": "Stellar Testnet",
     "passphrase": "Test SDF Network ; September 2015",
-    "rpc_url": "https://rpc.ankr.com/stellar_testnet_soroban",
+    "rpc_url": "https://soroban-testnet.stellar.org",
     "protocol": 27,
     "xlm_asset_mode": "native"
   },
   "source": {
-    "migration_repository_commit": "1888288215f1446dab559b98e726a238104b7a6c",
-    "contracts_repository_commit": "044751ad7962342c92e1308381732bb1ba94f00c",
+    "migration_repository_commit": "db38faf0f7a7baf18aa96663521c3c2087327bdd",
+    "contracts_repository_commit": "30b9256230bb967b6cbc241c85fa6633624aabbb",
     "dirty": true,
-    "patch_sha256": "dd1bf06383544fcd29ffc0937eff048e84abbb5a2e64af242913fcdbcff1598c"
+    "patch_sha256": "ee339321f9e28ada2dc225c7d09eff1f46820df6e399512d0b58877578b487db"
   },
   "accounts": {
-    "operator": "GAP6KNOFWPHD7XXKSRWGYJB26PLQRKTVKZ4PPG7Y6VBTJ7TQHHTGRQ6H",
-    "depositor": "GBPUY5FZJWYAFK4ING5PNF2T6E63PX7I5HFHVEWNXERFW27VGWAIKFV6"
+    "operator": "GCE6CPLHRAFV57RXYEDPATLXYMTERSRG3QGWP7ROOYGSC6FQRL3LXPDL",
+    "depositor": "GDLSWEJW7HEWV2AUK7Z5RED7LGYCHAJ5RDFQVHFIPZA6E37TCGE3DC6R"
   },
   "artifacts": {
     "emitter_sha256": "438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89",
     "v2_pool_factory_sha256": "31328050548831f63d2b72e37bcfd0bb7371b7907135755dbe09ed434d755ca9",
     "v2_backstop_sha256": "c1f4502a757e25c611f5a159bc1ab0eef64085adac6c68123dca66e87faffbc2",
     "v2_pool_sha256": "a41fc53d6753b6c04eb15b021c55052366a4c8e0e21bc72700f461264ec1350e",
-    "v3_pool_factory_sha256": "e9929bee650ca813f872b6d251991fb16a35e61a9b7a278cb974276e9afce0f0",
-    "v3_backstop_sha256": "a070a8ecb096305d6cff4d57c5a996418de9a4f897a037e71c7e0483e70565ee",
-    "v3_pool_sha256": "d0fb7f0dc9424cd98229b3324a603c9a538d02099cb6844bc68a913622df48ab",
+    "v3_pool_factory_sha256": "a2a648931707e056cbc78f091f64b3636b76b836f1fbd76314ca871add4925c3",
+    "v3_backstop_sha256": "18ea78678ff3c6bd3da64810c80664828833f18a305572ac700411d303a48bda",
+    "v3_pool_sha256": "095f04828521b7029e70448caabdf9f64fee5dc9b9f0f8494e90129fe803df74",
     "comet_sha256": "5d721fa580714291f6846fc01738e86d70acb47e449ea75312e272a0f7436dd8",
     "lending_oracle_sha256": "ee498142dbeb4de4d60a1d5e0741669c28ebe00f6265762fb160afaf412aa0b8"
   },
   "assets": {
-    "BLND": "CA54QZ7OLKANLOAQ6TMJK2B2VGDTYKGIS6PLSKAVVQQNU4HIO4RAGT7H",
-    "USDC": "CDTF5BPQYEJSA42LNKCUU52LXROBBCCO6DKAWRUR5P2A4XOHDZGQAIC2",
+    "BLND": "CAF4KJEWNZZBZVD5W6ZUDU7PYXK26GBMISNDC2SUPO25AXFTQTKR6YPK",
+    "USDC": "CAIMPRVTB3G3RNTITG4UKDZGN5W5CGHZUWP6IWTUV6AE6NQWBRYC6LEH",
     "XLM": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
-    "EURC": "CCY7QP2456FIZTKVEAKBQMAWEC3JIGVJPFZ4SLHS4SURGPOIV33NSDV6",
-    "AQUA": "CC4KNLMTP3DW4X7FJZJH225FGGS4RMSXQX6LYSIAG63XQ3VVYKS5W7EZ",
-    "USDGLO": "CDSMZXBXEUPYWXEOVPZC7PVLP7RKBOVIGPBIEDKDCSWBAXDWDIEX66PC",
-    "USTRY": "CAZIWKTT6ULGLP256QBASLAV67DDFZK4W6BE7OSK75UKELI4TW7JH2BR",
-    "CETES": "CAUEEHCCCUZK2H5UWETMZXM5LZMEERWAELDLKNQ7CQIOMOQV5VWXKVRC",
-    "PYUSD": "CBUFOMOXNDB6ZZCSEF7RV2ZY4OARJ4AGCKMYRLRSKFTUCFYJHY3DD2Q3"
+    "EURC": "CCYMQIDAOYJLD5NHMKQJUKSSP2SH3PTKTRRGEBS4CYRMKVZT27UBVO7A",
+    "PYUSD": "CBPLAQFK344K2Z7WLGOO6AOWAKSBQNLDZOTHE34EYQPKZSMSWM6ISVOD"
   },
   "comet_pools": {
     "BLND_USDC": {
-      "contract_id": "CCQMRBBO6ZSJOLANA4WWBGZLBAQGGHWU56USQK2XKJY7ROZ2TW3AQDE3",
+      "contract_id": "CAKASZY564Y62JXL6FQIHHDDGNSUJG6G4OKOXHAD5URVDRNQCIVL57YK",
       "weights": {
         "BLND": 80,
         "USDC": 20
       }
     },
     "BLND_XLM": {
-      "contract_id": "CBYBST2RMWTVBOZVPMZVWCQYOZVDRWTOKNQZ53EBY6UXAXVDAJYOBH3P",
+      "contract_id": "CBIXT3BQMPA6XD5XYLVANUQJENMEPD7BRMQ5HGXOQAZU6AGOK5ZJSLQS",
       "weights": {
         "BLND": 80,
         "XLM": 20
@@ -57,79 +53,116 @@
     }
   },
   "protocol": {
-    "emitter": "CDPRJB7NEBOJIXCBGE2ZBQPD2T6RPLCG4YLXX42VFES5MA6CWXROCDAQ",
+    "emitter": "CDHW5QXER6RLRTIQWORJZ33QF26A5H3U5HAOLGA434KJFOZOO4V67KDN",
     "v2": {
-      "backstop": "CCLU7XXXTZQB45Z2GSR3QPMWOHE44XLB6EEDB2PO3LN2ZAORSRJ6RURA",
-      "pool_factory": "CBVR3DVXVWCMOB5NXSWXHQ6JUZRQ7YYEOP4IU757R7CERQNOCQAR6PPS"
+      "backstop": "CD5JQLBAGVC4DTUL72WH2AMUBLDFPDVVF7ROIR54VP5LHN57RB7VMEYL",
+      "pool_factory": "CBC3IWV6RJ7M2MSOV4NIKEXRMKRY7NVHZ6LQTJ6BWSLDTP7H5ULEJOZR"
     },
     "v3": {
-      "backstop": "CC5G7QKZU7KJCAQIKG64WMCBEAIU6QSJVWHNEONIP7AYSU63II2JMIMT",
-      "pool_factory": "CD2OA4CMXF5SB5VXZASCRMZ5JU6XVRT47M6A45IXNHSH7HWYMERVNZZZ"
+      "backstop": "CDLFU3VM46U33YPNAW6LLELLH2A3TCMRE2IXNQ66M6GHINVIRECKYUWK",
+      "pool_factory": "CD3PZFE4C4JV372KB4QKIW6RERCM63ZOU3BITURI3ZW4RJH45YALECIE"
     }
+  },
+  "activation": {
+    "threshold_usd_base_units": "125000000000",
+    "decimals": 7
   },
   "modeled_pools": {
     "fixed": {
       "v2": {
-        "pool": "CBFXMRQBA7XREHSXDARN4NJHXCHTZ3MDJZRPTYSNEESZGZWEOZY2TR36",
-        "oracle": "CDVMBQWNQAITMTX7MDWOAXZ5SSGMJIDRXDIMWQWZP5ZM3UHUCM5PYZR5",
-        "status": "admin_active",
-        "reward_zone_member": true,
-        "blnd_usdc_base_units": "220000000000"
-      },
-      "v3": {
-        "pool": "CC6W2UPMNMBTFTIUECXVYUBUF7HZ5C3R3U6XCOHGF5JO4M5OJAS4YKPU",
-        "oracle": "CAMNYTMBFIAIDA73W7MINLJPQKXD5S4PWA72Y365EVG4T5EUTHEA42UB",
-        "status": "admin_active",
-        "reward_zone_member": true,
-        "pool_emission_position": "EURC borrow",
-        "backstop_base_units": {
-          "BLND_USDC": "220000000001",
-          "BLND_XLM": "100000000",
-          "USDC": "125000000000"
-        }
-      }
-    },
-    "yieldblox": {
-      "v2": {
-        "pool": "CALLZSHJ4K75GHRCWTYCHFGX3HFFXLX4BP7O46U5BVDLVSTR4DXMKVJ4",
-        "oracle": "CA5CJKSWMP5J5IE5QUP4XEQG3OGDGFPAFSZD7QCMTD5A7CNFWJL4SFJT",
-        "status": "admin_active",
-        "reward_zone_member": true,
-        "blnd_usdc_base_units": "220000000000"
-      },
-      "v3": {
-        "pool": "CCYHFQGGSWHVVQS36COFJ26YKAIMYODMBEKBXEGZY2LQKIHFQGZIRTSM",
-        "oracle": "CB5TURKXEMSSVYTZIBDUKX73UCTOFLH4THCWFJRDQGCV4EXNRZIUUZYN",
+        "pool": "CC2V77BZ2RSALH5H7GZVLCCPJKT2IIOCKKDGPKMQWY3LSDGBPKMZV25I",
+        "oracle": "CCSM73LM572YLKX7TAN2COM35EXCVM4SSTBOR2GXRAXCJ5IV2VR633MY",
         "status": "admin_active",
         "reward_zone_member": true,
         "pool_emission_position": "USDC supply",
-        "backstop_base_units": {
-          "BLND_USDC": "220000000000",
-          "BLND_XLM": "100000000",
-          "USDC": "125000000000"
-        }
+        "blnd_usdc_base_units": "220000000000"
+      },
+      "v3": {
+        "pool": "CAXEWHS62XC72X2DIPXBOPDCQVVUOBCXPQRYHVC6ZLIV2GNWGCDT7FY7",
+        "oracle": "CAKXYHRZ6VDWKAPCTNGG3VI2PN7EJSAGLEK3ERZFVRJP24W54ORC3OWZ",
+        "status": "admin_active",
+        "reward_zone_member": true,
+        "pool_emission_position": "EURC borrow",
+        "active_backstop_value_base_units": "675125000005",
+        "backstop": [
+          {
+            "tier": "FirstLoss",
+            "asset": "BLND_XLM",
+            "weight": 4,
+            "base_units": "100000000"
+          },
+          {
+            "tier": "SecondLoss",
+            "asset": "BLND_USDC",
+            "weight": 3,
+            "base_units": "440000000001"
+          },
+          {
+            "tier": "ThirdLoss",
+            "asset": "USDC",
+            "weight": 2,
+            "base_units": "125000000000"
+          }
+        ]
+      }
+    },
+    "custom": {
+      "v2": {
+        "pool": "CDZ4FS6EVGMZ5O2ENJDNLXLCIPHLGYUWZGNPODKXVUKP6MA7IHNWIIDW",
+        "oracle": "CCERPANZRF6M7RTRJSCLST7OKMVFBLJUN3NGFEEEKWFA6VBUCPBUXWCV",
+        "status": "admin_active",
+        "reward_zone_member": true,
+        "pool_emission_position": "USDC supply",
+        "blnd_usdc_base_units": "220000000000"
+      },
+      "v3": {
+        "pool": "CDR7U5AEACY2FXHNA2ICCVYR4GDDKMZQSMDYSIQIIA7EHTRHI4LHPORL",
+        "oracle": "CC6OZ3ICZ2V5OAZEHZ5VAG77ULHXUPUXNASG6HGYRPCKV4XXA23YLPZQ",
+        "status": "admin_active",
+        "reward_zone_member": true,
+        "pool_emission_position": null,
+        "reserves": [
+          "XLM",
+          "USDC",
+          "PYUSD"
+        ],
+        "active_backstop_value_base_units": "125000000000",
+        "backstop": [
+          {
+            "tier": "FirstLoss",
+            "asset": "XLM",
+            "weight": 2,
+            "base_units": "10000000000"
+          },
+          {
+            "tier": "SecondLoss",
+            "asset": "USDC",
+            "weight": 1,
+            "base_units": "122500000000"
+          }
+        ]
       }
     }
   },
   "reward_zones": {
     "v2": [
-      "CBFXMRQBA7XREHSXDARN4NJHXCHTZ3MDJZRPTYSNEESZGZWEOZY2TR36",
-      "CALLZSHJ4K75GHRCWTYCHFGX3HFFXLX4BP7O46U5BVDLVSTR4DXMKVJ4"
+      "CC2V77BZ2RSALH5H7GZVLCCPJKT2IIOCKKDGPKMQWY3LSDGBPKMZV25I",
+      "CDZ4FS6EVGMZ5O2ENJDNLXLCIPHLGYUWZGNPODKXVUKP6MA7IHNWIIDW"
     ],
     "v3": [
-      "CC6W2UPMNMBTFTIUECXVYUBUF7HZ5C3R3U6XCOHGF5JO4M5OJAS4YKPU",
-      "CCYHFQGGSWHVVQS36COFJ26YKAIMYODMBEKBXEGZY2LQKIHFQGZIRTSM"
+      "CAXEWHS62XC72X2DIPXBOPDCQVVUOBCXPQRYHVC6ZLIV2GNWGCDT7FY7",
+      "CDR7U5AEACY2FXHNA2ICCVYR4GDDKMZQSMDYSIQIIA7EHTRHI4LHPORL"
     ]
   },
   "migration": {
     "phase": "open",
-    "queue_transaction": "5ae53392e583e930169ec38e11ef47023d41a8e0726f7b52da5206fa492ea7bf",
-    "epoch_started_at": "2026-08-15T03:00:07Z",
-    "prepare_not_before": "2026-09-08T03:00:27Z",
-    "unlock_at": "2026-09-15T03:00:27Z",
+    "queue_transaction": "1f076426c5702eb7cca3d1cad8227cb801e1125b26f252f7843946d82f5c12eb",
+    "epoch_started_at": "2026-08-18T00:08:51Z",
+    "prepare_not_before": "2026-09-11T00:11:52Z",
+    "unlock_at": "2026-09-18T00:11:52Z",
     "incumbent_blnd_usdc_base_units": "440000000000",
     "candidate_blnd_usdc_base_units": "440000000001",
-    "queued_backstop": "CC5G7QKZU7KJCAQIKG64WMCBEAIU6QSJVWHNEONIP7AYSU63II2JMIMT",
-    "queued_designated_token": "CBYBST2RMWTVBOZVPMZVWCQYOZVDRWTOKNQZ53EBY6UXAXVDAJYOBH3P"
+    "queued_backstop": "CDLFU3VM46U33YPNAW6LLELLH2A3TCMRE2IXNQ66M6GHINVIRECKYUWK",
+    "queued_designated_token": "CBIXT3BQMPA6XD5XYLVANUQJENMEPD7BRMQ5HGXOQAZU6AGOK5ZJSLQS"
   }
 }

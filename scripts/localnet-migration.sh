@@ -58,11 +58,10 @@ QUICKSTART_CONTAINER_NAME="stellar-${CONTAINER_NAME}"
 
 SCALAR_7=10000000
 MODELED_BACKSTOP_LP_BALANCE=$((22000 * SCALAR_7))
-# Every fresh lane uses the modeled Fixed and YieldBlox pools. The Fixed v3
-# position carries one extra base unit so the candidate retains the deployed
-# emitter's strict aggregate BLND:USDC majority requirement.
+# Every fresh lane uses modeled Fixed and Custom pools. Fixed v3 holds the
+# candidate's complete migration-qualifying BLND:USDC position because Custom
+# v3 deliberately uses only XLM and USDC backstop tiers.
 INCUMBENT_BALANCE="${MODELED_BACKSTOP_LP_BALANCE}"
-CANDIDATE_BALANCE=$((INCUMBENT_BALANCE + 1))
 AGGREGATE_INCUMBENT_BALANCE=$((2 * MODELED_BACKSTOP_LP_BALANCE))
 AGGREGATE_CANDIDATE_BALANCE=$((AGGREGATE_INCUMBENT_BALANCE + 1))
 ACTIVATION_USDC_BALANCE=$((12500 * SCALAR_7))
@@ -78,7 +77,6 @@ FIXTURE_ORACLE_RESOLUTION=300
 FIXTURE_ORACLE_RECORDS=7
 QUEUE_ATTESTATION_WINDOW_SECONDS=$((7 * 24 * 60 * 60))
 EMISSION_START_DELAY_SECONDS=5
-MULTI_POOL_EMISSION_DELAY_SECONDS=10
 # Explicitly renewed deployed-emitter and v2 entries get ten wall-clock days
 # of TTL, leaving a two-times safety margin for the documented five-day
 # keepalive cadence.
@@ -87,11 +85,13 @@ MIGRATION_TTL_EXTENSION_LEDGERS="${BLEND_MIGRATION_TTL_EXTENSION_LEDGERS:-$((10 
 INCUMBENT_SALT="0000000000000000000000000000000000000000000000000000000000000011"
 CANDIDATE_SALT="0000000000000000000000000000000000000000000000000000000000000022"
 MODELED_V2_FIXED_SALT="0000000000000000000000000000000000000000000000000000000000000044"
-MODELED_V2_YIELDBLOX_SALT="0000000000000000000000000000000000000000000000000000000000000055"
+MODELED_V2_CUSTOM_SALT="0000000000000000000000000000000000000000000000000000000000000055"
 MODELED_V3_FIXED_SALT="0000000000000000000000000000000000000000000000000000000000000066"
-MODELED_V3_YIELDBLOX_SALT="0000000000000000000000000000000000000000000000000000000000000077"
+MODELED_V3_CUSTOM_SALT="0000000000000000000000000000000000000000000000000000000000000088"
 MODELED_BLND_XLM_LP_BALANCE=$((10 * SCALAR_7))
 MODELED_V3_USDC_BALANCE=$((12500 * SCALAR_7))
+MODELED_CUSTOM_V3_XLM_BALANCE=$((1000 * SCALAR_7))
+MODELED_CUSTOM_V3_USDC_BALANCE=$((12250 * SCALAR_7))
 MODELED_V2_USDC_SUPPLY_BALANCE=$((1000 * SCALAR_7))
 MODELED_FIXED_V3_USDC_COLLATERAL=$((1000 * SCALAR_7))
 MODELED_FIXED_V3_EURC_SUPPLY=$((500 * SCALAR_7))
@@ -128,9 +128,10 @@ Commands:
   refresh-oracle
             Refresh every modeled lending-pool oracle.
   deploy-modeled-pools
-            Resume or reverify the mandatory Fixed and YieldBlox pool setup.
+            Resume or reverify the mandatory Fixed and Custom pool setup.
   verify-modeled-pools
             Verify modeled pool configs, registration, status, and backstops.
+  begin     Begin the migration queue after modeled-pool verification succeeds.
   recover   Restart stalled local Stellar Core without replacing state.
   prepare   Attest the compatible queue during its final seven days.
   finalize  Checkpoint backfill, swap through the emitter, transition, and drop backfill.
@@ -490,6 +491,9 @@ capture() {
         stderr_file="${RUN_DIR}/${label}.cost.log"
     fi
 
+    CAPTURE_STDOUT_FILE="${stdout_file}"
+    CAPTURE_STDERR_FILE="${stderr_file}"
+
     note "Executing ${label}..."
     if "$@" >"${stdout_file}" 2> >(tee "${stderr_file}" >&2); then
         command_status=0
@@ -504,6 +508,15 @@ capture() {
     fi
     cat "${stdout_file}"
     return "${command_status}"
+}
+
+is_transient_rpc_error() {
+    local stderr_output="$1"
+
+    [[ "${stderr_output}" == *"client error (Connect)"* ||
+        "${stderr_output}" == *"client error (SendRequest)"* ||
+        "${stderr_output}" == *"Request timeout"* ||
+        "${stderr_output}" == *"connection reset"* ]]
 }
 
 normalize_scalar() {
@@ -625,16 +638,36 @@ invoke_transaction_as() {
 
 invoke_view() {
     local label="$1" contract_id="$2" function_name="$3"
+    local attempt status stderr_output
     shift 3
-    capture "${label}" \
-        stellar_cli contract invoke \
-        --id "${contract_id}" \
-        --source-account "${OPERATOR_IDENTITY}" \
-        --rpc-url "${RPC_URL}" \
-        --network-passphrase "${NETWORK_PASSPHRASE}" \
-        --send no \
-        --cost \
-        -- "${function_name}" "$@"
+    for attempt in 1 2 3 4 5; do
+        if capture "${label}" \
+            stellar_cli contract invoke \
+            --id "${contract_id}" \
+            --source-account "${OPERATOR_IDENTITY}" \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" \
+            --send no \
+            --cost \
+            -- "${function_name}" "$@"
+        then
+            status=0
+        else
+            status=$?
+        fi
+        stderr_output="$(<"${CAPTURE_STDERR_FILE}")"
+        if (( status == 0 )) && [[ -s "${CAPTURE_STDOUT_FILE}" ]]; then
+            return 0
+        fi
+        if [[ "${NETWORK_MODE}" != "testnet" || "${attempt}" == "5" ]] ||
+            ! is_transient_rpc_error "${stderr_output}"
+        then
+            (( status != 0 )) || status=1
+            return "${status}"
+        fi
+        note "Retrying ${label} after a transient public-testnet RPC error (${attempt}/5)..."
+        sleep 2
+    done
 }
 
 invoke_view_as() {
@@ -653,14 +686,35 @@ invoke_view_as() {
 
 read_migration_state() {
     local label="$1" candidate_id="$2" instance
+    local attempt status stderr_output
 
-    instance="$(capture "${label}" \
-        stellar_cli ledger entry fetch contract-data \
-        --contract "${candidate_id}" \
-        --instance \
-        --rpc-url "${RPC_URL}" \
-        --network-passphrase "${NETWORK_PASSPHRASE}" \
-        --output json)"
+    for attempt in 1 2 3 4 5; do
+        if capture "${label}" \
+            stellar_cli ledger entry fetch contract-data \
+            --contract "${candidate_id}" \
+            --instance \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" \
+            --output json >/dev/null
+        then
+            status=0
+        else
+            status=$?
+        fi
+        stderr_output="$(<"${CAPTURE_STDERR_FILE}")"
+        if (( status == 0 )) && [[ -s "${CAPTURE_STDOUT_FILE}" ]]; then
+            instance="$(<"${CAPTURE_STDOUT_FILE}")"
+            break
+        fi
+        if [[ "${NETWORK_MODE}" != "testnet" || "${attempt}" == "5" ]] ||
+            ! is_transient_rpc_error "${stderr_output}"
+        then
+            (( status != 0 )) || status=1
+            return "${status}"
+        fi
+        note "Retrying ${label} after a transient public-testnet RPC error (${attempt}/5)..."
+        sleep 2
+    done
     printf '%s' "${instance}" | jq -ce '
         .entries[0].val.contract_data.val.contract_instance.storage as $storage |
         def key_name:
@@ -833,9 +887,9 @@ modeled_asset_id() {
 modeled_pool_salt() {
     case "$1:$2" in
         v2:fixed) printf '%s\n' "${MODELED_V2_FIXED_SALT}" ;;
-        v2:yieldblox) printf '%s\n' "${MODELED_V2_YIELDBLOX_SALT}" ;;
+        v2:custom) printf '%s\n' "${MODELED_V2_CUSTOM_SALT}" ;;
         v3:fixed) printf '%s\n' "${MODELED_V3_FIXED_SALT}" ;;
-        v3:yieldblox) printf '%s\n' "${MODELED_V3_YIELDBLOX_SALT}" ;;
+        v3:custom) printf '%s\n' "${MODELED_V3_CUSTOM_SALT}" ;;
         *) die "unknown modeled pool salt: $1 $2" ;;
     esac
 }
@@ -928,7 +982,7 @@ refresh_modeled_pool_oracles() {
     local label_prefix="$1" version model oracle
 
     for version in v2 v3; do
-        for model in fixed yieldblox; do
+        for model in fixed custom; do
             oracle="$(state_value "$(modeled_oracle_state_key "${version}" "${model}")")"
             seed_modeled_sep40_oracle "${version}" "${model}" "${oracle}"
         done
@@ -1034,6 +1088,9 @@ ensure_modeled_v2_pool() {
             reserve_list="$(invoke_view \
                 "query-${model}-v2-reserves-${label}" \
                 "${pool}" get_reserve_list)"
+            printf '%s' "${reserve_list}" | jq -e \
+                --arg asset "${asset_id}" 'index($asset) != null' >/dev/null ||
+                die "${model} v2 reserve ${label} was not committed"
         fi
         index=$((index + 1))
     done < <(jq -r --arg model "${model}" \
@@ -1050,10 +1107,27 @@ ensure_modeled_v2_pool() {
     printf '%s\n' "${pool}"
 }
 
+modeled_v3_backstop_config() {
+    local model="$1"
+
+    jq -c --arg model "${model}" \
+        '.pools[$model].backstop_config' "${MODELED_POOLS_FIXTURE}"
+}
+
+modeled_v3_tiers() {
+    local model="$1"
+
+    jq -r --arg model "${model}" '
+        ["FirstLoss", "SecondLoss", "ThirdLoss"] as $tiers |
+        range(0; (.pools[$model].backstop_config | length)) |
+        $tiers[.]
+    ' "${MODELED_POOLS_FIXTURE}"
+}
+
 ensure_modeled_v3_pool() {
     local model="$1" oracle="$2" state_key pool factory salt raw name
     local take_rate max_positions min_collateral reserve_list asset asset_id metadata
-    local index=0 label status
+    local backstop_config index=0 label status
 
     state_key="$(modeled_pool_state_key v3 "${model}")"
     pool="$(state_optional "${state_key}")"
@@ -1068,6 +1142,7 @@ ensure_modeled_v3_pool() {
             '.pools[$model].max_positions' "${MODELED_POOLS_FIXTURE}")"
         min_collateral="$(jq -er --arg model "${model}" \
             '.pools[$model].min_collateral' "${MODELED_POOLS_FIXTURE}")"
+        backstop_config="$(modeled_v3_backstop_config "${model}")"
         raw="$(invoke_transaction "deploy-${model}-v3-pool" "${factory}" deploy \
             --admin "$(state_value operator)" \
             --name "${name}" \
@@ -1075,7 +1150,8 @@ ensure_modeled_v3_pool() {
             --oracle "${oracle}" \
             --backstop_take_rate "${take_rate}" \
             --max_positions "${max_positions}" \
-            --min_collateral "${min_collateral}")"
+            --min_collateral "${min_collateral}" \
+            --backstop_config "${backstop_config}")"
         pool="$(normalize_scalar "${raw}")"
         require_contract_id "${pool}" "${model} v3 pool"
         state_set "${state_key}" "${pool}"
@@ -1106,6 +1182,9 @@ ensure_modeled_v3_pool() {
             reserve_list="$(invoke_view \
                 "query-${model}-v3-reserves-${label}" \
                 "${pool}" get_reserve_list)"
+            printf '%s' "${reserve_list}" | jq -e \
+                --arg asset "${asset_id}" 'index($asset) != null' >/dev/null ||
+                die "${model} v3 reserve ${label} was not committed"
         fi
         index=$((index + 1))
     done < <(jq -r --arg model "${model}" \
@@ -1151,7 +1230,14 @@ modeled_v3_blnd_usdc_target() {
         printf '%s\n' "${explicit_target}"
         return
     fi
-    printf '%s\n' "${MODELED_BACKSTOP_LP_BALANCE}"
+    if jq -e --arg model "${model}" \
+        '.pools[$model].backstop_config | any(.asset == "BlndUsdc")' \
+        "${MODELED_POOLS_FIXTURE}" >/dev/null
+    then
+        printf '%s\n' "${MODELED_BACKSTOP_LP_BALANCE}"
+    else
+        printf '0\n'
+    fi
 }
 
 ensure_modeled_v2_backstop_deposit() {
@@ -1208,6 +1294,23 @@ ensure_token_balance() {
             --to "$(state_value depositor)" \
             --amount "${deficit}" >/dev/null
     fi
+}
+
+ensure_modeled_xlm_balance() {
+    local required="$1" balance
+
+    if [[ "${XLM_ASSET_MODE}" == "issued" ]]; then
+        ensure_token_balance "$(state_value xlm_token)" \
+            "${required}" "modeled-xlm"
+        return
+    fi
+    balance="$(normalize_scalar "$(invoke_view \
+        "query-modeled-xlm-available" "$(state_value xlm_token)" balance \
+        --id "$(state_value depositor)")")"
+    [[ "${balance}" =~ ^[0-9]+$ ]] ||
+        die "invalid modeled XLM depositor balance: ${balance}"
+    (( balance >= required )) ||
+        die "native XLM balance is below the Custom v3 backstop target"
 }
 
 ensure_classic_blnd_balance() {
@@ -1303,9 +1406,6 @@ ensure_modeled_v3_emissions_config() {
     case "${model}" in
         fixed)
             desired='[{"res_index":2,"res_type":0,"share":1}]'
-            ;;
-        yieldblox)
-            desired='[{"res_index":1,"res_type":1,"share":1}]'
             ;;
         *) die "unsupported modeled v3 emission profile: ${model}" ;;
     esac
@@ -1430,7 +1530,7 @@ keepalive_modeled_pools() {
     depositor="$(state_value depositor)"
 
     for version in v2 v3; do
-        for model in fixed yieldblox; do
+        for model in fixed custom; do
             state_key="$(modeled_pool_state_key "${version}" "${model}")"
             pool="$(state_value "${state_key}")"
             oracle="$(state_value "$(modeled_oracle_state_key "${version}" "${model}")")"
@@ -1451,14 +1551,14 @@ keepalive_modeled_pools() {
                     "${stamp}-${version}-${model}-registration" \
                     "$(state_value v3_pool_factory)" is_pool \
                     --pool_address "${pool}" >/dev/null
-                for tier in BlndUsdc BlndXlm Usdc; do
+                while IFS= read -r tier; do
                     invoke_forced_transaction \
                         "${stamp}-${version}-${model}-${tier}-position" \
                         "${candidate}" user_balance \
                         --tier "${tier}" \
                         --pool "${pool}" \
                         --user "${depositor}" >/dev/null
-                done
+                done < <(modeled_v3_tiers "${model}")
             fi
             while IFS= read -r asset; do
                 asset_id="$(modeled_asset_id "${asset}")"
@@ -1479,11 +1579,12 @@ keepalive_modeled_pools() {
         done
     done
 
-    for asset in EURC AQUA USDGLO USTRY CETES PYUSD; do
-        asset_id="$(state_value "$(modeled_asset_state_key "${asset}")")"
-        extend_contract_instance \
-            "${stamp}-asset-${asset}-instance" "${asset_id}" >/dev/null
-    done
+    asset_id="$(state_value "$(modeled_asset_state_key EURC)")"
+    extend_contract_instance \
+        "${stamp}-asset-EURC-instance" "${asset_id}" >/dev/null
+    asset_id="$(state_value "$(modeled_asset_state_key PYUSD)")"
+    extend_contract_instance \
+        "${stamp}-asset-PYUSD-instance" "${asset_id}" >/dev/null
     state_set "modeled_pools_keepalive_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 
@@ -1497,8 +1598,8 @@ command_plan() {
         asset_description="isolated BLND, USDC, and XLM assets"
     fi
     valuation_description="integrated Comet-derived backstop valuation and bounded test-only lending oracles"
-    pool_description="matched Fixed and YieldBlox v2/v3 pools from captured reserve configurations"
-    pool_funding_description="three candidate backstop tiers plus the configured Fixed and YieldBlox emission positions"
+    pool_description="matched Fixed and Custom v2/v3 pools from bounded reserve configurations"
+    pool_funding_description="Fixed's three candidate tiers, Custom's 2:1 XLM/USDC tiers, and their lending positions"
     incumbent_funding_description="Fund both modeled v2 pools with ${INCUMBENT_BALANCE} BLNDUSDC each while retaining the candidate's one-base-unit aggregate majority."
     cat <<EOF
 Blend v3 ${NETWORK_LABEL} migration plan
@@ -1521,7 +1622,7 @@ Deployment:
   3. Deploy the exact emitter WASM and a coherent SDK-22 incumbent stack.
   4. Predict the candidate address, bind its immutable factory, and deploy it.
   5. Deploy ${pool_description} with transferable v2-style admins.
-  6. Fund them with ${pool_funding_description}, activate them, add them to their reward zones, and configure their selected reserve-position emissions.
+  6. Fund them with ${pool_funding_description}, activate them, admit BLND-bearing pools to their reward zones, and configure selected reserve-position emissions.
   7. ${incumbent_funding_description}
   8. Assert strict candidate qualification, start backfill through distribute, queue the emitter swap, and observe it through distribute.
 
@@ -1564,6 +1665,25 @@ command_start() {
         --protocol-version 27 \
         --ports-mapping "${RPC_PORT}:8000"
     wait_for_network
+}
+
+command_begin() {
+    local phase
+
+    validate_tools
+    validate_source_provenance
+    require_network
+    load_state
+    phase="$(state_value phase)"
+    if [[ "${phase}" == "open" ]]; then
+        note "The migration queue is already open."
+        command_status
+        return
+    fi
+    assert_equal "deploying" "${phase}" "pre-migration deployment phase"
+    [[ -n "$(state_optional modeled_pools_verified_at)" ]] ||
+        die "modeled pools must pass verify-modeled-pools before beginning migration"
+    begin_deployed_migration
 }
 
 begin_deployed_migration() {
@@ -1832,10 +1952,11 @@ command_deploy() {
     assert_equal "${candidate_id}" "${deployed_candidate_id}" \
         "candidate deterministic address"
 
-    # Every lane uses the modeled Fixed pair as its incumbent/candidate lending
-    # topology. The candidate's integrated backstop valuation remains
-    # independent from the test-only lending oracles used by these pools.
+    # Every lane establishes Fixed first, then resumes the complete Fixed and
+    # Custom topology through command_deploy_modeled_pools. The candidate's
+    # backstop valuation remains independent from the test-only lending oracles.
     ensure_modeled_asset EURC
+    ensure_modeled_asset PYUSD
     state_set "modeled_pools_fixture_sha256" \
         "$(sha256_file "${MODELED_POOLS_FIXTURE}")"
     state_set "modeled_v3_lending_oracle_wasm_sha256" \
@@ -1847,22 +1968,23 @@ command_deploy() {
     state_set "v3_pool" "${pool_id}"
     state_set "primary_pool_supply_asset" "${usdc_token_id}"
     state_set "primary_pool_emission_reserve_token_id" "4"
-    state_set "modeled_v3_fixed_blnd_usdc_target" "${CANDIDATE_BALANCE}"
+    state_set "modeled_v3_fixed_blnd_usdc_target" \
+        "${AGGREGATE_CANDIDATE_BALANCE}"
 
     ensure_modeled_blnd_usdc_lp_capacity \
-        "$((INCUMBENT_BALANCE + CANDIDATE_BALANCE))"
+        "$((INCUMBENT_BALANCE + AGGREGATE_CANDIDATE_BALANCE))"
     invoke_transaction_as "deposit-candidate-blnd-usdc-lp" \
         "${DEPOSITOR_IDENTITY}" "${candidate_id}" deposit \
-        --tier BlndUsdc \
+        --tier SecondLoss \
         --from "${depositor}" \
         --pool-address "${pool_id}" \
-        --amount "${CANDIDATE_BALANCE}" >/dev/null
+        --amount "${AGGREGATE_CANDIDATE_BALANCE}" >/dev/null
     ensure_modeled_v2_backstop_deposit fixed "${fixed_v2_pool}"
     invoke_transaction "activate-fixed-v2-primary-pool" \
         "${fixed_v2_pool}" set_status --pool_status 0 >/dev/null
     invoke_transaction_as "deposit-candidate-usdc" \
         "${DEPOSITOR_IDENTITY}" "${candidate_id}" deposit \
-        --tier Usdc \
+        --tier ThirdLoss \
         --from "${depositor}" \
         --pool-address "${pool_id}" \
         --amount "${ACTIVATION_USDC_BALANCE}" >/dev/null
@@ -1888,19 +2010,19 @@ command_deploy() {
     ensure_fixed_v3_eurc_borrow "${pool_id}"
 
     # Complete both modeled v2/v3 pool pairs before starting the backfill
-    # clock, so both candidate BLND:USDC positions are prefunded before
-    # accrual begins. The setup command is idempotent and remains available
-    # to resume an interrupted deployment.
+    # clock. Fixed already holds the candidate's full migration-qualifying
+    # BLND:USDC balance; Custom uses XLM and USDC only. The setup command is
+    # idempotent and can resume an interrupted deployment.
     state_set "phase" "deploying"
     command_deploy_modeled_pools
 }
 
 command_deploy_modeled_pools() {
-    local phase fixed_v2_oracle yield_v2_oracle fixed_v3_oracle yield_v3_oracle
-    local fixed_v2_pool yield_v2_pool fixed_v3_pool yield_v3_pool
-    local usdc_required fixed_usdc_shares yield_usdc_shares
-    local fixed_v2_shares yield_v2_shares fixed_v3_shares yield_v3_shares
-    local fixed_supply yield_supply lp_required fixed_v3_target yield_v3_target
+    local phase fixed_v2_oracle custom_v2_oracle fixed_v3_oracle custom_v3_oracle
+    local fixed_v2_pool custom_v2_pool fixed_v3_pool custom_v3_pool
+    local usdc_required fixed_usdc_shares custom_usdc_shares
+    local fixed_v2_shares custom_v2_shares fixed_v3_shares
+    local fixed_supply custom_supply lp_required fixed_v3_target
     local incumbent_balance candidate_balance pool_status reward_zone stream
     local now refresh_streams=false
 
@@ -1919,86 +2041,77 @@ command_deploy_modeled_pools() {
     state_set "modeled_v3_lending_oracle_wasm_sha256" \
         "$(sha256_file "${V3_TEST_SEP40_ORACLE_WASM}")"
 
-    for asset in EURC AQUA USDGLO USTRY CETES PYUSD; do
-        ensure_modeled_asset "${asset}"
-    done
+    ensure_modeled_asset EURC
+    ensure_modeled_asset PYUSD
 
     fixed_v2_oracle="$(ensure_modeled_v2_oracle fixed)"
-    yield_v2_oracle="$(ensure_modeled_v2_oracle yieldblox)"
+    custom_v2_oracle="$(ensure_modeled_v2_oracle custom)"
     fixed_v3_oracle="$(ensure_modeled_v3_oracle fixed)"
-    yield_v3_oracle="$(ensure_modeled_v3_oracle yieldblox)"
+    custom_v3_oracle="$(ensure_modeled_v3_oracle custom)"
 
     fixed_v2_pool="$(ensure_modeled_v2_pool fixed "${fixed_v2_oracle}")"
-    yield_v2_pool="$(ensure_modeled_v2_pool yieldblox "${yield_v2_oracle}")"
+    custom_v2_pool="$(ensure_modeled_v2_pool custom "${custom_v2_oracle}")"
     fixed_v3_pool="$(ensure_modeled_v3_pool fixed "${fixed_v3_oracle}")"
-    yield_v3_pool="$(ensure_modeled_v3_pool yieldblox "${yield_v3_oracle}")"
+    custom_v3_pool="$(ensure_modeled_v3_pool custom "${custom_v3_oracle}")"
 
     fixed_v2_shares="$(modeled_v2_user_shares "${fixed_v2_pool}")"
-    yield_v2_shares="$(modeled_v2_user_shares "${yield_v2_pool}")"
-    fixed_v3_shares="$(modeled_v3_user_shares "${fixed_v3_pool}" BlndUsdc)"
-    yield_v3_shares="$(modeled_v3_user_shares "${yield_v3_pool}" BlndUsdc)"
+    custom_v2_shares="$(modeled_v2_user_shares "${custom_v2_pool}")"
+    fixed_v3_shares="$(modeled_v3_user_shares "${fixed_v3_pool}" SecondLoss)"
     fixed_v3_target="$(modeled_v3_blnd_usdc_target fixed)"
-    yield_v3_target="$(modeled_v3_blnd_usdc_target yieldblox)"
-    for value in "${fixed_v2_shares}" "${yield_v2_shares}"; do
+    for value in "${fixed_v2_shares}" "${custom_v2_shares}"; do
         [[ "${value}" =~ ^[0-9]+$ ]] ||
             die "invalid modeled BLND:USDC share state"
         (( value <= MODELED_BACKSTOP_LP_BALANCE )) ||
             die "modeled BLND:USDC shares exceed the active fixture target"
     done
-    [[ "${fixed_v3_shares}" =~ ^[0-9]+$ &&
-        "${yield_v3_shares}" =~ ^[0-9]+$ ]] ||
+    [[ "${fixed_v3_shares}" =~ ^[0-9]+$ ]] ||
         die "invalid modeled v3 BLND:USDC share state"
     (( fixed_v3_shares <= fixed_v3_target )) ||
         die "fixed v3 BLND:USDC shares exceed the active fixture target"
-    (( yield_v3_shares <= yield_v3_target )) ||
-        die "YieldBlox v3 BLND:USDC shares exceed the active fixture target"
     lp_required=$((
         (MODELED_BACKSTOP_LP_BALANCE - fixed_v2_shares) +
-        (MODELED_BACKSTOP_LP_BALANCE - yield_v2_shares) +
-        (fixed_v3_target - fixed_v3_shares) +
-        (yield_v3_target - yield_v3_shares)
+        (MODELED_BACKSTOP_LP_BALANCE - custom_v2_shares) +
+        (fixed_v3_target - fixed_v3_shares)
     ))
     ensure_modeled_blnd_usdc_lp_capacity "${lp_required}"
 
-    # Fund candidate BLND:USDC first for each matched pair, so the candidate
-    # never loses its strict BLND:USDC LP majority while the v2 side is funded.
+    # Fund Fixed v3 first so the candidate never loses its strict aggregate
+    # BLND:USDC LP majority while the two v2 pools are funded.
     ensure_modeled_v3_backstop_deposit \
-        fixed "${fixed_v3_pool}" BlndUsdc \
+        fixed "${fixed_v3_pool}" SecondLoss \
         "${fixed_v3_target}"
     ensure_modeled_v2_backstop_deposit fixed "${fixed_v2_pool}"
-    ensure_modeled_v3_backstop_deposit \
-        yieldblox "${yield_v3_pool}" BlndUsdc \
-        "${yield_v3_target}"
-    ensure_modeled_v2_backstop_deposit yieldblox "${yield_v2_pool}"
+    ensure_modeled_v2_backstop_deposit custom "${custom_v2_pool}"
 
     ensure_modeled_v3_backstop_deposit \
-        fixed "${fixed_v3_pool}" BlndXlm \
+        fixed "${fixed_v3_pool}" FirstLoss \
         "${MODELED_BLND_XLM_LP_BALANCE}"
+    ensure_modeled_xlm_balance "${MODELED_CUSTOM_V3_XLM_BALANCE}"
     ensure_modeled_v3_backstop_deposit \
-        yieldblox "${yield_v3_pool}" BlndXlm \
-        "${MODELED_BLND_XLM_LP_BALANCE}"
+        custom "${custom_v3_pool}" FirstLoss \
+        "${MODELED_CUSTOM_V3_XLM_BALANCE}"
 
-    fixed_usdc_shares="$(modeled_v3_user_shares "${fixed_v3_pool}" Usdc)"
-    yield_usdc_shares="$(modeled_v3_user_shares "${yield_v3_pool}" Usdc)"
+    fixed_usdc_shares="$(modeled_v3_user_shares "${fixed_v3_pool}" ThirdLoss)"
+    custom_usdc_shares="$(modeled_v3_user_shares "${custom_v3_pool}" SecondLoss)"
     [[ "${fixed_usdc_shares}" =~ ^[0-9]+$ &&
-        "${yield_usdc_shares}" =~ ^[0-9]+$ ]] ||
+        "${custom_usdc_shares}" =~ ^[0-9]+$ ]] ||
         die "invalid modeled v3 USDC share state"
     usdc_required=$((
         (MODELED_V3_USDC_BALANCE - fixed_usdc_shares) +
-        (MODELED_V3_USDC_BALANCE - yield_usdc_shares)
+        (MODELED_CUSTOM_V3_USDC_BALANCE - custom_usdc_shares)
     ))
     (( usdc_required >= 0 )) ||
         die "modeled v3 USDC shares exceed their fixture targets"
     ensure_token_balance "$(state_value usdc_token)" \
         "${usdc_required}" "modeled-usdc"
     ensure_modeled_v3_backstop_deposit \
-        fixed "${fixed_v3_pool}" Usdc \
+        fixed "${fixed_v3_pool}" ThirdLoss \
         "${MODELED_V3_USDC_BALANCE}"
     ensure_modeled_v3_backstop_deposit \
-        yieldblox "${yield_v3_pool}" Usdc \
-        "${MODELED_V3_USDC_BALANCE}"
+        custom "${custom_v3_pool}" SecondLoss \
+        "${MODELED_CUSTOM_V3_USDC_BALANCE}"
 
-    for pool in "${fixed_v3_pool}" "${yield_v3_pool}"; do
+    for pool in "${fixed_v3_pool}" "${custom_v3_pool}"; do
         pool_status="$(invoke_view \
             "query-modeled-v3-status" "${pool}" get_config |
             jq -er '.status | tostring')"
@@ -2014,7 +2127,17 @@ command_deploy_modeled_pools() {
             die "modeled v3 pool did not activate: ${pool} status ${pool_status}"
     done
 
-    for pool in "${fixed_v2_pool}" "${yield_v2_pool}"; do
+    reward_zone="$(invoke_view "query-modeled-v3-reward-zone" \
+        "$(state_value candidate_backstop)" reward_zone)"
+    if ! printf '%s' "${reward_zone}" | jq -e \
+        --arg pool "${custom_v3_pool}" 'index($pool) != null' >/dev/null
+    then
+        invoke_transaction "add-custom-v3-reward" \
+            "$(state_value candidate_backstop)" add_reward \
+            --to_add "${custom_v3_pool}" --to_remove null >/dev/null
+    fi
+
+    for pool in "${fixed_v2_pool}" "${custom_v2_pool}"; do
         pool_status="$(invoke_view "query-modeled-v2-active-status" \
             "${pool}" get_config | jq -er '.status | tostring')"
         if [[ "${pool_status}" == "2" ]]; then
@@ -2026,17 +2149,14 @@ command_deploy_modeled_pools() {
     done
 
     ensure_modeled_v3_emissions_config fixed "${fixed_v3_pool}"
-    ensure_modeled_v3_emissions_config yieldblox "${yield_v3_pool}"
     ensure_modeled_v3_supply fixed "${fixed_v3_pool}"
-    ensure_modeled_v3_supply yieldblox "${yield_v3_pool}"
+    ensure_modeled_v3_supply custom "${custom_v3_pool}"
     ensure_fixed_v3_eurc_borrow "${fixed_v3_pool}"
     state_set "primary_pool_emission_reserve_token_id" "4"
     state_set "modeled_v3_emissions_prepared_at" \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    admit_modeled_v3_yieldblox_reward "$(state_value candidate_backstop)"
-
     if [[ -z "$(state_optional modeled_v2_emissions_configured_at)" ]]; then
-        for pool in "${fixed_v2_pool}" "${yield_v2_pool}"; do
+        for pool in "${fixed_v2_pool}" "${custom_v2_pool}"; do
             invoke_transaction "configure-modeled-v2-emissions" \
                 "${pool}" set_emissions_config \
                 --res_emission_metadata \
@@ -2047,17 +2167,17 @@ command_deploy_modeled_pools() {
     fi
 
     fixed_supply="$(modeled_v2_user_supply "${fixed_v2_pool}")"
-    yield_supply="$(modeled_v2_user_supply "${yield_v2_pool}")"
+    custom_supply="$(modeled_v2_user_supply "${custom_v2_pool}")"
     usdc_required=$((
         (MODELED_V2_USDC_SUPPLY_BALANCE - fixed_supply) +
-        (MODELED_V2_USDC_SUPPLY_BALANCE - yield_supply)
+        (MODELED_V2_USDC_SUPPLY_BALANCE - custom_supply)
     ))
     (( usdc_required >= 0 )) ||
         die "modeled v2 USDC supply exceeds its fixture target"
     ensure_token_balance "$(state_value usdc_token)" \
         "${usdc_required}" "modeled-v2-usdc-supply"
     ensure_modeled_v2_supply fixed "${fixed_v2_pool}"
-    ensure_modeled_v2_supply yieldblox "${yield_v2_pool}"
+    ensure_modeled_v2_supply custom "${custom_v2_pool}"
 
     reward_zone="$(invoke_view "query-modeled-v2-reward-zone" \
         "$(state_value incumbent_backstop)" reward_zone)"
@@ -2080,16 +2200,16 @@ command_deploy_modeled_pools() {
             "$(state_value incumbent_backstop)" reward_zone)"
     fi
     if ! printf '%s' "${reward_zone}" | jq -e \
-        --arg pool "${yield_v2_pool}" 'index($pool) != null' >/dev/null
+        --arg pool "${custom_v2_pool}" 'index($pool) != null' >/dev/null
     then
         advance_modeled_v2_emissions "prime-modeled-v2-reward-zone"
-        invoke_transaction "add-yieldblox-v2-reward" \
+        invoke_transaction "add-custom-v2-reward" \
             "$(state_value incumbent_backstop)" add_reward \
-            --to_add "${yield_v2_pool}" --to_remove null >/dev/null
+            --to_add "${custom_v2_pool}" --to_remove null >/dev/null
     fi
 
     now="$(date +%s)"
-    for pool in "${fixed_v2_pool}" "${yield_v2_pool}"; do
+    for pool in "${fixed_v2_pool}" "${custom_v2_pool}"; do
         stream="$(invoke_view "query-modeled-v2-emission-stream" \
             "${pool}" get_reserve_emissions --reserve_token_index 3)"
         if ! modeled_v2_emission_stream_is_active "${stream}" "${now}"; then
@@ -2101,7 +2221,7 @@ command_deploy_modeled_pools() {
         advance_modeled_v2_emissions "start-or-renew-modeled-v2-stream"
     fi
     now="$(date +%s)"
-    for pool in "${fixed_v2_pool}" "${yield_v2_pool}"; do
+    for pool in "${fixed_v2_pool}" "${custom_v2_pool}"; do
         stream="$(invoke_view "query-modeled-v2-emission-stream-ready" \
             "${pool}" get_reserve_emissions --reserve_token_index 3)"
         if ! modeled_v2_emission_stream_is_active "${stream}" "${now}"; then
@@ -2178,9 +2298,12 @@ verify_modeled_pool_reserves() {
 
 command_verify_modeled_pools() {
     local version model pool oracle factory registered config expected_config
+    local backstop_config expected_backstop_config
     local status v2_shares blnd_usdc_shares blnd_xlm_shares usdc_shares
+    local custom_xlm_shares custom_usdc_shares
     local incumbent_balance candidate_balance reward_zone stream supply
-    local fixed_v3_target yield_v3_target now
+    local pool_data_value
+    local fixed_v3_target now
     local oracle_admin
     local positions usdc_collateral eurc_supply eurc_borrow
 
@@ -2192,7 +2315,7 @@ command_verify_modeled_pools() {
     record_modeled_pools_provenance verification
 
     for version in v2 v3; do
-        for model in fixed yieldblox; do
+        for model in fixed custom; do
             pool="$(state_value "$(modeled_pool_state_key "${version}" "${model}")")"
             oracle="$(state_value "$(modeled_oracle_state_key "${version}" "${model}")")"
             if [[ "${version}" == "v2" ]]; then
@@ -2217,6 +2340,12 @@ command_verify_modeled_pools() {
                 registered="$(normalize_scalar "$(invoke_view \
                     "verify-${model}-v3-registration" "${factory}" is_pool \
                     --pool_address "${pool}")")"
+                backstop_config="$(invoke_view \
+                    "verify-${model}-v3-backstop-config" \
+                    "${factory}" backstop_config --pool_address "${pool}")"
+                expected_backstop_config="$(modeled_v3_backstop_config "${model}")"
+                assert_json_equal "${expected_backstop_config}" \
+                    "${backstop_config}" "${version} ${model} backstop config"
                 oracle_admin="$(normalize_scalar "$(invoke_view \
                     "verify-${model}-v3-oracle-admin" \
                     "${oracle}" admin)")"
@@ -2244,9 +2373,8 @@ command_verify_modeled_pools() {
     done
 
     fixed_v3_target="$(modeled_v3_blnd_usdc_target fixed)"
-    yield_v3_target="$(modeled_v3_blnd_usdc_target yieldblox)"
     now="$(date +%s)"
-    for model in fixed yieldblox; do
+    for model in fixed custom; do
         pool="$(state_value "$(modeled_pool_state_key v2 "${model}")")"
         v2_shares="$(modeled_v2_user_shares "${pool}")"
         assert_equal "${MODELED_BACKSTOP_LP_BALANCE}" "${v2_shares}" \
@@ -2265,20 +2393,32 @@ command_verify_modeled_pools() {
             jq -er '.status | tostring')"
         [[ "${status}" == "0" || "${status}" == "1" ]] ||
             die "${model} v3 pool is not active: status ${status}"
-        blnd_usdc_shares="$(modeled_v3_user_shares "${pool}" BlndUsdc)"
-        blnd_xlm_shares="$(modeled_v3_user_shares "${pool}" BlndXlm)"
-        usdc_shares="$(modeled_v3_user_shares "${pool}" Usdc)"
+        pool_data_value="$(invoke_view \
+            "verify-${model}-v3-backstop-value" \
+            "$(state_value candidate_backstop)" pool_data --pool "${pool}" |
+            jq -er '([.tiers[].value | tonumber] | add) | tostring')"
+        [[ "${pool_data_value}" =~ ^[0-9]+$ ]] ||
+            die "${model} v3 backstop value is invalid: ${pool_data_value}"
+        (( pool_data_value >= ACTIVATION_USDC_BALANCE )) ||
+            die "${model} v3 backstop is below the activation threshold: ${pool_data_value}"
         if [[ "${model}" == "fixed" ]]; then
+            blnd_usdc_shares="$(modeled_v3_user_shares "${pool}" SecondLoss)"
+            blnd_xlm_shares="$(modeled_v3_user_shares "${pool}" FirstLoss)"
+            usdc_shares="$(modeled_v3_user_shares "${pool}" ThirdLoss)"
             assert_equal "${fixed_v3_target}" \
                 "${blnd_usdc_shares}" "${model} v3 BLND:USDC shares"
+            assert_equal "${MODELED_BLND_XLM_LP_BALANCE}" \
+                "${blnd_xlm_shares}" "${model} v3 BLND:XLM shares"
+            assert_equal "${MODELED_V3_USDC_BALANCE}" \
+                "${usdc_shares}" "${model} v3 USDC shares"
         else
-            assert_equal "${yield_v3_target}" \
-                "${blnd_usdc_shares}" "${model} v3 BLND:USDC shares"
+            custom_xlm_shares="$(modeled_v3_user_shares "${pool}" FirstLoss)"
+            custom_usdc_shares="$(modeled_v3_user_shares "${pool}" SecondLoss)"
+            assert_equal "${MODELED_CUSTOM_V3_XLM_BALANCE}" \
+                "${custom_xlm_shares}" "${model} v3 XLM shares"
+            assert_equal "${MODELED_CUSTOM_V3_USDC_BALANCE}" \
+                "${custom_usdc_shares}" "${model} v3 USDC shares"
         fi
-        assert_equal "${MODELED_BLND_XLM_LP_BALANCE}" \
-            "${blnd_xlm_shares}" "${model} v3 BLND:XLM shares"
-        assert_equal "${MODELED_V3_USDC_BALANCE}" \
-            "${usdc_shares}" "${model} v3 USDC shares"
         supply="$(modeled_v3_user_supply "${pool}" 1)"
         assert_equal "${POOL_SUPPLY_BALANCE}" "${supply}" \
             "${model} v3 USDC supply"
@@ -2304,14 +2444,14 @@ command_verify_modeled_pools() {
     reward_zone="$(invoke_view \
         "verify-modeled-v3-candidate-reward-zone" \
         "$(state_value candidate_backstop)" reward_zone)"
-    for pool in \
-        "$(state_value modeled_v3_fixed_pool)" \
-        "$(state_value modeled_v3_yieldblox_pool)"
-    do
-        printf '%s' "${reward_zone}" | jq -e \
-            --arg pool "${pool}" 'index($pool) != null' >/dev/null ||
-            die "modeled v3 pool is missing from the candidate reward zone: ${pool}"
-    done
+    pool="$(state_value modeled_v3_fixed_pool)"
+    printf '%s' "${reward_zone}" | jq -e \
+        --arg pool "${pool}" 'index($pool) != null' >/dev/null ||
+        die "Fixed v3 is missing from the candidate reward zone"
+    pool="$(state_value modeled_v3_custom_pool)"
+    printf '%s' "${reward_zone}" | jq -e \
+        --arg pool "${pool}" 'index($pool) != null' >/dev/null ||
+        die "Custom v3 is missing from the candidate reward zone"
     incumbent_balance="$(normalize_scalar "$(invoke_view \
         "verify-modeled-incumbent-balance" \
         "$(state_value blnd_usdc_token)" balance \
@@ -2327,7 +2467,7 @@ command_verify_modeled_pools() {
         "$(state_value incumbent_backstop)" reward_zone)"
     for pool in \
         "$(state_value modeled_v2_fixed_pool)" \
-        "$(state_value modeled_v2_yieldblox_pool)"
+        "$(state_value modeled_v2_custom_pool)"
     do
         printf '%s' "${reward_zone}" | jq -e \
             --arg pool "${pool}" 'index($pool) != null' >/dev/null ||
@@ -2337,10 +2477,10 @@ command_verify_modeled_pools() {
     state_set "modeled_pools_verified_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     cat <<EOF
 ${NETWORK_LABEL} modeled pools verified
-  v2 Fixed:     $(state_value modeled_v2_fixed_pool) (Admin Active, emitting)
-  v2 YieldBlox: $(state_value modeled_v2_yieldblox_pool) (Admin Active, emitting)
-  v3 Fixed:     $(state_value modeled_v3_fixed_pool) (active, EURC-borrow emissions prepared)
-  v3 YieldBlox: $(state_value modeled_v3_yieldblox_pool) (active, USDC-supply emissions prepared)
+  v2 Fixed:  $(state_value modeled_v2_fixed_pool) (Admin Active, emitting)
+  v2 Custom: $(state_value modeled_v2_custom_pool) (Admin Active, emitting)
+  v3 Fixed:  $(state_value modeled_v3_fixed_pool) (active, EURC-borrow emissions prepared)
+  v3 Custom: $(state_value modeled_v3_custom_pool) (active, reward-zone member with zero BLND weight)
   incumbent BLND:USDC balance: ${incumbent_balance}
   candidate BLND:USDC balance: ${candidate_balance}
 EOF
@@ -2526,12 +2666,12 @@ command_keepalive() {
         "${pool_id}" get_config >/dev/null
     invoke_forced_transaction "${prefix}-position" \
         "${candidate_id}" user_balance \
-        --tier BlndUsdc \
+        --tier SecondLoss \
         --pool "${pool_id}" \
         --user "${depositor}" >/dev/null
     invoke_forced_transaction "${prefix}-usdc-position" \
         "${candidate_id}" user_balance \
-        --tier Usdc \
+        --tier ThirdLoss \
         --pool "${pool_id}" \
         --user "${depositor}" >/dev/null
     invoke_forced_transaction "${prefix}-pool-data" \
@@ -2741,7 +2881,7 @@ command_verify() {
     local operator emitter_id incumbent_id candidate_id factory_id pool_id
     local blnd_usdc_token_id blnd_xlm_token_id emitter_backstop
     local candidate_blnd_usdc_token candidate_blnd_xlm_token
-    local factory_backstop pool_operator pool_registered pool_status
+    local pool_operator pool_registered pool_status
     local candidate_pool_data incumbent_balance candidate_balance queued_swap
     local migration_state migration_status activated_at saved_phase
     local scheduled_backfill funded_backfill
@@ -2763,12 +2903,10 @@ command_verify() {
         "verify-emitter-backstop" "${emitter_id}" get_backstop)")"
     candidate_blnd_usdc_token="$(normalize_scalar "$(invoke_view \
         "verify-candidate-blnd-usdc-lp" "${candidate_id}" backstop_token \
-        --tier BlndUsdc)")"
+        --tier SecondLoss --pool "${pool_id}")")"
     candidate_blnd_xlm_token="$(normalize_scalar "$(invoke_view \
         "verify-candidate-blnd-xlm-lp" "${candidate_id}" backstop_token \
-        --tier BlndXlm)")"
-    factory_backstop="$(normalize_scalar "$(invoke_view \
-        "verify-factory-backstop" "${factory_id}" backstop)")"
+        --tier FirstLoss --pool "${pool_id}")")"
     pool_operator="$(normalize_scalar "$(invoke_view \
         "verify-pool-admin" "${pool_id}" get_admin)")"
     pool_status="$(invoke_view \
@@ -2797,15 +2935,13 @@ command_verify() {
     assert_equal "${blnd_usdc_token_id}" "${candidate_blnd_usdc_token}" "candidate BLND:USDC LP token"
     assert_equal "${blnd_xlm_token_id}" "${candidate_blnd_xlm_token}" \
         "candidate BLND:XLM LP token"
-    assert_equal "${candidate_id}" "${factory_backstop}" "v3 factory binding"
     assert_equal "${operator}" "${pool_operator}" "v3 pool admin"
     assert_equal "0" "${pool_status}" "active v3 pool status"
     assert_equal "true" "${pool_registered}" "v3 pool registration"
     printf '%s' "${candidate_pool_data}" | jq -e '
         (.active_value | tonumber) > 0 and
-        (.blnd_usdc.value | tonumber) > 0 and
-        (.blnd_xlm.value | tonumber) > 0 and
-        (.usdc.value | tonumber) > 0
+        (.tiers | length) == 3 and
+        ([.tiers[].value | tonumber] | all(. > 0))
     ' >/dev/null ||
         die "integrated candidate pool valuation is not positive for every tier: ${candidate_pool_data}"
     [[ "${incumbent_balance}" =~ ^[0-9]+$ ]] ||
@@ -2864,35 +3000,6 @@ ${NETWORK_LABEL} migration verified
 EOF
 }
 
-admit_modeled_v3_yieldblox_reward() {
-    local candidate_id="$1" yield_pool reward_zone
-
-    yield_pool="$(state_value modeled_v3_yieldblox_pool)"
-
-    reward_zone="$(invoke_view \
-        "query-v3-reward-zone-before-yieldblox" \
-        "${candidate_id}" reward_zone)"
-    if ! printf '%s' "${reward_zone}" | jq -e \
-        --arg pool "${yield_pool}" 'index($pool) != null' >/dev/null
-    then
-        # Once either backfill or ongoing distribution begins, the contract
-        # requires a recent successful checkpoint before this weight mutation.
-        invoke_transaction "add-yieldblox-v3-reward" \
-            "${candidate_id}" add_reward \
-            --to_add "${yield_pool}" \
-            --to_remove null >/dev/null
-    fi
-
-    reward_zone="$(invoke_view \
-        "verify-v3-reward-zone-with-yieldblox" \
-        "${candidate_id}" reward_zone)"
-    printf '%s' "${reward_zone}" | jq -e \
-        --arg pool "${yield_pool}" 'index($pool) != null' >/dev/null ||
-        die "YieldBlox v3 was not admitted to the candidate reward zone"
-    state_set "modeled_v3_yieldblox_reward_enabled_at" \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
-
 capture_ongoing_distribution() {
     local label="$1" candidate_id="$2"
     local distributed expected_backstop_tranche expected_pool_tranche
@@ -2934,15 +3041,16 @@ read_token_balance() {
 
 read_pool_tier_assets() {
     local label="$1" candidate_id="$2" pool="$3" tier="$4"
-    local selector assets
+    local index assets
 
     case "${tier}" in
-        BlndUsdc) selector='.blnd_usdc.tokens' ;;
-        BlndXlm) selector='.blnd_xlm.tokens' ;;
+        FirstLoss) index=0 ;;
+        SecondLoss) index=1 ;;
         *) die "${label} cannot read non-BLND emission tier ${tier}" ;;
     esac
     assets="$(invoke_view "${label}" "${candidate_id}" pool_data \
-        --pool "${pool}" | jq -er "${selector} | tostring")"
+        --pool "${pool}" | jq -er --argjson index "${index}" \
+        '.tiers[$index].tokens | tostring')"
     [[ "${assets}" =~ ^[0-9]+$ ]] ||
         die "${label} returned invalid tier assets: ${assets}"
     printf '%s' "${assets}"
@@ -2962,11 +3070,7 @@ read_user_tier_shares() {
 command_emissions() {
     local phase candidate_id pool_id distribution received
     local expected_backstop_tranche expected_pool_tranche pool_gulped stream expiration
-    local emission_reserve_token_id yieldblox_reward_status
-    local yield_pool yield_distribution yield_received yield_expected_backstop_tranche
-    local yield_expected_pool_tranche
-    local yield_pool_gulped yield_stream
-    local yield_expiration
+    local emission_reserve_token_id
 
     validate_tools
     require_network
@@ -2977,7 +3081,6 @@ command_emissions() {
         die "ongoing emissions require a verified migration; saved phase is ${phase}"
     candidate_id="$(state_value candidate_backstop)"
     pool_id="$(state_value v3_pool)"
-    yield_pool="$(state_value modeled_v3_yieldblox_pool)"
     emission_reserve_token_id="$(
         state_value primary_pool_emission_reserve_token_id
     )"
@@ -3009,38 +3112,6 @@ command_emissions() {
         die "expected pool tranche is below the one-BLND gulp minimum: ${distribution}"
     fi
 
-    admit_modeled_v3_yieldblox_reward "${candidate_id}"
-    yieldblox_reward_status="eligible and allocated after a shared distribution"
-    note "Waiting ${MULTI_POOL_EMISSION_DELAY_SECONDS} seconds for a shared two-pool interval..."
-    sleep "${MULTI_POOL_EMISSION_DELAY_SECONDS}"
-    yield_distribution="$(capture_ongoing_distribution \
-        "distribute-ongoing-blnd-to-modeled-pools" \
-        "${candidate_id}")"
-    yield_received="$(printf '%s' "${yield_distribution}" |
-        jq -er '.distributed | tostring')"
-    yield_expected_backstop_tranche="$(printf '%s' "${yield_distribution}" |
-        jq -er '.expected_backstop_tranche | tostring')"
-    yield_expected_pool_tranche="$(printf '%s' "${yield_distribution}" |
-        jq -er '.expected_pool_tranche | tostring')"
-    if [[ ! "${yield_received}" =~ ^[0-9]+$ ]] ||
-        (( yield_received <= 0 ))
-    then
-        die "shared distribution did not receive positive BLND: ${yield_distribution}"
-    fi
-    if [[ ! "${yield_expected_backstop_tranche}" =~ ^[0-9]+$ ]] ||
-        (( yield_expected_backstop_tranche <= 0 ))
-    then
-        die "shared distribution did not produce a positive expected backstop tranche: ${yield_distribution}"
-    fi
-    if [[ ! "${yield_expected_pool_tranche}" =~ ^[0-9]+$ ]] ||
-        (( yield_expected_pool_tranche < 2 * SCALAR_7 ))
-    then
-        die "shared expected pool tranche is too small for two one-BLND gulps: ${yield_distribution}"
-    fi
-    received=$((received + yield_received))
-    expected_backstop_tranche=$((expected_backstop_tranche + yield_expected_backstop_tranche))
-    expected_pool_tranche=$((expected_pool_tranche + yield_expected_pool_tranche))
-
     pool_gulped="$(normalize_scalar "$(invoke_transaction \
         "gulp-pool-ongoing-blnd" "${pool_id}" gulp_emissions)")"
     if [[ ! "${pool_gulped}" =~ ^[0-9]+$ ]] ||
@@ -3055,34 +3126,12 @@ command_emissions() {
     [[ "${expiration}" =~ ^[0-9]+$ ]] ||
         die "pool emission stream has no expiration: ${stream}"
 
-    yield_pool_gulped="$(normalize_scalar "$(invoke_transaction \
-        "gulp-yieldblox-pool-ongoing-blnd" \
-        "${yield_pool}" gulp_emissions)")"
-    if [[ ! "${yield_pool_gulped}" =~ ^[0-9]+$ ]] ||
-        (( yield_pool_gulped < SCALAR_7 ))
-    then
-        die "YieldBlox pool did not gulp at least one BLND: ${yield_pool_gulped}"
-    fi
-    yield_stream="$(invoke_view \
-        "query-yieldblox-pool-emission-stream" \
-        "${yield_pool}" get_reserve_emissions \
-        --reserve_token_index 3)"
-    yield_expiration="$(printf '%s' "${yield_stream}" |
-        jq -er '.expiration | tostring')"
-    [[ "${yield_expiration}" =~ ^[0-9]+$ ]] ||
-        die "YieldBlox pool emission stream has no expiration: ${yield_stream}"
-
     state_set "ongoing_received" "${received}"
     state_set "ongoing_expected_backstop_tranche" "${expected_backstop_tranche}"
     state_set "ongoing_expected_pool_tranche" "${expected_pool_tranche}"
     state_set "ongoing_fixed_pool_gulped" "${pool_gulped}"
-    state_set "ongoing_yieldblox_pool_gulped" "${yield_pool_gulped}"
-    state_set "ongoing_pool_gulped" "$((pool_gulped + yield_pool_gulped))"
+    state_set "ongoing_pool_gulped" "${pool_gulped}"
     state_set "fixed_pool_emission_expiration" "${expiration}"
-    state_set "yieldblox_pool_emission_expiration" "${yield_expiration}"
-    if (( yield_expiration > expiration )); then
-        expiration="${yield_expiration}"
-    fi
     state_set "pool_emission_expiration" "${expiration}"
     state_set "phase" "emissions_streaming"
     state_set "emissions_started_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -3093,9 +3142,8 @@ ${NETWORK_LABEL} post-migration emissions verified
   expected backstop 70% tranche: ${expected_backstop_tranche}
   expected pool 30% tranche: ${expected_pool_tranche}
   Fixed pool tranche streamed: ${pool_gulped}
-  YieldBlox pool tranche streamed: ${yield_pool_gulped}
   backstop and pool stream expiration: $(format_timestamp "${expiration}") (${expiration})
-  YieldBlox v3 reward status: ${yieldblox_reward_status}
+  Custom v3 reward status: member with zero BLND weight and no BLND allocation
   next action: claim backstop and pool emissions after the streams expire
 EOF
 }
@@ -3285,9 +3333,8 @@ claim_pool_emissions_resumable() {
 
 command_claim_emissions() {
     local phase candidate_id depositor pool_id expiration now claimed
-    local emission_reserve_token_id yield_pool yield_claimed
+    local emission_reserve_token_id
     local fixed_blnd_usdc_lp fixed_blnd_xlm_lp
-    local yield_blnd_usdc_lp yield_blnd_xlm_lp
 
     validate_tools
     require_network
@@ -3313,7 +3360,7 @@ command_claim_emissions() {
     capture_ongoing_distribution \
         "refresh-before-fixed-blnd-usdc-stream-claim" "${candidate_id}" >/dev/null
     fixed_blnd_usdc_lp="$(claim_backstop_tier_resumable \
-        fixed-blnd-usdc "${candidate_id}" "${depositor}" "${pool_id}" BlndUsdc \
+        fixed-blnd-usdc "${candidate_id}" "${depositor}" "${pool_id}" SecondLoss \
         ongoing_fixed_blnd_usdc_lp_compounded)"
 
     note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds before the next tier checkpoint..."
@@ -3321,39 +3368,18 @@ command_claim_emissions() {
     capture_ongoing_distribution \
         "refresh-before-fixed-blnd-xlm-stream-claim" "${candidate_id}" >/dev/null
     fixed_blnd_xlm_lp="$(claim_backstop_tier_resumable \
-        fixed-blnd-xlm "${candidate_id}" "${depositor}" "${pool_id}" BlndXlm \
+        fixed-blnd-xlm "${candidate_id}" "${depositor}" "${pool_id}" FirstLoss \
         ongoing_fixed_blnd_xlm_lp_compounded)"
-
-    yield_pool="$(state_value modeled_v3_yieldblox_pool)"
-    state_value modeled_v3_yieldblox_reward_enabled_at >/dev/null
-    note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds before the YieldBlox tier checkpoint..."
-    sleep "${EMISSION_START_DELAY_SECONDS}"
-    capture_ongoing_distribution \
-        "refresh-before-yieldblox-blnd-usdc-stream-claim" "${candidate_id}" >/dev/null
-    yield_blnd_usdc_lp="$(claim_backstop_tier_resumable \
-        yieldblox-blnd-usdc "${candidate_id}" "${depositor}" "${yield_pool}" BlndUsdc \
-        ongoing_yieldblox_blnd_usdc_lp_compounded)"
-
-    note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds before the final tier checkpoint..."
-    sleep "${EMISSION_START_DELAY_SECONDS}"
-    capture_ongoing_distribution \
-        "refresh-before-yieldblox-blnd-xlm-stream-claim" "${candidate_id}" >/dev/null
-    yield_blnd_xlm_lp="$(claim_backstop_tier_resumable \
-        yieldblox-blnd-xlm "${candidate_id}" "${depositor}" "${yield_pool}" BlndXlm \
-        ongoing_yieldblox_blnd_xlm_lp_compounded)"
 
     claimed="$(claim_pool_emissions_resumable \
         fixed "${pool_id}" "${emission_reserve_token_id}" \
         ongoing_fixed_pool_claimed)"
-    yield_claimed="$(claim_pool_emissions_resumable \
-        yieldblox "${yield_pool}" 3 ongoing_yieldblox_pool_claimed)"
     state_set "ongoing_fixed_pool_claimed" "${claimed}"
-    state_set "ongoing_yieldblox_pool_claimed" "${yield_claimed}"
-    state_set "ongoing_pool_claimed" "$((claimed + yield_claimed))"
+    state_set "ongoing_pool_claimed" "${claimed}"
     state_set "phase" "emissions_claimed"
     state_set "emissions_claimed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-    note "${NETWORK_LABEL} seven-day emissions claimed: Fixed tiers ${fixed_blnd_usdc_lp}/${fixed_blnd_xlm_lp} LP, YieldBlox tiers ${yield_blnd_usdc_lp}/${yield_blnd_xlm_lp} LP, pool tranches ${claimed}/${yield_claimed} BLND base units."
+    note "${NETWORK_LABEL} seven-day emissions claimed: Fixed tiers ${fixed_blnd_usdc_lp}/${fixed_blnd_xlm_lp} LP and pool tranche ${claimed} BLND base units; Custom remains at zero BLND weight."
 }
 
 command_stop() {
@@ -3385,6 +3411,7 @@ main() {
         refresh-oracle) command_refresh_oracle ;;
         deploy-modeled-pools) command_deploy_modeled_pools ;;
         verify-modeled-pools) command_verify_modeled_pools ;;
+        begin) command_begin ;;
         recover) command_recover ;;
         prepare) command_prepare ;;
         finalize) command_finalize ;;

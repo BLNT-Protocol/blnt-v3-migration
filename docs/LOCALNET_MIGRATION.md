@@ -18,7 +18,8 @@ The runner uses independently issued local assets and real Comet contracts:
 - A BLND:XLM Comet LP, representing the candidate's next designated token and
   first-loss backstop tier
 - `USDC`, representing the plain-USDC third backstop tier
-- `XLM`, representing the isolated pair asset for the next Comet LP
+- `XLM`, representing the isolated pair asset for the next Comet LP and the
+  fourth canonical asset available to an operator-defined tier
 
 The two LPs execute the checked-in Comet WASM and expose current reserve
 composition to the candidate's integrated valuation and emission calculations.
@@ -27,13 +28,15 @@ represent production market pricing or liquidity. Separate authenticated
 SEP-40 fixtures provide the modeled pools' deterministic reserve prices and
 are not used for backstop valuation.
 
-The migration runner deploys matched Fixed and YieldBlox models against the
-incumbent and candidate before opening the emitter queue. Both v3 pools receive
-all three backstop tiers, cross the activation threshold, enter the reward
-zone, and retain positive BLND:USDC and BLND:XLM emission weight. Fixed v3
-routes its pool tranche to EURC borrowing, while YieldBlox v3 routes it to USDC
-supply. Both incumbent pools receive BLND:USDC backstop capital and enter the
-v2 reward zone.
+The migration runner deploys matched Fixed and Custom models against the
+incumbent and candidate before opening the emitter queue. Fixed v3 uses
+BLND:XLM, BLND:USDC, and USDC with 4:3:2 weights, holds the candidate's full
+migration-qualifying BLND:USDC balance, enters the reward zone, and routes its
+pool tranche to EURC borrowing. Custom v3 has XLM first loss at weight 2 and
+USDC second loss at weight 1. It crosses the activation threshold, enters an
+open reward-zone slot, and supports XLM, USDC, and PYUSD lending. Because it has
+no BLND-bearing tier, it receives zero BLND allocation. Both incumbent pools
+receive BLND:USDC capital and enter the v2 reward zone.
 
 The classic-asset issuer/operator and candidate depositor use separate local
 identities. The runner creates the required modeled-asset trustlines,
@@ -175,10 +178,11 @@ make localnet-emissions
 
 That command waits for positive emitter intervals, invokes the candidate's
 permissionless distribution, derives its immutable 70/30 tranches from the
-public total, and gulps both pools. Each gulp starts the BLND:USDC and BLND:XLM
-backstop streams and the pool's reserve-token streams. After the reported
-seven-day expiration, the next command compounds both backstop-tier accruals
-and claims both pool streams:
+public total, and gulps Fixed v3. That gulp starts the BLND:USDC and BLND:XLM
+backstop streams and the pool's reserve-token stream. Custom v3 remains a
+zero-weight reward-zone member. After the reported seven-day expiration, the
+next command compounds both Fixed backstop-tier accruals and claims its pool
+stream:
 
 ```bash
 make localnet-claim-emissions

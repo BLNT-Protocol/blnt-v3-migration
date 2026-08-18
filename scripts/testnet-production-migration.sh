@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 export BLEND_MIGRATION_NETWORK=testnet
 export BLEND_MIGRATION_XLM_ASSET_MODE=native
-export BLEND_MIGRATION_RPC_URL="${BLEND_PRODUCTION_TESTNET_RPC_URL:-https://rpc.ankr.com/stellar_testnet_soroban}"
+export BLEND_MIGRATION_RPC_URL="${BLEND_PRODUCTION_TESTNET_RPC_URL:-https://soroban-testnet.stellar.org}"
 export BLEND_TESTNET_WORK_DIR="${BLEND_PRODUCTION_TESTNET_WORK_DIR:-${ROOT_DIR}/.testnet-production}"
 export BLEND_MIGRATION_OPERATOR_IDENTITY="${BLEND_PRODUCTION_TESTNET_OPERATOR_IDENTITY:-blend-v3-production-testnet-operator}"
 export BLEND_MIGRATION_DEPOSITOR_IDENTITY="${BLEND_PRODUCTION_TESTNET_DEPOSITOR_IDENTITY:-blend-v3-production-testnet-depositor}"

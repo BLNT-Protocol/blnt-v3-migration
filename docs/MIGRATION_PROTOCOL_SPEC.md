@@ -75,7 +75,7 @@ through their ordinary v2 entry points after replacement.
 
 The candidate uses the incumbent BLND:USDC Comet LP as both:
 
-- its second-loss BLND:USDC backstop tier; and
+- an ordinary configured backstop tier in candidate pools; and
 - the direct-balance capital used to qualify for emitter replacement.
 
 These are one continuous accounted position, not separate temporary and
@@ -162,13 +162,13 @@ because the deployed emitter deletes its queue and exposes no designated-token
 getter after replacement.
 
 While the emitter points to a candidate that has not completed this
-transition, every BLND:USDC or BLND:XLM weight mutation and reward-zone edit
-MUST fail. Plain USDC operations remain available because they affect neither
-migration backfill nor ongoing BLND weight.
+transition, every canonical BLND:USDC or BLND:XLM weight mutation and
+reward-zone edit MUST fail. Other tier operations remain available because
+they affect neither migration backfill nor ongoing BLND weight.
 
 ## 6. Continuous BLND:USDC migration accounting
 
-An accounted BLND:USDC deposit is ordinary second-loss tier capital from the
+An accounted BLND:USDC deposit is ordinary configured tier capital from the
 moment it is accepted, before or after migration. Before migration succeeds,
 the same custody also contributes to the candidate's direct emitter-qualifying
 balance and its active, nonqueued shares participate in backfill emissions.
@@ -176,7 +176,7 @@ balance and its active, nonqueued shares participate in backfill emissions.
 The first pre-replacement `distribute()` opens the ordinary allocation epoch at
 its invocation timestamp, independently of any queue. Reward-zone pools are
 weighted by their active, nonqueued BLND:USDC LP-token amounts directly,
-matching v2; BLND:XLM and plain USDC have zero backfill weight. A checkpoint
+matching v2; every other tier has zero backfill weight. A checkpoint
 assigns the 70% tranche to pending BLND:USDC, and a later pool gulp starts or
 refreshes its seven-day depositor stream.
 
@@ -187,18 +187,20 @@ already streamed to the owner. Pending or unstreamed BLND remains governed by
 the ordinary v2-style stream rather than a principal-time entitlement.
 
 Migration MUST NOT redeem, convert, reissue, or change ownership of BLND:USDC
-tier shares. Activation value, second-loss capacity, take-rate eligibility,
-withdrawal restrictions, and post-migration emission weight continue to use the
-ordinary tier position.
+tier shares. Activation value, configured waterfall capacity, take-rate
+eligibility, withdrawal restrictions, and post-migration emission weight
+continue to use the ordinary tier position.
 
 The pre-migration loss waterfall applies only to liabilities of candidate v3
 pools connected to this backstop. Candidate capital does not absorb incumbent
 v2 pool losses merely because it also qualifies the emitter replacement.
-The immutable BLND:XLM, BLND:USDC, then plain-USDC waterfall applies before
-and after migration; replacement does not reorder tiers or swap their assets.
+Each pool's immutable configured waterfall applies before and after migration;
+replacement does not reorder tiers or swap their assets. The modeled migration
+deployment uses BLND:XLM, BLND:USDC, then canonical USDC.
 
-BLND:XLM and plain USDC MAY be deposited before migration but receive no
-migration backfill and do not enter the incumbent balance comparison.
+BLND:XLM and every other configured asset MAY be deposited before migration
+but receive no migration backfill and do not enter the incumbent balance
+comparison.
 
 ## 7. Backfill
 
@@ -220,7 +222,7 @@ accounting as ongoing emissions:
   tokens and becomes pending only for each pool's BLND:USDC tier;
 - 30% is allocated to the same pools for their configured supply/borrow
   emission positions; and
-- BLND:XLM and plain USDC receive no migration backfill.
+- BLND:XLM and every non-BLND:USDC tier receive no migration backfill.
 
 At most once per 24 hours, a permissionless pool gulp starts or refreshes the
 BLND:USDC depositor stream and the pool's configured reserve streams. Pending
@@ -285,8 +287,9 @@ The emitter checkpoint MUST advance without exceeding ledger time. Standalone
 distribution calls require at least five seconds since the preceding candidate
 checkpoint. Unrelated BLND transfers create no emission entitlement. After
 migration, reward-zone pool weight includes active, nonqueued underlying BLND
-in both BLND:USDC and BLND:XLM; the 70% pool tranche is divided between those
-two tiers by the same underlying-BLND measure. Plain USDC remains ineligible.
+in exact canonical BLND:USDC and BLND:XLM tiers, wherever configured; the 70%
+pool tranche is divided between those two assets by the same underlying-BLND
+measure. Every other tier remains ineligible.
 
 ## 9. Next designated token
 

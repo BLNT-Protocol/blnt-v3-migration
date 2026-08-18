@@ -128,7 +128,7 @@ npm run dev:testnet
 
 Open <http://localhost:3000>. The testnet UI separates Blend's team deployment,
 this repository's v2 deployment, and the v3 candidate into V1, V2, and V3
-market lanes. The configured Fixed and YieldBlox v2/v3 pools are also seeded in
+market lanes. The configured Fixed and Custom v2/v3 pools are also seeded in
 the dashboard and backstop pool menus. Blend's current team testnet pools use
 v2 pool bytecode; the V1 lane name identifies the requested team-deployment
 lane rather than claiming those contracts are historical v1 bytecode.

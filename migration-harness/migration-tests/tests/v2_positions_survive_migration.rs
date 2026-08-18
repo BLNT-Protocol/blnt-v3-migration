@@ -40,6 +40,22 @@ const SCALAR_7: i128 = 10_000_000;
 
 #[derive(Clone)]
 #[contracttype]
+struct BackstopTierConfig {
+    asset: BackstopAsset,
+    take_rate_weight: u32,
+}
+
+#[derive(Clone)]
+#[contracttype]
+enum BackstopAsset {
+    BlndXlm,
+    BlndUsdc,
+    Usdc,
+    Xlm,
+}
+
+#[derive(Clone)]
+#[contracttype]
 struct QueuedSwap {
     new_backstop: Address,
     new_backstop_token: Address,
@@ -336,6 +352,24 @@ impl MockV3PoolFactory {
         env.storage()
             .instance()
             .set(&MockV3PoolFactoryKey::Pool(pool), &true);
+    }
+
+    pub fn backstop_config(env: Env, _pool: Address) -> Vec<BackstopTierConfig> {
+        vec![
+            &env,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndXlm,
+                take_rate_weight: 4,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndUsdc,
+                take_rate_weight: 3,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 2,
+            },
+        ]
     }
 }
 
@@ -645,7 +679,7 @@ fn run_v3_backfill_timeline() -> BackfillOutcome {
     let emitter = DeployedEmitterClient::new(env, &fixture.emitter);
     assert_eq!(
         backstop.deposit(
-            &v3_backstop::BackstopTier::BlndUsdc,
+            &v3_backstop::BackstopTier::SecondLoss,
             &fixture.user_a,
             &fixture.pool,
             &USER_A_LP,
@@ -654,7 +688,7 @@ fn run_v3_backfill_timeline() -> BackfillOutcome {
     );
     assert_eq!(
         backstop.deposit(
-            &v3_backstop::BackstopTier::BlndUsdc,
+            &v3_backstop::BackstopTier::SecondLoss,
             &fixture.user_b,
             &fixture.pool,
             &USER_B_LP,
@@ -679,7 +713,7 @@ fn run_v3_backfill_timeline() -> BackfillOutcome {
     env.ledger().set_timestamp(start + 4 * DAY);
     scheduled += backstop.distribute();
     backstop.queue_withdrawal(
-        &v3_backstop::BackstopTier::BlndUsdc,
+        &v3_backstop::BackstopTier::SecondLoss,
         &fixture.user_b,
         &fixture.pool,
         &QUEUED_LP,
@@ -689,20 +723,20 @@ fn run_v3_backfill_timeline() -> BackfillOutcome {
     env.ledger().set_timestamp(start + 5 * DAY);
     scheduled += backstop.distribute();
     backstop.dequeue_withdrawal(
-        &v3_backstop::BackstopTier::BlndUsdc,
+        &v3_backstop::BackstopTier::SecondLoss,
         &fixture.user_b,
         &fixture.pool,
         &DEQUEUED_LP,
     );
     pool_tranche += backstop.gulp_emissions(&fixture.pool);
     backstop.queue_withdrawal(
-        &v3_backstop::BackstopTier::BlndUsdc,
+        &v3_backstop::BackstopTier::SecondLoss,
         &fixture.user_a,
         &fixture.pool,
         &USER_A_LP,
     );
     backstop.queue_withdrawal(
-        &v3_backstop::BackstopTier::BlndUsdc,
+        &v3_backstop::BackstopTier::SecondLoss,
         &fixture.user_b,
         &fixture.pool,
         &REMOVAL_QUEUE_B_LP,
@@ -711,7 +745,7 @@ fn run_v3_backfill_timeline() -> BackfillOutcome {
     env.ledger().set_timestamp(start + 25 * DAY);
     scheduled += backstop.distribute();
     let mut withdrawn_lp = backstop.withdraw(
-        &v3_backstop::BackstopTier::BlndUsdc,
+        &v3_backstop::BackstopTier::SecondLoss,
         &fixture.user_b,
         &fixture.pool,
         &DEQUEUED_LP,
@@ -723,14 +757,14 @@ fn run_v3_backfill_timeline() -> BackfillOutcome {
     scheduled += backstop.distribute();
     pool_tranche += backstop.gulp_emissions(&fixture.pool);
     withdrawn_lp += backstop.withdraw(
-        &v3_backstop::BackstopTier::BlndUsdc,
+        &v3_backstop::BackstopTier::SecondLoss,
         &fixture.user_a,
         &fixture.pool,
         &USER_A_LP,
         &fixture.user_a,
     );
     withdrawn_lp += backstop.withdraw(
-        &v3_backstop::BackstopTier::BlndUsdc,
+        &v3_backstop::BackstopTier::SecondLoss,
         &fixture.user_b,
         &fixture.pool,
         &REMOVAL_QUEUE_B_LP,
@@ -752,13 +786,13 @@ fn run_v3_backfill_timeline() -> BackfillOutcome {
 
     env.ledger().set_timestamp(unlock + 7 * DAY);
     let user_a_lp = backstop.claim(
-        &v3_backstop::BackstopTier::BlndUsdc,
+        &v3_backstop::BackstopTier::SecondLoss,
         &fixture.user_a,
         &vec![env, fixture.pool.clone()],
         &0,
     );
     let user_b_lp = backstop.claim(
-        &v3_backstop::BackstopTier::BlndUsdc,
+        &v3_backstop::BackstopTier::SecondLoss,
         &fixture.user_b,
         &vec![env, fixture.pool.clone()],
         &0,
@@ -995,7 +1029,7 @@ fn sdk_22_v2_positions_survive_accelerated_sdk_27_migration() {
     let candidate_lp_amount = incumbent_lp_amount + 1;
     blnd_usdc_lp_client.mint(&candidate_depositor, &candidate_lp_amount);
     candidate.deposit(
-        &v3_backstop::BackstopTier::BlndUsdc,
+        &v3_backstop::BackstopTier::SecondLoss,
         &candidate_depositor,
         &v3_pool_id,
         &candidate_lp_amount,

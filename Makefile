@@ -43,6 +43,9 @@ localnet-run:
 localnet-status:
 	bash scripts/localnet-migration.sh status
 
+localnet-begin:
+	bash scripts/localnet-migration.sh begin
+
 localnet-keepalive:
 	bash scripts/localnet-migration.sh keepalive
 
@@ -90,6 +93,9 @@ testnet-production-deploy-modeled-pools:
 
 testnet-production-verify-modeled-pools:
 	bash scripts/testnet-production-migration.sh verify-modeled-pools
+
+testnet-production-begin:
+	bash scripts/testnet-production-migration.sh begin
 
 testnet-production-prepare:
 	bash scripts/testnet-production-migration.sh prepare

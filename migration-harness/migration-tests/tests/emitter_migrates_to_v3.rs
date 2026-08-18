@@ -27,6 +27,22 @@ struct QueuedSwap {
     unlock_time: u64,
 }
 
+#[derive(Clone)]
+#[contracttype]
+struct BackstopTierConfig {
+    asset: BackstopAsset,
+    take_rate_weight: u32,
+}
+
+#[derive(Clone)]
+#[contracttype]
+enum BackstopAsset {
+    BlndXlm,
+    BlndUsdc,
+    Usdc,
+    Xlm,
+}
+
 #[allow(dead_code)]
 #[contractclient(name = "DeployedEmitterClient")]
 trait DeployedEmitter {
@@ -41,6 +57,7 @@ trait DeployedEmitter {
 #[contracttype]
 enum FactoryKey {
     Backstop,
+    Pool,
 }
 
 #[contract]
@@ -48,18 +65,41 @@ struct MockPoolFactory;
 
 #[contractimpl]
 impl MockPoolFactory {
-    pub fn __constructor(env: Env, backstop: Address) {
+    pub fn __constructor(env: Env, backstop: Address, pool: Address) {
         env.storage()
             .instance()
             .set(&FactoryKey::Backstop, &backstop);
+        env.storage().instance().set(&FactoryKey::Pool, &pool);
     }
 
     pub fn backstop(env: Env) -> Address {
         env.storage().instance().get(&FactoryKey::Backstop).unwrap()
     }
 
-    pub fn is_pool(_env: Env, _pool: Address) -> bool {
-        false
+    pub fn is_pool(env: Env, pool: Address) -> bool {
+        env.storage()
+            .instance()
+            .get::<_, Address>(&FactoryKey::Pool)
+            .unwrap()
+            == pool
+    }
+
+    pub fn backstop_config(env: Env, _pool: Address) -> Vec<BackstopTierConfig> {
+        soroban_sdk::vec![
+            &env,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndXlm,
+                take_rate_weight: 4,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndUsdc,
+                take_rate_weight: 3,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 2,
+            },
+        ]
     }
 }
 
@@ -144,7 +184,8 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
     emitter.initialize(&blnd, &incumbent, &blnd_usdc);
 
     let candidate_id = Address::generate(&env);
-    let factory = env.register(MockPoolFactory, (&candidate_id,));
+    let pool = Address::generate(&env);
+    let factory = env.register(MockPoolFactory, (&candidate_id, &pool));
     env.register_at(
         &candidate_id,
         v3_backstop::WASM,
@@ -202,11 +243,11 @@ fn optimized_candidate_migrates_through_the_deployed_emitter() {
         Some(queued.unlock_time)
     );
     assert_eq!(
-        candidate.backstop_token(&v3_backstop::BackstopTier::BlndUsdc),
+        candidate.backstop_token(&v3_backstop::BackstopTier::SecondLoss, &pool),
         blnd_usdc
     );
     assert_eq!(
-        candidate.backstop_token(&v3_backstop::BackstopTier::BlndXlm),
+        candidate.backstop_token(&v3_backstop::BackstopTier::FirstLoss, &pool),
         blnd_xlm
     );
 }

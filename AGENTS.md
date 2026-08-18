@@ -9,7 +9,7 @@ emitter to the experimental v3 candidate while preserving demonstrable
 cross-version compatibility.
 
 Treat deployed v2 behavior as the default specification. V3 behavioral changes
-require an explicit justification tied to the three-tier backstop, emitter
+require an explicit justification tied to the configurable backstop waterfall, emitter
 migration compatibility, Protocol 27 compatibility, a conservation/safety
 fix, or a separately approved exception recorded in the v3 specification.
 Carrying integer dust forward at the same accounting scope and the
@@ -95,15 +95,15 @@ a side effect of work in this repository.
   BLND-emission weight. Queueing does not shield their redemption value from
   losses absorbed by their tier.
 - Each user may have at most 20 queued-withdrawal entries in aggregate for one
-  pool across all three tiers. FIFO withdrawal and LIFO dequeue remain
+  pool across all configured tiers. FIFO withdrawal and LIFO dequeue remain
   tier-local.
 - Assets counted as backstop capital must be available to the specified loss
   waterfall.
-- Bad-debt auctions use at most one backstop tier at a time in strict
-  BLND:XLM, BLND:USDC, then plain-USDC order. Every tier with positive
+- Bad-debt auctions use at most one backstop tier at a time in the pool's
+  immutable configured order. Every tier with positive
   available capital and verified value is auction-eligible; zero-value tiers
   are skipped, while negative, inconsistent, failed, or unavailable valuation
-  is not exhaustion. Supplier loss begins only after all three tiers have no
+  is not exhaustion. Supplier loss begins only after all configured tiers have no
   usable value. Once a lot is committed, later price movement does not cancel
   it.
 - A bad-debt fill transfers only its time-scaled tier-token lot to the
@@ -117,7 +117,7 @@ a side effect of work in this repository.
   requires no active bad-debt auction. It restarts strict tier selection and
   must reuse an earlier tier while that tier remains eligible.
 - Supplier loss is permitted only after the configured backstop successfully
-  reports that all three tiers have no usable value. It must accrue each
+  reports that all configured tiers have no usable value. It must accrue each
   affected reserve and apply Blend v2's ceiling-rounded bToken exchange-rate
   loss with intentional saturation at zero; invalid or unavailable valuation
   fails closed.
@@ -142,14 +142,15 @@ a side effect of work in this repository.
 - Pool-status and reward-zone threshold decisions must use the same canonical
   activation valuation. Stored pool status is not an additional reward-zone
   eligibility gate.
-- Production LP value uses current reserves from the immutable BLND:USDC and
-  BLND:XLM 80:20 Comets. BLND:USDC is the USDC anchor and plain USDC is valued
-  one-for-one. Do not introduce a backstop price oracle or caller-supplied
+- Backstop value uses current reserves from the immutable BLND:USDC and
+  BLND:XLM 80:20 Comets. BLND:USDC is the USDC anchor, plain USDC is valued
+  one-for-one, and plain XLM is priced by the BLND reserve ratio between the
+  two Comets. Do not introduce a backstop price oracle or caller-supplied
   production values.
-- Plain-USDC interest-auction payments credit 99% to that tier and reserve an
-  exact cumulative 1% for bounded swaps through the canonical BLND:USDC Comet
-  followed by an exact BLND burn. Buyback failure must not unwind or block the
-  completed interest settlement.
+- Plain-USDC and plain-XLM interest-auction payments credit 99% to their tier
+  and reserve an exact cumulative 1% for bounded swaps through the matching
+  canonical BLND Comet followed by an exact BLND burn. Buyback failure must
+  not unwind or block the completed interest settlement.
 - Candidate construction must validate its immutable BLND, USDC, XLM,
   BLND:USDC, and BLND:XLM bindings exactly.
 - Pool status preserves v2 codes and hard Q4W thresholds: normal On-Ice at
@@ -161,10 +162,15 @@ a side effect of work in this repository.
 - Pool administration follows v2's two-step `propose_admin` / `accept_admin`
   lifecycle. The current admin may update the v2-compatible pool parameters,
   queue or cancel reserve configuration, and set relative supply/borrow
-  emission weights. The admin cannot change the three backstop tiers,
-  activation threshold, `4:3:2` take-rate weighting in loss order, loss
+  emission weights. The admin cannot change the pool's one-to-three backstop
+  tier configuration, activation threshold, configured take-rate weights, loss
   waterfall, migration
   policy, 70/30 emission split, contract WASM, or any protocol-wide rule.
+- Each pool factory deployment immutably selects one to three unique assets
+  from canonical BLND:XLM LP, BLND:USDC LP, USDC, and XLM and assigns integer
+  take-rate weights from 1 through 10 that strictly decrease by tier. Only the
+  two LP assets are BLND-emission eligible; plain USDC and XLM apply the
+  failure-isolated 1% buy-and-burn rule above.
 - Preserve the v2-compatible reward-zone shape: at most 30 pools,
   permissionless threshold-qualified entry/removal/replacement, and no
   additional stored pool-status gate. V3 replacement weight uses eligible

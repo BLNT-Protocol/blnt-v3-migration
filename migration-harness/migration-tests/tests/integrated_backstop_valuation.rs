@@ -10,6 +10,22 @@ mod backstop {
 }
 
 const SCALAR_7: i128 = 10_000_000;
+
+#[derive(Clone)]
+#[contracttype]
+struct BackstopTierConfig {
+    asset: BackstopAsset,
+    take_rate_weight: u32,
+}
+
+#[derive(Clone)]
+#[contracttype]
+enum BackstopAsset {
+    BlndXlm,
+    BlndUsdc,
+    Usdc,
+    Xlm,
+}
 const BLND_WEIGHT: i128 = 8_000_000;
 const PAIR_WEIGHT: i128 = 2_000_000;
 
@@ -150,6 +166,20 @@ impl MockPoolFactory {
     pub fn set_pool(env: Env, pool: Address) {
         env.storage().instance().set(&FactoryKey::Pool(pool), &true);
     }
+
+    pub fn backstop_config(env: Env, _pool: Address) -> Vec<BackstopTierConfig> {
+        vec![
+            &env,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndXlm,
+                take_rate_weight: 4,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndUsdc,
+                take_rate_weight: 3,
+            },
+        ]
+    }
 }
 
 #[contract]
@@ -267,25 +297,25 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
     blnd_xlm_client.mint(&provider, &(20 * SCALAR_7));
     let candidate = backstop::Client::new(&env, &candidate_id);
     candidate.deposit(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &provider,
         &pool,
         &(20 * SCALAR_7),
     );
     candidate.deposit(
-        &backstop::BackstopTier::BlndXlm,
+        &backstop::BackstopTier::FirstLoss,
         &provider,
         &pool,
         &(20 * SCALAR_7),
     );
     candidate.queue_withdrawal(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &provider,
         &pool,
         &(5 * SCALAR_7),
     );
     candidate.queue_withdrawal(
-        &backstop::BackstopTier::BlndXlm,
+        &backstop::BackstopTier::FirstLoss,
         &provider,
         &pool,
         &(5 * SCALAR_7),
@@ -296,22 +326,28 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
         candidate.pool_data(&pool),
         backstop::PoolBackstopData {
             active_value: 30 * SCALAR_7,
-            blnd_usdc: backstop::PoolTierData {
-                tokens: 20 * SCALAR_7,
-                shares: 20 * SCALAR_7,
-                value: 20 * SCALAR_7,
-            },
-            blnd_xlm: backstop::PoolTierData {
-                tokens: 20 * SCALAR_7,
-                shares: 20 * SCALAR_7,
-                value: 20 * SCALAR_7,
-            },
             q4w_pct: 2_500_000,
-            usdc: backstop::PoolTierData {
-                tokens: 0,
-                shares: 0,
-                value: 0,
-            },
+            tiers: vec![
+                &env,
+                backstop::PoolTierData {
+                    asset: backstop::BackstopAsset::BlndXlm,
+                    blnd_emission_eligible: true,
+                    take_rate_weight: 4,
+                    token: blnd_xlm,
+                    tokens: 20 * SCALAR_7,
+                    shares: 20 * SCALAR_7,
+                    value: 20 * SCALAR_7,
+                },
+                backstop::PoolTierData {
+                    asset: backstop::BackstopAsset::BlndUsdc,
+                    blnd_emission_eligible: true,
+                    take_rate_weight: 3,
+                    token: blnd_usdc,
+                    tokens: 20 * SCALAR_7,
+                    shares: 20 * SCALAR_7,
+                    value: 20 * SCALAR_7,
+                },
+            ],
         }
     );
     let resources = env.cost_estimate().resources();

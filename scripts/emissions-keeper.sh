@@ -22,9 +22,9 @@ Commands:
   help  Show this message.
 
 Each pass advances the incumbent emitter when it still targets v2, checkpoints
-the v2 and v3 backstops, then gulps every modeled pool for the corresponding
-protocol version. It also processes one bounded pending-USDC buy-and-burn batch
-when work is available. The default run interval is one hour. Configuration
+the v2 and v3 backstops, then gulps each reward-zone modeled pool for the
+corresponding protocol version. It also processes one bounded pending-USDC and pending-XLM
+buy-and-burn batch when work is available. The default run interval is one hour. Configuration
 may be overridden with BLEND_KEEPER_REGISTRY,
 BLEND_KEEPER_CONFIG_DIR, BLEND_KEEPER_SOURCE_ACCOUNT, BLEND_KEEPER_RPC_URL,
 BLEND_KEEPER_INCLUSION_FEE, and BLEND_KEEPER_INTERVAL_SECONDS.
@@ -60,6 +60,7 @@ stellar_cli() {
 
 invoke() {
     local send="$1" contract_id="$2" function_name="$3"
+    shift 3
 
     stellar_cli contract invoke \
         --id "${contract_id}" \
@@ -67,14 +68,15 @@ invoke() {
         --rpc-url "${RPC_URL}" \
         --network-passphrase "${NETWORK_PASSPHRASE}" \
         --send "${send}" \
-        -- "${function_name}"
+        -- "${function_name}" "$@"
 }
 
 capture_invoke() {
     local send="$1" contract_id="$2" function_name="$3" output status
+    shift 3
 
     set +e
-    output="$(invoke "${send}" "${contract_id}" "${function_name}" 2>&1)"
+    output="$(invoke "${send}" "${contract_id}" "${function_name}" "$@" 2>&1)"
     status=$?
     set -e
     printf '%s' "${output}"
@@ -197,40 +199,48 @@ is_positive_i128_result() {
 }
 
 plan_buy_and_burn() {
-    local output
+    local asset output
 
-    if ! output="$(capture_invoke no "${V3_BACKSTOP_ID}" buy_and_burn)"; then
-        die "v3 buy and burn simulation failed: ${output}"
-    fi
-    if is_zero_i128_result "${output}"; then
-        note "v3 buy and burn: no pending USDC"
-    elif is_positive_i128_result "${output}"; then
-        note "v3 buy and burn: ready (${output} BLND)"
-    else
-        die "v3 buy and burn returned an invalid amount: ${output}"
-    fi
+    for asset in Usdc Xlm; do
+        if ! output="$(capture_invoke no "${V3_BACKSTOP_ID}" buy_and_burn --asset "${asset}")"; then
+            die "v3 ${asset} buy and burn simulation failed: ${output}"
+        fi
+        if is_zero_i128_result "${output}"; then
+            note "v3 buy and burn: no pending ${asset}"
+        elif is_positive_i128_result "${output}"; then
+            note "v3 ${asset} buy and burn: ready (${output} BLND)"
+        else
+            die "v3 ${asset} buy and burn returned an invalid amount: ${output}"
+        fi
+    done
 }
 
 run_buy_and_burn() {
-    local output
+    local asset output failed=0
 
-    if ! output="$(capture_invoke no "${V3_BACKSTOP_ID}" buy_and_burn)"; then
-        note "v3 buy and burn simulation failed: ${output}"
-        return 1
-    fi
-    if is_zero_i128_result "${output}"; then
-        note "v3 buy and burn: no pending USDC"
-        return 0
-    fi
-    if ! is_positive_i128_result "${output}"; then
-        note "v3 buy and burn returned an invalid amount: ${output}"
-        return 1
-    fi
-    if ! output="$(capture_invoke yes "${V3_BACKSTOP_ID}" buy_and_burn)"; then
-        note "v3 buy and burn submission failed: ${output}"
-        return 1
-    fi
-    note "v3 buy and burn: submitted (${output} BLND)"
+    for asset in Usdc Xlm; do
+        if ! output="$(capture_invoke no "${V3_BACKSTOP_ID}" buy_and_burn --asset "${asset}")"; then
+            note "v3 ${asset} buy and burn simulation failed: ${output}"
+            failed=1
+            continue
+        fi
+        if is_zero_i128_result "${output}"; then
+            note "v3 buy and burn: no pending ${asset}"
+            continue
+        fi
+        if ! is_positive_i128_result "${output}"; then
+            note "v3 ${asset} buy and burn returned an invalid amount: ${output}"
+            failed=1
+            continue
+        fi
+        if ! output="$(capture_invoke yes "${V3_BACKSTOP_ID}" buy_and_burn --asset "${asset}")"; then
+            note "v3 ${asset} buy and burn submission failed: ${output}"
+            failed=1
+            continue
+        fi
+        note "v3 ${asset} buy and burn: submitted (${output} BLND)"
+    done
+    return "${failed}"
 }
 
 load_configuration() {
@@ -254,7 +264,11 @@ load_configuration() {
         require_contract_id "${pool_id}" "modeled v2 pool contract ID"
         V2_POOL_NAMES+=("${pool_name}")
         V2_POOLS+=("${pool_id}")
-    done < <(jq -er '.modeled_pools | to_entries[] | [.key, .value.v2.pool] | @tsv' "${REGISTRY}")
+    done < <(jq -er '
+        .modeled_pools | to_entries[] |
+        select(.value.v2.reward_zone_member == true) |
+        [.key, .value.v2.pool] | @tsv
+    ' "${REGISTRY}")
 
     V3_POOL_NAMES=()
     V3_POOLS=()
@@ -262,7 +276,11 @@ load_configuration() {
         require_contract_id "${pool_id}" "modeled v3 pool contract ID"
         V3_POOL_NAMES+=("${pool_name}")
         V3_POOLS+=("${pool_id}")
-    done < <(jq -er '.modeled_pools | to_entries[] | [.key, .value.v3.pool] | @tsv' "${REGISTRY}")
+    done < <(jq -er '
+        .modeled_pools | to_entries[] |
+        select(.value.v3.reward_zone_member == true) |
+        [.key, .value.v3.pool] | @tsv
+    ' "${REGISTRY}")
 
     (( ${#V2_POOLS[@]} > 0 )) || die "deployment registry contains no modeled v2 pools"
     (( ${#V3_POOLS[@]} > 0 )) || die "deployment registry contains no modeled v3 pools"

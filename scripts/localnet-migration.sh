@@ -51,7 +51,7 @@ case "${XLM_ASSET_MODE}" in
         exit 2
         ;;
 esac
-CONFIG_DIR="${WORK_DIR}/stellar-config"
+CONFIG_DIR="${BLEND_MIGRATION_CONFIG_DIR:-${WORK_DIR}/stellar-config}"
 STATE_FILE="${WORK_DIR}/state.json"
 CONTAINER_NAME="${BLEND_LOCALNET_CONTAINER:-blend-v3-local}"
 QUICKSTART_CONTAINER_NAME="stellar-${CONTAINER_NAME}"

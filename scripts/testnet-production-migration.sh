@@ -8,6 +8,7 @@ export BLEND_MIGRATION_NETWORK=testnet
 export BLEND_MIGRATION_XLM_ASSET_MODE=native
 export BLEND_MIGRATION_RPC_URL="${BLEND_PRODUCTION_TESTNET_RPC_URL:-https://soroban-testnet.stellar.org}"
 export BLEND_TESTNET_WORK_DIR="${BLEND_PRODUCTION_TESTNET_WORK_DIR:-${ROOT_DIR}/.testnet-production}"
+export BLEND_MIGRATION_CONFIG_DIR="${BLEND_PRODUCTION_TESTNET_CONFIG_DIR:-${BLEND_TESTNET_WORK_DIR}/stellar-config}"
 export BLEND_MIGRATION_OPERATOR_IDENTITY="${BLEND_PRODUCTION_TESTNET_OPERATOR_IDENTITY:-blend-v3-production-testnet-operator}"
 export BLEND_MIGRATION_DEPOSITOR_IDENTITY="${BLEND_PRODUCTION_TESTNET_DEPOSITOR_IDENTITY:-blend-v3-production-testnet-depositor}"
 # Bid above the minimum on public testnet; Stellar charges only the inclusion

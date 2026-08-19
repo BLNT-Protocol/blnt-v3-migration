@@ -4,10 +4,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REGISTRY="${BLEND_KEEPER_REGISTRY:-${ROOT_DIR}/deployments/testnet-production.json}"
-CONFIG_DIR="${BLEND_KEEPER_CONFIG_DIR:-${ROOT_DIR}/.testnet-production/stellar-config}"
+WORK_DIR="${BLEND_KEEPER_WORK_DIR:-${ROOT_DIR}/.testnet-production}"
+CONFIG_DIR="${BLEND_KEEPER_CONFIG_DIR:-${WORK_DIR}/stellar-config}"
+STATE_FILE="${WORK_DIR}/state.json"
 SOURCE_ACCOUNT="${BLEND_KEEPER_SOURCE_ACCOUNT:-blend-v3-production-testnet-operator}"
 INCLUSION_FEE="${BLEND_KEEPER_INCLUSION_FEE:-10000}"
 INTERVAL_SECONDS="${BLEND_KEEPER_INTERVAL_SECONDS:-3600}"
+ORACLE_REFRESH_INTERVAL_SECONDS="${BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS:-43200}"
+TESTNET_PASSPHRASE="Test SDF Network ; September 2015"
 STOP_REQUESTED=0
 SLEEP_PID=""
 
@@ -24,10 +28,12 @@ Commands:
 Each pass advances the incumbent emitter when it still targets v2, checkpoints
 the v2 and v3 backstops, then gulps each reward-zone modeled pool for the
 corresponding protocol version. It also processes one bounded pending-USDC and pending-XLM
-buy-and-burn batch when work is available. The default run interval is one hour. Configuration
-may be overridden with BLEND_KEEPER_REGISTRY,
-BLEND_KEEPER_CONFIG_DIR, BLEND_KEEPER_SOURCE_ACCOUNT, BLEND_KEEPER_RPC_URL,
-BLEND_KEEPER_INCLUSION_FEE, and BLEND_KEEPER_INTERVAL_SECONDS.
+buy-and-burn batch when work is available. On Stellar testnet, it refreshes the
+controlled fixture-oracle histories when they are at least 12 hours old. The
+default keeper interval is one hour. Configuration may be overridden with
+BLEND_KEEPER_REGISTRY, BLEND_KEEPER_WORK_DIR, BLEND_KEEPER_CONFIG_DIR,
+BLEND_KEEPER_SOURCE_ACCOUNT, BLEND_KEEPER_RPC_URL, BLEND_KEEPER_INCLUSION_FEE,
+BLEND_KEEPER_INTERVAL_SECONDS, and BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS.
 EOF
 }
 
@@ -52,6 +58,111 @@ require_contract_id() {
 require_positive_integer() {
     local value="$1" label="$2"
     [[ "${value}" =~ ^[1-9][0-9]*$ ]] || die "${label} must be a positive integer"
+}
+
+read_last_oracle_refresh_epoch() {
+    local refreshed_at
+
+    if [[ ! -f "${STATE_FILE}" ]]; then
+        printf '0'
+        return
+    fi
+    if refreshed_at="$(jq -er '
+        (.modeled_oracles_refreshed_at // empty) | fromdateiso8601
+    ' "${STATE_FILE}" 2>/dev/null)"; then
+        printf '%s' "${refreshed_at}"
+    else
+        printf '0'
+    fi
+}
+
+require_registry_state_match() {
+    local registry_filter="$1" state_key="$2" label="$3"
+    local registry_value state_value
+
+    registry_value="$(jq -er "${registry_filter}" "${REGISTRY}")" ||
+        die "deployment registry is missing ${label}"
+    state_value="$(jq -er --arg key "${state_key}" '.[$key]' "${STATE_FILE}")" ||
+        die "deployment state is missing ${label}"
+    [[ "${registry_value}" == "${state_value}" ]] ||
+        die "${label} differs between ${REGISTRY} and ${STATE_FILE}"
+}
+
+validate_oracle_refresh_configuration() {
+    [[ "${NETWORK_PASSPHRASE}" == "${TESTNET_PASSPHRASE}" ]] || return
+    [[ -f "${STATE_FILE}" ]] || die "deployment state not found: ${STATE_FILE}"
+
+    require_registry_state_match '.assets.XLM' xlm_token "XLM asset"
+    require_registry_state_match '.assets.USDC' usdc_token "USDC asset"
+    require_registry_state_match '.assets.EURC' modeled_asset_eurc "EURC asset"
+    require_registry_state_match '.assets.PYUSD' modeled_asset_pyusd "PYUSD asset"
+    require_registry_state_match \
+        '.modeled_pools.fixed.v2.oracle' modeled_v2_fixed_oracle "Fixed v2 oracle"
+    require_registry_state_match \
+        '.modeled_pools.custom.v2.oracle' modeled_v2_custom_oracle "Custom v2 oracle"
+    require_registry_state_match \
+        '.modeled_pools.fixed.v3.oracle' modeled_v3_fixed_oracle "Fixed v3 oracle"
+    require_registry_state_match \
+        '.modeled_pools.custom.v3.oracle' modeled_v3_custom_oracle "Custom v3 oracle"
+}
+
+oracle_refresh_remaining_seconds() {
+    local now last_refresh age
+
+    now="$(date +%s)"
+    last_refresh="$(read_last_oracle_refresh_epoch)"
+    if (( last_refresh <= 0 || now < last_refresh )); then
+        printf '0'
+        return
+    fi
+    age=$((now - last_refresh))
+    if (( age >= ORACLE_REFRESH_INTERVAL_SECONDS )); then
+        printf '0'
+    else
+        printf '%s' "$((ORACLE_REFRESH_INTERVAL_SECONDS - age))"
+    fi
+}
+
+plan_oracle_refresh() {
+    local remaining
+
+    if [[ "${NETWORK_PASSPHRASE}" != "${TESTNET_PASSPHRASE}" ]]; then
+        note "Fixture-oracle refresh is disabled outside Stellar testnet."
+        return
+    fi
+    remaining="$(oracle_refresh_remaining_seconds)"
+    if (( remaining == 0 )); then
+        note "Fixture-oracle refresh is due and would run before the emissions pass."
+    else
+        note "Fixture-oracle refresh is current; next refresh is due in ${remaining} seconds."
+    fi
+}
+
+refresh_oracles_if_due() {
+    local remaining
+
+    if [[ "${NETWORK_PASSPHRASE}" != "${TESTNET_PASSPHRASE}" ]]; then
+        note "Fixture-oracle refresh skipped outside Stellar testnet."
+        return 0
+    fi
+    remaining="$(oracle_refresh_remaining_seconds)"
+    if (( remaining > 0 )); then
+        note "Fixture-oracle refresh is current; next refresh is due in ${remaining} seconds."
+        return 0
+    fi
+
+    note "Refreshing all modeled v2 and v3 fixture oracles."
+    if BLEND_PRODUCTION_TESTNET_RPC_URL="${RPC_URL}" \
+        BLEND_PRODUCTION_TESTNET_WORK_DIR="${WORK_DIR}" \
+        BLEND_PRODUCTION_TESTNET_CONFIG_DIR="${CONFIG_DIR}" \
+        BLEND_PRODUCTION_TESTNET_OPERATOR_IDENTITY="${SOURCE_ACCOUNT}" \
+        BLEND_PRODUCTION_TESTNET_INCLUSION_FEE="${INCLUSION_FEE}" \
+        bash "${ROOT_DIR}/scripts/testnet-production-migration.sh" refresh-oracle; then
+        note "Fixture-oracle refresh completed successfully."
+        return 0
+    fi
+    note "Fixture-oracle refresh failed; it remains due for the next keeper pass."
+    return 1
 }
 
 stellar_cli() {
@@ -284,11 +395,13 @@ load_configuration() {
 
     (( ${#V2_POOLS[@]} > 0 )) || die "deployment registry contains no modeled v2 pools"
     (( ${#V3_POOLS[@]} > 0 )) || die "deployment registry contains no modeled v3 pools"
+    validate_oracle_refresh_configuration
 }
 
 plan_pass() {
     local index emitter_recipient
 
+    plan_oracle_refresh
     emitter_recipient="$(read_emitter_recipient)" || die "cannot determine the emitter recipient"
 
     note "Planning v2 emissions pass: ${V2_BACKSTOP_ID}"
@@ -320,6 +433,7 @@ plan_pass() {
 run_pass() {
     local index emitter_recipient failed=0
 
+    refresh_oracles_if_due || failed=1
     if ! emitter_recipient="$(read_emitter_recipient)"; then
         failed=1
         emitter_recipient=""
@@ -368,7 +482,7 @@ run_forever() {
     local pass_number=0
 
     trap request_stop INT TERM
-    note "Keeper started; interval is ${INTERVAL_SECONDS} seconds."
+    note "Keeper started; emissions interval is ${INTERVAL_SECONDS} seconds and fixture-oracle refresh interval is ${ORACLE_REFRESH_INTERVAL_SECONDS} seconds."
     while (( STOP_REQUESTED == 0 )); do
         pass_number=$((pass_number + 1))
         note "Beginning scheduled pass ${pass_number}."
@@ -401,6 +515,9 @@ main() {
     require_command stellar
     require_positive_integer "${INCLUSION_FEE}" "BLEND_KEEPER_INCLUSION_FEE"
     require_positive_integer "${INTERVAL_SECONDS}" "BLEND_KEEPER_INTERVAL_SECONDS"
+    require_positive_integer \
+        "${ORACLE_REFRESH_INTERVAL_SECONDS}" \
+        "BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS"
     load_configuration
     export STELLAR_INCLUSION_FEE="${INCLUSION_FEE}"
 

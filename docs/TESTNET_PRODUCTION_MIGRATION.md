@@ -105,11 +105,19 @@ make testnet-production-keeper
 ```
 
 Continuous mode performs its first pass immediately and schedules subsequent
-passes hourly without allowing overlapping passes. Override the interval, in
-seconds, when a faster isolated test schedule is useful:
+passes hourly without allowing overlapping passes. It also refreshes all
+controlled v2 and v3 lending-oracle histories when their last successful
+refresh is at least 12 hours old. Oracle refresh runs before emissions, and a
+failure remains due for retry on the next hourly pass. This keeps the fixture
+prices comfortably inside Blend's one-day validity window without refreshing
+them on every pass.
+
+Override either interval, in seconds, when an isolated test needs a different
+schedule:
 
 ```bash
 BLEND_KEEPER_INTERVAL_SECONDS=300 make testnet-production-keeper
+BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS=21600 make testnet-production-keeper
 ```
 
 Stop continuous mode with `Ctrl-C` or `SIGTERM`. An unexpected call failure is
@@ -118,6 +126,13 @@ continuous mode retries on its next interval. Known v2/v3 no-work and timing
 errors are treated as idempotent skips. The configured source account only
 pays transaction fees and receives no protocol privilege. The keeper never
 invokes emitter swap, migration `drop()`, claims, or pool-admin operations.
+
+Automatic oracle refresh is guarded by the Stellar testnet passphrase and
+uses the same controlled fixed-price fixture path as
+`testnet-production-refresh-oracle`. It is not a production oracle service.
+When deployment paths are overridden, the keeper verifies that the registry's
+modeled assets and oracle contracts match the selected work-directory state
+and forwards the selected Stellar configuration to the refresher.
 
 The internal scheduler runs only while the process and host remain running. A
 service manager such as `launchd` can supervise it for unattended operation,

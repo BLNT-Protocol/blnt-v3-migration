@@ -106,6 +106,8 @@ v2, the permissionless keeper first calls the emitter's `distribute()`. It then
 calls each deployed v2 and v3 backstop's `distribute()` and
 `gulp_emissions()` on every corresponding reward-zone modeled pool. This keeps incumbent
 v2 emissions moving before migration while also checkpointing v3 backfill.
+Before the v3 emissions pass, it simulates `reconcile_loss(asset)` for every
+reserve in every modeled v3 pool and submits only positive custody deficits.
 Each pass also simulates v3 `buy_and_burn(asset)` for USDC and XLM and submits
 each bounded canonical-Comet swap only when that asset has a pending balance.
 After migration, the v3 candidate advances the emitter from its own

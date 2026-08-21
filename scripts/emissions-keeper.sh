@@ -27,10 +27,11 @@ Commands:
 
 Each pass advances the incumbent emitter when it still targets v2, checkpoints
 the v2 and v3 backstops, then gulps each reward-zone modeled pool for the
-corresponding protocol version. It also processes one bounded pending-USDC and pending-XLM
-buy-and-burn batch when work is available. On Stellar testnet, it refreshes the
-controlled fixture-oracle histories when they are at least 12 hours old. The
-default keeper interval is one hour. Configuration may be overridden with
+corresponding protocol version. It reconciles direct reserve-custody deficits
+across every modeled v3 pool and processes one bounded pending-USDC and
+pending-XLM buy-and-burn batch when work is available. On Stellar testnet, it
+refreshes the controlled fixture-oracle histories when they are at least 12
+hours old. The default keeper interval is one hour. Configuration may be overridden with
 BLEND_KEEPER_REGISTRY, BLEND_KEEPER_WORK_DIR, BLEND_KEEPER_CONFIG_DIR,
 BLEND_KEEPER_SOURCE_ACCOUNT, BLEND_KEEPER_RPC_URL, BLEND_KEEPER_INCLUSION_FEE,
 BLEND_KEEPER_INTERVAL_SECONDS, and BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS.
@@ -309,6 +310,91 @@ is_positive_i128_result() {
     ' >/dev/null 2>&1
 }
 
+read_v3_reserve_assets() {
+    local pool_id="$1" output
+
+    if ! output="$(capture_invoke no "${pool_id}" get_reserve_list)"; then
+        printf '%s' "${output}"
+        return 1
+    fi
+    printf '%s' "${output}" | jq -er '
+        if type == "array" and length > 0 and all(.[]; type == "string") then
+            .[]
+        else
+            error("invalid reserve list")
+        end
+    '
+}
+
+plan_reconcile_losses() {
+    local index asset assets output
+
+    for index in "${!V3_ALL_POOLS[@]}"; do
+        if ! assets="$(read_v3_reserve_assets "${V3_ALL_POOLS[index]}")"; then
+            die "v3 ${V3_ALL_POOL_NAMES[index]} reserve-list simulation failed: ${assets}"
+        fi
+        while IFS= read -r asset; do
+            require_contract_id "${asset}" "v3 reserve asset contract ID"
+            if ! output="$(capture_invoke no \
+                "${V3_ALL_POOLS[index]}" reconcile_loss --asset "${asset}")"; then
+                die "v3 ${V3_ALL_POOL_NAMES[index]} reserve ${asset} reconciliation simulation failed: ${output}"
+            fi
+            if is_zero_i128_result "${output}"; then
+                note "v3 ${V3_ALL_POOL_NAMES[index]} reserve ${asset}: custody reconciled"
+            elif is_positive_i128_result "${output}"; then
+                note "v3 ${V3_ALL_POOL_NAMES[index]} reserve ${asset}: would reconcile ${output} base units"
+            else
+                die "v3 ${V3_ALL_POOL_NAMES[index]} reserve ${asset} reconciliation returned an invalid amount: ${output}"
+            fi
+        done <<< "${assets}"
+    done
+}
+
+run_reconcile_losses() {
+    local index asset assets output failed=0
+
+    for index in "${!V3_ALL_POOLS[@]}"; do
+        if ! assets="$(read_v3_reserve_assets "${V3_ALL_POOLS[index]}")"; then
+            note "v3 ${V3_ALL_POOL_NAMES[index]} reserve-list simulation failed: ${assets}"
+            failed=1
+            continue
+        fi
+        while IFS= read -r asset; do
+            require_contract_id "${asset}" "v3 reserve asset contract ID"
+            if ! output="$(capture_invoke no \
+                "${V3_ALL_POOLS[index]}" reconcile_loss --asset "${asset}")"; then
+                note "v3 ${V3_ALL_POOL_NAMES[index]} reserve ${asset} reconciliation simulation failed: ${output}"
+                failed=1
+                continue
+            fi
+            if is_zero_i128_result "${output}"; then
+                note "v3 ${V3_ALL_POOL_NAMES[index]} reserve ${asset}: custody reconciled"
+                continue
+            fi
+            if ! is_positive_i128_result "${output}"; then
+                note "v3 ${V3_ALL_POOL_NAMES[index]} reserve ${asset} reconciliation returned an invalid amount: ${output}"
+                failed=1
+                continue
+            fi
+            if ! output="$(capture_invoke yes \
+                "${V3_ALL_POOLS[index]}" reconcile_loss --asset "${asset}")"; then
+                note "v3 ${V3_ALL_POOL_NAMES[index]} reserve ${asset} reconciliation submission failed: ${output}"
+                failed=1
+                continue
+            fi
+            if is_positive_i128_result "${output}"; then
+                note "v3 ${V3_ALL_POOL_NAMES[index]} reserve ${asset}: reconciled ${output} base units"
+            elif is_zero_i128_result "${output}"; then
+                note "v3 ${V3_ALL_POOL_NAMES[index]} reserve ${asset}: another keeper reconciled first"
+            else
+                note "v3 ${V3_ALL_POOL_NAMES[index]} reserve ${asset} reconciliation returned an invalid submitted amount: ${output}"
+                failed=1
+            fi
+        done <<< "${assets}"
+    done
+    return "${failed}"
+}
+
 plan_buy_and_burn() {
     local asset output
 
@@ -393,8 +479,20 @@ load_configuration() {
         [.key, .value.v3.pool] | @tsv
     ' "${REGISTRY}")
 
+    V3_ALL_POOL_NAMES=()
+    V3_ALL_POOLS=()
+    while IFS=$'\t' read -r pool_name pool_id; do
+        require_contract_id "${pool_id}" "modeled v3 pool contract ID"
+        V3_ALL_POOL_NAMES+=("${pool_name}")
+        V3_ALL_POOLS+=("${pool_id}")
+    done < <(jq -er '
+        .modeled_pools | to_entries[] |
+        [.key, .value.v3.pool] | @tsv
+    ' "${REGISTRY}")
+
     (( ${#V2_POOLS[@]} > 0 )) || die "deployment registry contains no modeled v2 pools"
     (( ${#V3_POOLS[@]} > 0 )) || die "deployment registry contains no modeled v3 pools"
+    (( ${#V3_ALL_POOLS[@]} > 0 )) || die "deployment registry contains no modeled v3 pools"
     validate_oracle_refresh_configuration
 }
 
@@ -420,6 +518,7 @@ plan_pass() {
     done
 
     note "Planning v3 emissions pass: ${V3_BACKSTOP_ID}"
+    plan_reconcile_losses
     plan_call "v3 checkpoint protocol emissions" "${V3_BACKSTOP_ID}" distribute 1030
     for index in "${!V3_POOLS[@]}"; do
         plan_call \
@@ -456,6 +555,7 @@ run_pass() {
     done
 
     note "Starting v3 emissions pass: ${V3_BACKSTOP_ID}"
+    run_reconcile_losses || failed=1
     run_call "v3 checkpoint protocol emissions" "${V3_BACKSTOP_ID}" distribute 1030 || failed=1
     for index in "${!V3_POOLS[@]}"; do
         run_call \

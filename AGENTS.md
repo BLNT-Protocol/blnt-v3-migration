@@ -121,6 +121,14 @@ a side effect of work in this repository.
   affected reserve and apply Blend v2's ceiling-rounded bToken exchange-rate
   loss with intentional saturation at zero; invalid or unavailable valuation
   fails closed.
+- The sole exception is reconciliation of an unexplained lending-reserve
+  custody deficit. That reserve absorbs the deficit through its supplier rate
+  and then its unpaid take-rate credit, without creating backstop debt or
+  touching another reserve. Only subsequent borrower bad debt follows the
+  configured waterfall. New supply and borrowing stop below a 0.1 bToken
+  exchange rate and resume only if accrued interest restores that rate while
+  b_supply remains positive. Zero b_supply is terminal and freezes liability
+  interest without blocking repayment or liquidation.
 - Emitter migration qualification uses the candidate contract's direct balance
   of the incumbent emitter-designated token and requires a strictly greater
   balance.

@@ -125,10 +125,12 @@ a side effect of work in this repository.
   custody deficit. That reserve absorbs the deficit through its supplier rate
   and then its unpaid take-rate credit, without creating backstop debt or
   touching another reserve. Only subsequent borrower bad debt follows the
-  configured waterfall. New supply and borrowing stop below a 0.1 bToken
-  exchange rate and resume only if accrued interest restores that rate while
-  b_supply remains positive. Zero b_supply is terminal and freezes liability
-  interest without blocking repayment or liquidation.
+  configured waterfall. Complete supplier-value exhaustion sets the bToken
+  exchange rate exactly to zero. New supply and borrowing stop only at zero
+  and resume if accrued interest restores a positive rate while b_supply
+  remains positive. Zero b_supply is terminal, freezes liability interest
+  without blocking repayment or liquidation, and directs positive custody
+  surplus through `gulp` into backstop credit.
 - Emitter migration qualification uses the candidate contract's direct balance
   of the incumbent emitter-designated token and requires a strictly greater
   balance.

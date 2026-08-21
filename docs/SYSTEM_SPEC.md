@@ -71,6 +71,31 @@ Updating either submodule pin, a frozen artifact, or a network assumption is
 an explicit reviewed change. Successful testnet execution is evidence, not
 production approval.
 
+## Backstop custody deployment gate
+
+The deployment runner MUST establish Fixed Pool v3 before any other v3 pool
+and use its first plain-USDC backstop deposit to create the candidate's shared
+USDC SAC balance. It MUST then read the Protocol-27 persistent balance entries
+for that custody and for both canonical Comets' issuer-controlled underlying
+assets. Every entry MUST exist, be positive and authorized, and record
+`clawback = false`. A local issued-XLM fixture MUST satisfy the same check for
+both Comet and backstop custody; native XLM requires no issuer check.
+
+The complete modeled-pool verification MUST repeat the checks before the
+emitter queue can open. Any missing, malformed, deauthorized, zero, or
+clawbackable entry invalidates the deployment. This is evidence for the
+contract specification's non-clawbackable-custody requirement, not a new
+contract entry point or substitute for lending-reserve admission policy.
+
+Both canonical Comets MUST use the same dedicated classic-account controller.
+After both Comets are initialized unfrozen, the runner MUST atomically set that
+account's low, medium, and high thresholds to 100 and its only signer weight to
+zero, matching the canonical mainnet BLND:USDC Comet. It MUST then verify each
+Comet's exact token pair, 80:20 weights, controller address, and the controller
+account's thresholds and signer weights. A failed check invalidates the
+deployment, and successful locking makes later freeze or controller changes
+unfulfillable.
+
 ## Open deployment decisions
 
 The following production-readiness decisions do not authorize contract or

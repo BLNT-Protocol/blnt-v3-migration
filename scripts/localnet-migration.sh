@@ -15,6 +15,7 @@ case "${NETWORK_MODE}" in
         NETWORK_PASSPHRASE="Standalone Network ; February 2017"
         OPERATOR_IDENTITY="${BLEND_MIGRATION_OPERATOR_IDENTITY:-blend-v3-local-operator}"
         DEPOSITOR_IDENTITY="${BLEND_MIGRATION_DEPOSITOR_IDENTITY:-blend-v3-local-depositor}"
+        COMET_CONTROLLER_IDENTITY="${BLEND_MIGRATION_COMET_CONTROLLER_IDENTITY:-blend-v3-local-comet-controller}"
         DEFAULT_XLM_ASSET_MODE="issued"
         LEDGER_SECONDS=1
         ;;
@@ -28,6 +29,7 @@ case "${NETWORK_MODE}" in
         NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
         OPERATOR_IDENTITY="${BLEND_MIGRATION_OPERATOR_IDENTITY:-blend-v3-production-testnet-operator}"
         DEPOSITOR_IDENTITY="${BLEND_MIGRATION_DEPOSITOR_IDENTITY:-blend-v3-production-testnet-depositor}"
+        COMET_CONTROLLER_IDENTITY="${BLEND_MIGRATION_COMET_CONTROLLER_IDENTITY:-blend-v3-production-testnet-comet-controller}"
         DEFAULT_XLM_ASSET_MODE="native"
         LEDGER_SECONDS=5
         ;;
@@ -70,6 +72,7 @@ BLND_USDC_LP_JOIN_AMOUNT=$((100 * SCALAR_7))
 COMET_INITIAL_BLND=$((1000 * SCALAR_7))
 COMET_INITIAL_PAIR_TOKEN=$((25 * SCALAR_7))
 COMET_INITIAL_XLM=$((100 * SCALAR_7))
+COMET_CONTROLLER_THRESHOLD=100
 DEPOSITOR_BLND_MINT=$((15000 * SCALAR_7))
 DEPOSITOR_USDC_MINT=$((ACTIVATION_USDC_BALANCE + POOL_SUPPLY_BALANCE + 500 * SCALAR_7))
 DEPOSITOR_XLM_MINT=$((COMET_INITIAL_PAIR_TOKEN))
@@ -335,6 +338,23 @@ horizon_account_sequence() {
         sleep 1
     done
     die "unable to read ${account} sequence from Horizon"
+}
+
+read_horizon_account() {
+    local account="$1" response
+
+    for _ in {1..30}; do
+        response="$(curl --fail --silent --show-error --max-time 5 \
+            "${HORIZON_URL}/accounts/${account}" 2>/dev/null || true)"
+        if printf '%s' "${response}" | jq -e \
+            --arg account "${account}" '.account_id == $account' >/dev/null 2>&1
+        then
+            printf '%s\n' "${response}"
+            return
+        fi
+        sleep 1
+    done
+    die "unable to read ${account} from Horizon"
 }
 
 wait_for_testnet_sequence_convergence() {
@@ -744,6 +764,188 @@ read_migration_state() {
              else "Pending"
              end)
     '
+}
+
+sac_balance_key_xdr() {
+    local holder="$1" key_json
+
+    require_contract_id "${holder}" "SAC contract-balance holder"
+    key_json="$(jq -cn --arg holder "${holder}" '
+        {vec: [{symbol: "Balance"}, {address: $holder}]}
+    ')"
+    stellar_cli xdr encode \
+        --type ScVal \
+        --output single-base64 \
+        "${key_json}"
+}
+
+read_sac_contract_balance() {
+    local label="$1" token="$2" holder="$3"
+    local key_xdr attempt status stderr_output
+
+    require_contract_id "${token}" "${label} SAC"
+    key_xdr="$(sac_balance_key_xdr "${holder}")"
+    for attempt in 1 2 3 4 5; do
+        if capture "${label}" \
+            stellar_cli ledger entry fetch contract-data \
+            --contract "${token}" \
+            --key-xdr "${key_xdr}" \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" \
+            --output json
+        then
+            status=0
+        else
+            status=$?
+        fi
+        stderr_output="$(<"${CAPTURE_STDERR_FILE}")"
+        if (( status == 0 )) && [[ -s "${CAPTURE_STDOUT_FILE}" ]]; then
+            return 0
+        fi
+        if [[ "${NETWORK_MODE}" != "testnet" || "${attempt}" == "5" ]] ||
+            ! is_transient_rpc_error "${stderr_output}"
+        then
+            (( status != 0 )) || status=1
+            return "${status}"
+        fi
+        note "Retrying ${label} after a transient public-testnet RPC error (${attempt}/5)..."
+        sleep 2
+    done
+}
+
+verify_non_clawbackable_sac_balance() {
+    local label="$1" token="$2" holder="$3"
+    local entry facts amount authorized clawback
+
+    entry="$(read_sac_contract_balance "${label}" "${token}" "${holder}")" ||
+        die "${label} contract-balance entry is unavailable"
+    facts="$(printf '%s' "${entry}" | jq -ce '
+        def field($name):
+            ([.[] | select(.key.symbol? == $name) | .val] |
+                if length == 1 then .[0]
+                else error("missing or duplicate " + $name)
+                end);
+        if (.entries | length) != 1 then
+            error("expected exactly one ledger entry")
+        else
+            .entries[0].val.contract_data.val.map as $fields |
+            {
+                amount: ($fields | field("amount") | .i128),
+                authorized: ($fields | field("authorized") | .bool),
+                clawback: ($fields | field("clawback") | .bool)
+            }
+        end
+    ')" || die "${label} is not a Protocol-27 SAC contract-balance entry"
+    amount="$(printf '%s' "${facts}" | jq -er '.amount | tostring')"
+    authorized="$(printf '%s' "${facts}" | jq -er '.authorized | tostring')"
+    clawback="$(printf '%s' "${facts}" | jq -er '.clawback | tostring')"
+
+    [[ "${amount}" =~ ^[1-9][0-9]*$ ]] ||
+        die "${label} must hold a positive balance; found ${amount}"
+    [[ "${authorized}" == "true" ]] ||
+        die "${label} is currently deauthorized"
+    [[ "${clawback}" == "false" ]] ||
+        die "${label} is clawbackable; rejecting the deployment"
+    note "Verified ${label}: positive, authorized, and non-clawbackable."
+}
+
+verify_locked_comet_controller() {
+    local label="$1" comet="$2" expected_controller="$3"
+    local first_token="$4" second_token="$5"
+    local actual_controller tokens first_weight second_weight account
+
+    actual_controller="$(normalize_scalar "$(invoke_view \
+        "query-${label}-controller" "${comet}" get_controller)")"
+    assert_equal "${expected_controller}" "${actual_controller}" \
+        "${label} controller"
+
+    tokens="$(invoke_view "query-${label}-tokens" "${comet}" get_tokens)"
+    printf '%s' "${tokens}" | jq -e \
+        --arg first "${first_token}" --arg second "${second_token}" \
+        '. == [$first, $second]' >/dev/null ||
+        die "${label} does not contain the expected canonical token pair"
+    first_weight="$(normalize_scalar "$(invoke_view \
+        "query-${label}-first-weight" "${comet}" get_normalized_weight \
+        --token "${first_token}")")"
+    second_weight="$(normalize_scalar "$(invoke_view \
+        "query-${label}-second-weight" "${comet}" get_normalized_weight \
+        --token "${second_token}")")"
+    assert_equal "8000000" "${first_weight}" "${label} BLND weight"
+    assert_equal "2000000" "${second_weight}" "${label} pair-token weight"
+
+    account="$(read_horizon_account "${expected_controller}")"
+    printf '%s' "${account}" | jq -e \
+        --arg controller "${expected_controller}" \
+        --argjson threshold "${COMET_CONTROLLER_THRESHOLD}" '
+        .thresholds.low_threshold == $threshold and
+        .thresholds.med_threshold == $threshold and
+        .thresholds.high_threshold == $threshold and
+        (.signers | length == 1) and
+        .signers[0].key == $controller and
+        .signers[0].type == "ed25519_public_key" and
+        .signers[0].weight == 0
+    ' >/dev/null ||
+        die "${label} controller is not irreversibly locked"
+    note "Verified ${label}: canonical 80:20 pair with a zero-weight controller."
+}
+
+verify_canonical_comet_controller_lock() {
+    local controller blnd usdc xlm
+
+    controller="$(state_value comet_controller)"
+    blnd="$(state_value blnd_token)"
+    usdc="$(state_value usdc_token)"
+    xlm="$(state_value xlm_token)"
+    verify_locked_comet_controller \
+        "blnd-usdc-comet" "$(state_value blnd_usdc_token)" \
+        "${controller}" "${blnd}" "${usdc}"
+    verify_locked_comet_controller \
+        "blnd-xlm-comet" "$(state_value blnd_xlm_token)" \
+        "${controller}" "${blnd}" "${xlm}"
+    state_set "canonical_comet_controllers_verified_at" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+
+verify_fixed_v3_backstop_custody() {
+    local candidate blnd_usdc blnd_xlm blnd usdc xlm
+
+    verify_canonical_comet_controller_lock
+    candidate="$(state_value candidate_backstop)"
+    blnd_usdc="$(state_value blnd_usdc_token)"
+    blnd_xlm="$(state_value blnd_xlm_token)"
+    blnd="$(state_value blnd_token)"
+    usdc="$(state_value usdc_token)"
+    xlm="$(state_value xlm_token)"
+
+    verify_non_clawbackable_sac_balance \
+        "verify-blnd-usdc-comet-blnd-custody" "${blnd}" "${blnd_usdc}"
+    verify_non_clawbackable_sac_balance \
+        "verify-blnd-usdc-comet-usdc-custody" "${usdc}" "${blnd_usdc}"
+    verify_non_clawbackable_sac_balance \
+        "verify-blnd-xlm-comet-blnd-custody" "${blnd}" "${blnd_xlm}"
+    if [[ "${XLM_ASSET_MODE}" == "issued" ]]; then
+        verify_non_clawbackable_sac_balance \
+            "verify-blnd-xlm-comet-xlm-custody" "${xlm}" "${blnd_xlm}"
+    fi
+    verify_non_clawbackable_sac_balance \
+        "verify-fixed-v3-backstop-usdc-custody" "${usdc}" "${candidate}"
+
+    state_set "fixed_v3_non_clawbackable_custody_verified_at" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+
+verify_all_v3_backstop_custody() {
+    local candidate xlm
+
+    verify_fixed_v3_backstop_custody
+    if [[ "${XLM_ASSET_MODE}" == "issued" ]]; then
+        candidate="$(state_value candidate_backstop)"
+        xlm="$(state_value xlm_token)"
+        verify_non_clawbackable_sac_balance \
+            "verify-custom-v3-backstop-xlm-custody" "${xlm}" "${candidate}"
+    fi
+    state_set "backstop_non_clawbackable_custody_verified_at" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 
 invoke_forced_transaction() {
@@ -1589,7 +1791,7 @@ keepalive_modeled_pools() {
 }
 
 command_plan() {
-    local asset_description valuation_description pool_description
+    local asset_description valuation_description
     local incumbent_funding_description pool_funding_description
 
     if [[ "${XLM_ASSET_MODE}" == "native" ]]; then
@@ -1598,7 +1800,6 @@ command_plan() {
         asset_description="isolated BLND, USDC, and XLM assets"
     fi
     valuation_description="integrated Comet-derived backstop valuation and bounded test-only lending oracles"
-    pool_description="matched Fixed and Custom v2/v3 pools from bounded reserve configurations"
     pool_funding_description="Fixed's three candidate tiers, Custom's 2:1 XLM/USDC tiers, and their lending positions"
     incumbent_funding_description="Fund both modeled v2 pools with ${INCUMBENT_BALANCE} BLNDUSDC each while retaining the candidate's one-base-unit aggregate majority."
     cat <<EOF
@@ -1617,21 +1818,22 @@ Artifacts:
   Candidate: SDK 27 pool, pool factory, and backstop with ${valuation_description}
 
 Deployment:
-  1. Create and fund isolated issuer/operator and depositor identities.
-  2. Provision ${asset_description} and deploy real 80:20 BLND:USDC and BLND:XLM Comet pools.
+  1. Create and fund isolated issuer/operator, depositor, and one-way Comet-controller identities.
+  2. Provision ${asset_description}; deploy real 80:20 BLND:USDC and BLND:XLM Comets; then lock their shared controller at zero signer weight.
   3. Deploy the exact emitter WASM and a coherent SDK-22 incumbent stack.
   4. Predict the candidate address, bind its immutable factory, and deploy it.
-  5. Deploy ${pool_description} with transferable v2-style admins.
-  6. Fund them with ${pool_funding_description}, activate them, admit BLND-bearing pools to their reward zones, and configure selected reserve-position emissions.
-  7. ${incumbent_funding_description}
-  8. Assert strict candidate qualification, start backfill through distribute, queue the emitter swap, and observe it through distribute.
+  5. Deploy the modeled Fixed v2/v3 pools with transferable v2-style admins.
+  6. Fund Fixed v3 first and reject the deployment unless its shared USDC and canonical-Comet custody entries prove non-clawbackable.
+  7. Deploy the modeled Custom v2/v3 pools, fund all remaining tiers with ${pool_funding_description}, activate the pools, admit them to their reward zones, and configure selected reserve-position emissions.
+  8. ${incumbent_funding_description}
+  9. Assert strict candidate qualification, start backfill through distribute, queue the emitter swap, and observe it through distribute.
 
 Time-gated continuation:
-  9. During the final seven days, attest the compatible queue through distribute.
- 10. At or after unlock, checkpoint backfill, call the emitter swap, and transition through distribute.
- 11. Verify the emitter, candidate, pool, balances, and cleared queue.
- 12. Distribute ongoing BLND and gulp both backstop-tier and pool tranches.
- 13. Claim all completed streams after their seven-day vesting period.
+ 10. During the final seven days, attest the compatible queue through distribute.
+ 11. At or after unlock, checkpoint backfill, call the emitter swap, and transition through distribute.
+ 12. Verify the emitter, candidate, pool, balances, custody flags, and cleared queue.
+ 13. Distribute ongoing BLND and gulp both backstop-tier and pool tranches.
+ 14. Claim all completed streams after their seven-day vesting period.
 
 Mutation is limited to ${NETWORK_LABEL} and ${WORK_DIR}.
 EOF
@@ -1683,6 +1885,10 @@ command_begin() {
     assert_equal "deploying" "${phase}" "pre-migration deployment phase"
     [[ -n "$(state_optional modeled_pools_verified_at)" ]] ||
         die "modeled pools must pass verify-modeled-pools before beginning migration"
+    [[ -n "$(state_optional backstop_non_clawbackable_custody_verified_at)" ]] ||
+        die "backstop custody must pass non-clawbackable verification before beginning migration"
+    [[ -n "$(state_optional canonical_comet_controllers_verified_at)" ]] ||
+        die "canonical Comet controllers must be irreversibly locked before beginning migration"
     begin_deployed_migration
 }
 
@@ -1778,7 +1984,8 @@ begin_deployed_migration() {
 
 command_deploy() {
     local skip_build="${1:-false}"
-    local operator depositor issuer emitter_id blnd_id xlm_id blnd_usdc_token_id blnd_xlm_token_id
+    local operator depositor comet_controller issuer emitter_id blnd_id xlm_id
+    local blnd_usdc_token_id blnd_xlm_token_id
     local usdc_token_id
     local v2_pool_hash incumbent_id v2_factory_id deployed_incumbent_id
     local v3_pool_hash candidate_id v3_factory_id
@@ -1828,6 +2035,13 @@ command_deploy() {
     fund_and_wait_for_account "${depositor}"
     state_set "depositor" "${depositor}"
 
+    note "Creating and funding one-way ${NETWORK_LABEL} Comet controller ${COMET_CONTROLLER_IDENTITY}..."
+    stellar_cli keys generate "${COMET_CONTROLLER_IDENTITY}" \
+        --overwrite >/dev/null
+    comet_controller="$(stellar_cli keys public-key "${COMET_CONTROLLER_IDENTITY}")"
+    fund_and_wait_for_account "${comet_controller}"
+    state_set "comet_controller" "${comet_controller}"
+
     emitter_id="$(deploy_wasm "deploy-deployed-emitter" "${EMITTER_WASM}" "")"
     state_set "emitter" "${emitter_id}"
 
@@ -1867,6 +2081,26 @@ command_deploy() {
             --rpc-url "${RPC_URL}" \
             --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
     fi
+    capture "create-comet-controller-blnd-trustline" \
+        stellar_cli tx new change-trust \
+        --source-account "${COMET_CONTROLLER_IDENTITY}" \
+        --line "BLND:${issuer}" \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+    capture "create-comet-controller-usdc-trustline" \
+        stellar_cli tx new change-trust \
+        --source-account "${COMET_CONTROLLER_IDENTITY}" \
+        --line "USDC:${issuer}" \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+    if [[ "${XLM_ASSET_MODE}" == "issued" ]]; then
+        capture "create-comet-controller-xlm-trustline" \
+            stellar_cli tx new change-trust \
+            --source-account "${COMET_CONTROLLER_IDENTITY}" \
+            --line "XLM:${issuer}" \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+    fi
     invoke_transaction "mint-depositor-blnd" "${blnd_id}" mint \
         --to "${depositor}" --amount "${DEPOSITOR_BLND_MINT}" >/dev/null
     invoke_transaction "mint-depositor-usdc" "${usdc_token_id}" mint \
@@ -1875,25 +2109,49 @@ command_deploy() {
         invoke_transaction "mint-depositor-xlm" "${xlm_id}" mint \
             --to "${depositor}" --amount "${DEPOSITOR_XLM_MINT}" >/dev/null
     fi
+    invoke_transaction "mint-comet-controller-blnd" "${blnd_id}" mint \
+        --to "${comet_controller}" --amount "$((2 * COMET_INITIAL_BLND))" >/dev/null
+    invoke_transaction "mint-comet-controller-usdc" "${usdc_token_id}" mint \
+        --to "${comet_controller}" --amount "${COMET_INITIAL_PAIR_TOKEN}" >/dev/null
+    if [[ "${XLM_ASSET_MODE}" == "issued" ]]; then
+        invoke_transaction "mint-comet-controller-xlm" "${xlm_id}" mint \
+            --to "${comet_controller}" --amount "${COMET_INITIAL_PAIR_TOKEN}" >/dev/null
+    fi
     invoke_transaction_as "initialize-comet-blnd-usdc" \
-        "${DEPOSITOR_IDENTITY}" "${blnd_usdc_token_id}" init \
-        --controller "${depositor}" \
+        "${COMET_CONTROLLER_IDENTITY}" "${blnd_usdc_token_id}" init \
+        --controller "${comet_controller}" \
         --tokens "[\"${blnd_id}\",\"${usdc_token_id}\"]" \
         --weights '["8000000","2000000"]' \
         --balances "[\"${COMET_INITIAL_BLND}\",\"${COMET_INITIAL_PAIR_TOKEN}\"]" \
         --swap_fee 30000 >/dev/null
     invoke_transaction_as "initialize-comet-blnd-xlm" \
-        "${DEPOSITOR_IDENTITY}" "${blnd_xlm_token_id}" init \
-        --controller "${depositor}" \
+        "${COMET_CONTROLLER_IDENTITY}" "${blnd_xlm_token_id}" init \
+        --controller "${comet_controller}" \
         --tokens "[\"${blnd_id}\",\"${xlm_id}\"]" \
         --weights '["8000000","2000000"]' \
         --balances "[\"${COMET_INITIAL_BLND}\",\"${comet_xlm_balance}\"]" \
         --swap_fee 30000 >/dev/null
+    capture "lock-canonical-comet-controller" \
+        stellar_cli tx new set-options \
+        --source-account "${COMET_CONTROLLER_IDENTITY}" \
+        --low-threshold "${COMET_CONTROLLER_THRESHOLD}" \
+        --med-threshold "${COMET_CONTROLLER_THRESHOLD}" \
+        --high-threshold "${COMET_CONTROLLER_THRESHOLD}" \
+        --master-weight 0 \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+    verify_canonical_comet_controller_lock
     invoke_transaction_as "join-comet-blnd-usdc" \
         "${DEPOSITOR_IDENTITY}" "${blnd_usdc_token_id}" join_pool \
         --pool_amount_out "${BLND_USDC_LP_JOIN_AMOUNT}" \
         --max_amounts_in \
         "[\"$((13000 * SCALAR_7))\",\"$((500 * SCALAR_7))\"]" \
+        --user "${depositor}" >/dev/null
+    invoke_transaction_as "join-comet-blnd-xlm" \
+        "${DEPOSITOR_IDENTITY}" "${blnd_xlm_token_id}" join_pool \
+        --pool_amount_out "${MODELED_BLND_XLM_LP_BALANCE}" \
+        --max_amounts_in \
+        "[\"$((1000 * SCALAR_7))\",\"$((100 * SCALAR_7))\"]" \
         --user "${depositor}" >/dev/null
 
     invoke_transaction "set-emitter-as-blnd-admin" "${blnd_id}" set_admin \
@@ -1988,6 +2246,10 @@ command_deploy() {
         --from "${depositor}" \
         --pool-address "${pool_id}" \
         --amount "${ACTIVATION_USDC_BALANCE}" >/dev/null
+    # This first real plain-USDC deposit creates the candidate's one shared
+    # SAC balance entry. Verify it and both Comets' underlying custody before
+    # any later pool is deployed; a failure invalidates this deployment lane.
+    verify_fixed_v3_backstop_custody
     invoke_transaction \
         "activate-v3-pool" "${pool_id}" set_status --pool_status 0 >/dev/null
     pool_status="$(invoke_view \
@@ -2052,6 +2314,24 @@ command_deploy_modeled_pools() {
     fixed_v2_pool="$(ensure_modeled_v2_pool fixed "${fixed_v2_oracle}")"
     custom_v2_pool="$(ensure_modeled_v2_pool custom "${custom_v2_oracle}")"
     fixed_v3_pool="$(ensure_modeled_v3_pool fixed "${fixed_v3_oracle}")"
+
+    # Preserve the custody gate even when this resumable command is entered
+    # before the top-level deploy path reaches its first Fixed deposit. Custom
+    # v3 must not be deployed until Fixed has established and verified the
+    # candidate's shared plain-USDC balance.
+    fixed_usdc_shares="$(modeled_v3_user_shares "${fixed_v3_pool}" ThirdLoss)"
+    [[ "${fixed_usdc_shares}" =~ ^[0-9]+$ ]] ||
+        die "invalid fixed v3 USDC share state"
+    (( fixed_usdc_shares <= MODELED_V3_USDC_BALANCE )) ||
+        die "fixed v3 USDC shares exceed the fixture target"
+    ensure_token_balance "$(state_value usdc_token)" \
+        "$((MODELED_V3_USDC_BALANCE - fixed_usdc_shares))" \
+        "fixed-v3-usdc-custody"
+    ensure_modeled_v3_backstop_deposit \
+        fixed "${fixed_v3_pool}" ThirdLoss \
+        "${MODELED_V3_USDC_BALANCE}"
+    verify_fixed_v3_backstop_custody
+
     custom_v3_pool="$(ensure_modeled_v3_pool custom "${custom_v3_oracle}")"
 
     fixed_v2_shares="$(modeled_v2_user_shares "${fixed_v2_pool}")"
@@ -2107,9 +2387,11 @@ command_deploy_modeled_pools() {
     ensure_modeled_v3_backstop_deposit \
         fixed "${fixed_v3_pool}" ThirdLoss \
         "${MODELED_V3_USDC_BALANCE}"
+    verify_fixed_v3_backstop_custody
     ensure_modeled_v3_backstop_deposit \
         custom "${custom_v3_pool}" SecondLoss \
         "${MODELED_CUSTOM_V3_USDC_BALANCE}"
+    verify_all_v3_backstop_custody
 
     for pool in "${fixed_v3_pool}" "${custom_v3_pool}"; do
         pool_status="$(invoke_view \
@@ -2313,6 +2595,7 @@ command_verify_modeled_pools() {
     require_modeled_pool_support
     validate_source_provenance
     record_modeled_pools_provenance verification
+    verify_all_v3_backstop_custody
 
     for version in v2 v3; do
         for model in fixed custom; do
@@ -2930,6 +3213,8 @@ command_verify() {
         jq -c '.activated_at')")"
     scheduled_backfill="$(normalize_scalar "$(printf '%s' "${migration_state}" | \
         jq -c '.scheduled_backfill')")"
+
+    verify_all_v3_backstop_custody
 
     assert_equal "${candidate_id}" "${emitter_backstop}" "emitter backstop"
     assert_equal "${blnd_usdc_token_id}" "${candidate_blnd_usdc_token}" "candidate BLND:USDC LP token"

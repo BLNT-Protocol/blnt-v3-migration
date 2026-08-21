@@ -187,6 +187,14 @@ Localnet and public-testnet runners MUST:
 - use the production migration constants;
 - deploy and prefund matched Fixed and Custom v2/v3 pools before opening
   the emitter queue;
+- deploy and fund Fixed v3 before Custom v3, then fail closed unless the shared
+  backstop USDC balance and both canonical Comets' issuer-controlled custody
+  entries decode as positive, authorized, and non-clawbackable;
+- initialize both canonical Comets unfrozen, irrevocably lock their dedicated
+  controller with 100/100/100 thresholds and zero signer weight, and verify
+  each controller binding and exact 80:20 token configuration;
+- repeat the complete custody proof during modeled-pool verification and
+  prohibit queue creation without recorded success;
 - verify source commits and every deployed artifact digest;
 - use independently issued test assets instead of depending on official test
   BLND or USDC supply;

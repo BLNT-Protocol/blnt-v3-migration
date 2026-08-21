@@ -28,6 +28,12 @@ represent production market pricing or liquidity. Separate authenticated
 SEP-40 fixtures provide the modeled pools' deterministic reserve prices and
 are not used for backstop valuation.
 
+Both Comets are initialized unfrozen by one dedicated controller account. The
+runner then sets that account's thresholds to 100 and its sole signer weight to
+zero, verifies the controller and exact 80:20 token configuration, and performs
+the depositor LP joins only after the lock. This mirrors the canonical mainnet
+BLND:USDC Comet and makes later freeze or controller changes impossible.
+
 The migration runner deploys matched Fixed and Custom models against the
 incumbent and candidate before opening the emitter queue. Fixed v3 uses
 BLND:XLM, BLND:USDC, and USDC with 4:3:2 weights, holds the candidate's full
@@ -38,10 +44,18 @@ open reward-zone slot, and supports XLM, USDC, and PYUSD lending. Because it has
 no BLND-bearing tier, it receives zero BLND allocation. Both incumbent pools
 receive BLND:USDC capital and enter the v2 reward zone.
 
-The classic-asset issuer/operator and candidate depositor use separate local
-identities. The runner creates the required modeled-asset trustlines,
-initializes both Comet pools, and mints the LP positions before funding the two
-backstops and lending positions.
+The classic-asset issuer/operator, candidate depositor, and one-way Comet
+controller use separate local identities. The runner creates the required
+modeled-asset trustlines, initializes and locks both Comet pools, and mints the
+depositor LP positions before funding the two backstops and lending positions.
+
+Fixed v3 is created and receives the first plain-USDC backstop deposit before
+Custom v3 is deployed. The runner then decodes the shared backstop USDC balance
+and both Comets' underlying SAC balance entries directly from persistent
+ledger state. It fails the deployment unless each entry is positive,
+authorized, and records `clawback = false`; local issued XLM is checked at both
+the Comet and shared backstop after its first deposit. Modeled-pool verification
+repeats the complete proof before the emitter queue may open.
 
 The local operator pays for deployment and migration transactions but receives
 no continuing protocol authority. The exercise uses only the deployed emitter's

@@ -19,6 +19,8 @@ The runner creates:
   Friendbot;
 - a real 80:20 BLND:USDC Comet initialized with 1,000 BLND and 25 USDC;
 - a real 80:20 BLND:XLM Comet initialized with 1,000 BLND and 100 native XLM;
+- a dedicated controller shared by both Comets, irreversibly locked at
+  100/100/100 thresholds with every signer weight zero;
 - bounded, authenticated, test-only SEP-40 lending oracles for the modeled
   pools;
 - the optimized candidate backstop bound immutably to the canonical assets and
@@ -27,6 +29,21 @@ The runner creates:
 - Fixed v3 BLND:XLM, BLND:USDC, and USDC tiers with 4:3:2 weights; and
 - Custom v3 XLM and USDC tiers with 2:1 weights, plus single-tier incumbent
   backstop positions for both v2 pools.
+
+Fixed v3 is deployed and receives the first plain-USDC backstop deposit before
+Custom v3 is created. That transfer establishes the shared candidate USDC SAC
+balance. The runner then reads its persistent Protocol-27 balance value and the
+issuer-controlled balances held by both Comets, and rejects the deployment
+unless every entry is positive, currently authorized, and permanently marked
+non-clawbackable. Native XLM has no issuer clawback. Complete modeled-pool
+verification repeats this proof before the emitter queue opens.
+
+The runner initializes both Comets unfrozen, locks their dedicated controller,
+verifies each exact token pair and 80:20 weights, and only then performs the
+depositor LP joins. Any controller mismatch, nonzero signer weight, or threshold
+other than 100 invalidates the lane. This reproduces the canonical mainnet
+BLND:USDC Comet's controller posture so neither testnet Comet can later be
+frozen or assigned a replacement controller.
 
 The BLND:USDC Comet is the backstop's USDC anchor. The backstop uses current
 reserves from both 80:20 Comets to value the LP assets and plain XLM, values
@@ -42,9 +59,9 @@ make testnet-production-plan
 make testnet-production-validate
 ```
 
-Deploy the complete incumbent and candidate stacks, create both Comets,
-deploy and fund both modeled pool pairs, and then begin the unshortened 31-day
-deployed-emitter queue:
+Deploy the complete incumbent and candidate stacks, create and lock both Comets,
+deploy and fund both modeled pool pairs, verify their non-clawbackable backstop
+custody, and then begin the unshortened 31-day deployed-emitter queue:
 
 ```bash
 make testnet-production-run

@@ -51,6 +51,9 @@ Operational instructions live in
 [docs/LOCALNET_MIGRATION.md](docs/LOCALNET_MIGRATION.md). The isolated
 native-XLM public-testnet lane is documented in
 [docs/TESTNET_PRODUCTION_MIGRATION.md](docs/TESTNET_PRODUCTION_MIGRATION.md).
+The isolated pool/SAC clawback and reserve-loss reconciliation fixture is
+documented in
+[docs/RESERVE_LOSS_TESTING.md](docs/RESERVE_LOSS_TESTING.md).
 
 ## Toolchain lanes
 

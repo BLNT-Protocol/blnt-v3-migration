@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-18T06:05:38Z",
+  "generated_at": "2026-08-22T17:16:10Z",
   "network": {
     "name": "Stellar Testnet",
     "passphrase": "Test SDF Network ; September 2015",
@@ -141,6 +141,78 @@
             "base_units": "122500000000"
           }
         ]
+      }
+    }
+  },
+  "test_scenarios": {
+    "reserve_loss": {
+      "purpose": "Isolated pool clawback, SAC clawback, and reserve-loss reconciliation",
+      "deployed_at": "2026-08-22T17:13:48Z",
+      "verified_at": "2026-08-22T17:14:56Z",
+      "source": {
+        "migration_repository_commit": "ad38631ea1897c7f9f91d8b88a3f0f767b0f290d",
+        "migration_patch_sha256": "4830da51c5df9f4c2a8436a28c9bf34d5885accce7af82679d60a1595b07c1e6",
+        "contracts_repository_commit": "407665562a00e2f6a725cf1f3ca1e4c5c5e7efa1",
+        "contracts_patch_sha256": "830ca49d489cdb0769522f324881f7ff8f6b0af30271a09705d208a20a13d389"
+      },
+      "accounts": {
+        "issuer": "GCTD4TKWVMWUMCJ7XV426AXIQOZZLOJAW5QWCK2DBSO6R7ZVKR5HQHCB",
+        "supplier": "GB7CLWROHWR3THD74C6YDP2SDHENO6UMW7VPLRBWFXACZCLCHAQLCXMW"
+      },
+      "contracts": {
+        "pool_factory": "CDF5WFL3T5QFKF72LHAO54L2VUJCNJGLADUSEWSUNJZIUE6THTUH3REM",
+        "backstop": "CAKBKZAO37BKDF6EXIEZ2UR6PMZY7RYFEP6BFLNJ75GOQ43J4PYK2ZZT",
+        "pool": "CB73ZYVTN52LEE3EXKFTNMRJCBVRK432DYNHDEKESPI6X26NJKFZQ4NF",
+        "oracle": "CAUZ6UMP46CB343N6FKP35A6GC6XGUBYN3DBXUV3AMDJ7TZ5VSCHZBPP",
+        "pool_wasm_sha256": "8e903234125aea8139d479343d8ea54e11dd0cf9f42d0a479be68860600b9f38"
+      },
+      "backstop": {
+        "reward_zone_member": true,
+        "receives_live_emitter_blnd": false,
+        "active_value_base_units": "125125000000",
+        "tiers": [
+          {
+            "tier": "FirstLoss",
+            "asset": "BLND_USDC",
+            "weight": 2,
+            "base_units": "100000000"
+          },
+          {
+            "tier": "SecondLoss",
+            "asset": "USDC",
+            "weight": 1,
+            "base_units": "125000000000"
+          }
+        ]
+      },
+      "reserves": {
+        "HLTY": {
+          "contract_id": "CAFZBPGBVMEV6LOCJ7U752T2BGBESOXTQDSR64PXPO2BXXIMNSN2652D",
+          "mechanism": "pool_clawback",
+          "clawback_base_units": "2500000000",
+          "custody_base_units": "7500000000",
+          "b_supply": "7500000000",
+          "b_rate": "1000000000000",
+          "state": "healthy"
+        },
+        "IMPR": {
+          "contract_id": "CDKM7UVN4VU2EAOOXNC4SYJ7XJVB4LQGZDTDKBOPOUE3B7MHUZSI6TIY",
+          "mechanism": "sac_clawback_then_reconcile_loss",
+          "clawback_base_units": "4000000000",
+          "custody_base_units": "6000000000",
+          "b_supply": "10000000000",
+          "b_rate": "600000000000",
+          "state": "impaired"
+        },
+        "EXHT": {
+          "contract_id": "CDCKY64B2JJQQNY3JRLMXXXDXDQTM6JE74GHET2SJVCRZBCW6RHTJFHI",
+          "mechanism": "sac_clawback_then_reconcile_loss",
+          "clawback_base_units": "10000000000",
+          "custody_base_units": "0",
+          "b_supply": "10000000000",
+          "b_rate": "0",
+          "state": "exhausted"
+        }
       }
     }
   },

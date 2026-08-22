@@ -43,6 +43,12 @@ localnet-run:
 localnet-status:
 	bash scripts/localnet-migration.sh status
 
+localnet-deploy-reserve-loss-pool:
+	bash scripts/localnet-migration.sh deploy-reserve-loss-pool
+
+localnet-verify-reserve-loss-pool:
+	bash scripts/localnet-migration.sh verify-reserve-loss-pool
+
 localnet-begin:
 	bash scripts/localnet-migration.sh begin
 
@@ -93,6 +99,12 @@ testnet-production-deploy-modeled-pools:
 
 testnet-production-verify-modeled-pools:
 	bash scripts/testnet-production-migration.sh verify-modeled-pools
+
+testnet-production-deploy-reserve-loss-pool:
+	bash scripts/testnet-production-migration.sh deploy-reserve-loss-pool
+
+testnet-production-verify-reserve-loss-pool:
+	bash scripts/testnet-production-migration.sh verify-reserve-loss-pool
 
 testnet-production-begin:
 	bash scripts/testnet-production-migration.sh begin

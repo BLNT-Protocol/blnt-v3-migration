@@ -53,6 +53,8 @@ case "${XLM_ASSET_MODE}" in
         exit 2
         ;;
 esac
+RESERVE_LOSS_ISSUER_IDENTITY="${BLEND_RESERVE_LOSS_ISSUER_IDENTITY:-blend-v3-${NETWORK_MODE}-reserve-loss-issuer}"
+RESERVE_LOSS_USER_IDENTITY="${BLEND_RESERVE_LOSS_USER_IDENTITY:-blend-v3-${NETWORK_MODE}-reserve-loss-user}"
 CONFIG_DIR="${BLEND_MIGRATION_CONFIG_DIR:-${WORK_DIR}/stellar-config}"
 STATE_FILE="${WORK_DIR}/state.json"
 CONTAINER_NAME="${BLEND_LOCALNET_CONTAINER:-blend-v3-local}"
@@ -91,6 +93,8 @@ MODELED_V2_FIXED_SALT="000000000000000000000000000000000000000000000000000000000
 MODELED_V2_CUSTOM_SALT="0000000000000000000000000000000000000000000000000000000000000055"
 MODELED_V3_FIXED_SALT="0000000000000000000000000000000000000000000000000000000000000066"
 MODELED_V3_CUSTOM_SALT="0000000000000000000000000000000000000000000000000000000000000088"
+RESERVE_LOSS_BACKSTOP_SALT="00000000000000000000000000000000000000000000000000000000000000ad"
+RESERVE_LOSS_POOL_SALT="00000000000000000000000000000000000000000000000000000000000000ae"
 MODELED_BLND_XLM_LP_BALANCE=$((10 * SCALAR_7))
 MODELED_V3_USDC_BALANCE=$((12500 * SCALAR_7))
 MODELED_CUSTOM_V3_XLM_BALANCE=$((1000 * SCALAR_7))
@@ -101,6 +105,12 @@ MODELED_FIXED_V3_EURC_SUPPLY=$((500 * SCALAR_7))
 MODELED_FIXED_V3_EURC_BORROW=$((100 * SCALAR_7))
 MODELED_ASSET_BALANCE=$((1000000 * SCALAR_7))
 MODELED_POOLS_FIXTURE="${ROOT_DIR}/fixtures/testnet-modeled-pools.json"
+RESERVE_LOSS_FIXTURE="${ROOT_DIR}/fixtures/reserve-loss-pool.json"
+RESERVE_LOSS_BACKSTOP_USDC=$((12500 * SCALAR_7))
+RESERVE_LOSS_BACKSTOP_LP=$((10 * SCALAR_7))
+RESERVE_LOSS_SUPPLY=$((1000 * SCALAR_7))
+RESERVE_LOSS_HEALTHY_CLAWBACK=$((250 * SCALAR_7))
+RESERVE_LOSS_IMPAIRED_CLAWBACK=$((400 * SCALAR_7))
 
 V2_FACTORY_WASM="${ROOT_DIR}/deployed-artifacts/mainnet/v2-pool-factory.wasm"
 V2_BACKSTOP_WASM="${ROOT_DIR}/deployed-artifacts/mainnet/v2-backstop.wasm"
@@ -134,6 +144,10 @@ Commands:
             Resume or reverify the mandatory Fixed and Custom pool setup.
   verify-modeled-pools
             Verify modeled pool configs, registration, status, and backstops.
+  deploy-reserve-loss-pool
+            Deploy and exercise the isolated three-reserve clawback scenario.
+  verify-reserve-loss-pool
+            Verify healthy, impaired, and exhausted reserve outcomes.
   begin     Begin the migration queue after modeled-pool verification succeeds.
   recover   Restart stalled local Stellar Core without replacing state.
   prepare   Attest the compatible queue during its final seven days.
@@ -653,6 +667,23 @@ invoke_transaction_as() {
         --rpc-url "${RPC_URL}" \
         --network-passphrase "${NETWORK_PASSPHRASE}" \
         --cost \
+        -- "${function_name}" "$@"
+}
+
+# SAC clawback events can trigger a Stellar CLI 27 display panic after a
+# successful submission because the native event's asset string is decoded
+# against the invoking contract's typed event schema. Quiet mode reduces that
+# presentation path; scenario callers additionally confirm custody before
+# accepting any nonzero CLI exit.
+invoke_transaction_quiet_as() {
+    local label="$1" source_identity="$2" contract_id="$3" function_name="$4"
+    shift 4
+    capture "${label}" \
+        stellar_cli --quiet contract invoke \
+        --id "${contract_id}" \
+        --source-account "${source_identity}" \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" \
         -- "${function_name}" "$@"
 }
 
@@ -2769,6 +2800,604 @@ ${NETWORK_LABEL} modeled pools verified
 EOF
 }
 
+require_reserve_loss_support() {
+    [[ -s "${RESERVE_LOSS_FIXTURE}" ]] ||
+        die "reserve-loss fixture is missing: ${RESERVE_LOSS_FIXTURE}"
+    [[ -s "${V3_TEST_SEP40_ORACLE_WASM}" ]] ||
+        die "test lending-oracle WASM is missing: ${V3_TEST_SEP40_ORACLE_WASM}"
+}
+
+ensure_reserve_loss_identity() {
+    local state_key="$1" identity="$2" label="$3" account saved
+
+    saved="$(state_optional "${state_key}")"
+    if [[ -z "${saved}" ]]; then
+        note "Creating and funding ${NETWORK_LABEL} ${label} ${identity}..."
+        stellar_cli keys generate "${identity}" --overwrite >/dev/null
+        account="$(stellar_cli keys public-key "${identity}")"
+        fund_and_wait_for_account "${account}"
+        state_set "${state_key}" "${account}"
+    else
+        account="$(stellar_cli keys public-key "${identity}")"
+        assert_equal "${saved}" "${account}" "${label} identity"
+    fi
+    printf '%s\n' "${account}"
+}
+
+ensure_reserve_loss_issuer() {
+    local issuer account
+
+    issuer="$(ensure_reserve_loss_identity \
+        reserve_loss_issuer "${RESERVE_LOSS_ISSUER_IDENTITY}" \
+        "reserve-loss asset issuer")"
+    account="$(read_horizon_account "${issuer}")"
+    if ! printf '%s' "${account}" | jq -e \
+        '.flags.auth_clawback_enabled == true' >/dev/null
+    then
+        capture "enable-reserve-loss-clawback" \
+            stellar_cli tx new set-options \
+            --source-account "${RESERVE_LOSS_ISSUER_IDENTITY}" \
+            --set-revocable \
+            --set-clawback-enabled \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null ||
+            die "failed to enable revocable and clawback flags on the reserve-loss issuer"
+        account="$(read_horizon_account "${issuer}")"
+    fi
+    printf '%s' "${account}" | jq -e '
+        .flags.auth_revocable == true and
+        .flags.auth_clawback_enabled == true
+    ' >/dev/null || die "reserve-loss issuer is not revocable and clawback-enabled"
+    printf '%s\n' "${issuer}"
+}
+
+reserve_loss_asset_state_key() {
+    local label
+
+    label="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    printf 'reserve_loss_asset_%s\n' "${label}"
+}
+
+reserve_loss_asset_id() {
+    state_value "$(reserve_loss_asset_state_key "$1")"
+}
+
+ensure_reserve_loss_asset() {
+    local code="$1" issuer="$2" user="$3" state_key token label
+
+    label="$(printf '%s' "${code}" | tr '[:upper:]' '[:lower:]')"
+    state_key="$(reserve_loss_asset_state_key "${code}")"
+    token="$(state_optional "${state_key}")"
+    if [[ -z "${token}" ]]; then
+        token="$(deploy_asset \
+            "deploy-reserve-loss-${label}" "${code}" "${issuer}")"
+        state_set "${state_key}" "${token}"
+    fi
+    require_contract_id "${token}" "reserve-loss ${code}"
+
+    if [[ -z "$(state_optional "${state_key}_user_trustline")" ]]; then
+        capture "create-reserve-loss-${label}-trustline" \
+            stellar_cli tx new change-trust \
+            --source-account "${RESERVE_LOSS_USER_IDENTITY}" \
+            --line "${code}:${issuer}" \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+        state_set "${state_key}_user_trustline" "created"
+    fi
+    printf '%s\n' "${token}"
+}
+
+reserve_loss_pool_asset_ids() {
+    local result="[]" code token
+
+    while IFS= read -r code; do
+        token="$(reserve_loss_asset_id "${code}")"
+        result="$(printf '%s' "${result}" | jq -c \
+            --arg token "${token}" '. + [{Stellar: $token}]')"
+    done < <(jq -r '.reserves[].asset' "${RESERVE_LOSS_FIXTURE}")
+    printf '%s\n' "${result}"
+}
+
+seed_reserve_loss_oracle() {
+    local oracle="$1" code token price prices label
+
+    while IFS= read -r code; do
+        label="$(printf '%s' "${code}" | tr '[:upper:]' '[:lower:]')"
+        token="$(reserve_loss_asset_id "${code}")"
+        price="$(jq -er --arg code "${code}" \
+            '.reserves[] | select(.asset == $code) | .price' \
+            "${RESERVE_LOSS_FIXTURE}")"
+        prices="$(fixture_price_series "${price}")"
+        invoke_transaction "seed-reserve-loss-oracle-${label}" \
+            "${oracle}" set_prices \
+            --asset "{\"Stellar\":\"${token}\"}" \
+            --prices "${prices}" >/dev/null
+    done < <(jq -r '.reserves[].asset' "${RESERVE_LOSS_FIXTURE}")
+    state_set "reserve_loss_oracle_refreshed_at" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+
+ensure_reserve_loss_oracle() {
+    local oracle assets
+
+    oracle="$(state_optional reserve_loss_oracle)"
+    if [[ -z "${oracle}" ]]; then
+        assets="$(reserve_loss_pool_asset_ids)"
+        oracle="$(deploy_wasm \
+            "deploy-reserve-loss-oracle" \
+            "${V3_TEST_SEP40_ORACLE_WASM}" "" \
+            --admin "$(state_value operator)" \
+            --base '{"Other":"USD"}' \
+            --assets "${assets}" \
+            --decimals 7 \
+            --resolution "${FIXTURE_ORACLE_RESOLUTION}")"
+        state_set "reserve_loss_oracle" "${oracle}"
+    fi
+    seed_reserve_loss_oracle "${oracle}"
+    printf '%s\n' "${oracle}"
+}
+
+ensure_reserve_loss_backstop() {
+    local pool_hash backstop factory deployed reward_zone
+
+    pool_hash="$(state_optional reserve_loss_pool_wasm_hash)"
+    if [[ -z "${pool_hash}" ]]; then
+        pool_hash="$(upload_wasm \
+            "upload-reserve-loss-pool" "${V3_POOL_WASM}")"
+        state_set "reserve_loss_pool_wasm_hash" "${pool_hash}"
+    fi
+
+    backstop="$(state_optional reserve_loss_backstop)"
+    if [[ -z "${backstop}" ]]; then
+        backstop="$(predict_contract_id "${RESERVE_LOSS_BACKSTOP_SALT}")"
+        state_set "reserve_loss_backstop" "${backstop}"
+    fi
+
+    factory="$(state_optional reserve_loss_pool_factory)"
+    if [[ -z "${factory}" ]]; then
+        factory="$(deploy_wasm \
+            "deploy-reserve-loss-pool-factory" "${V3_FACTORY_WASM}" "" \
+            --pool_init_meta \
+            "{\"backstop\":\"${backstop}\",\"blnd_id\":\"$(state_value blnd_token)\",\"pool_hash\":\"${pool_hash}\"}")"
+        state_set "reserve_loss_pool_factory" "${factory}"
+    fi
+
+    if ! reward_zone="$(invoke_view \
+        "probe-reserve-loss-backstop" "${backstop}" reward_zone 2>/dev/null)"
+    then
+        deployed="$(deploy_wasm \
+            "deploy-reserve-loss-backstop" "${V3_BACKSTOP_WASM}" \
+            "${RESERVE_LOSS_BACKSTOP_SALT}" \
+            --emitter "$(state_value emitter)" \
+            --blnd_token "$(state_value blnd_token)" \
+            --pool_factory "${factory}" \
+            --blnd_usdc_token "$(state_value blnd_usdc_token)" \
+            --blnd_xlm_token "$(state_value blnd_xlm_token)" \
+            --usdc_token "$(state_value usdc_token)" \
+            --xlm_token "$(state_value xlm_token)" \
+            --drop_list '[]')"
+        assert_equal "${backstop}" "${deployed}" \
+            "reserve-loss backstop deterministic address"
+    fi
+    printf '%s\n' "${backstop}"
+}
+
+reserve_loss_reserve_config() {
+    local index="$1"
+
+    jq -c --argjson index "${index}" \
+        '.reserves[$index].config + {
+            decimals: 7,
+            enabled: true,
+            index: $index
+        }' "${RESERVE_LOSS_FIXTURE}"
+}
+
+ensure_reserve_loss_pool() {
+    local oracle="$1" pool factory raw reserve_list code token metadata label
+    local index=0 status
+
+    pool="$(state_optional reserve_loss_pool)"
+    if [[ -z "${pool}" ]]; then
+        factory="$(state_value reserve_loss_pool_factory)"
+        raw="$(invoke_transaction \
+            "deploy-reserve-loss-pool" "${factory}" deploy \
+            --admin "$(state_value operator)" \
+            --name "$(jq -er '.name' "${RESERVE_LOSS_FIXTURE}")" \
+            --salt "${RESERVE_LOSS_POOL_SALT}" \
+            --oracle "${oracle}" \
+            --backstop_take_rate \
+            "$(jq -er '.backstop_take_rate' "${RESERVE_LOSS_FIXTURE}")" \
+            --max_positions \
+            "$(jq -er '.max_positions' "${RESERVE_LOSS_FIXTURE}")" \
+            --min_collateral \
+            "$(jq -er '.min_collateral' "${RESERVE_LOSS_FIXTURE}")" \
+            --backstop_config \
+            "$(jq -c '.backstop_config' "${RESERVE_LOSS_FIXTURE}")")"
+        pool="$(normalize_scalar "${raw}")"
+        require_contract_id "${pool}" "reserve-loss pool"
+        state_set "reserve_loss_pool" "${pool}"
+    fi
+
+    reserve_list="$(invoke_view \
+        "query-reserve-loss-reserves" "${pool}" get_reserve_list)"
+    while IFS= read -r code; do
+        label="$(printf '%s' "${code}" | tr '[:upper:]' '[:lower:]')"
+        token="$(reserve_loss_asset_id "${code}")"
+        if ! printf '%s' "${reserve_list}" | jq -e \
+            --arg token "${token}" 'index($token) != null' >/dev/null
+        then
+            metadata="$(reserve_loss_reserve_config "${index}")"
+            invoke_transaction "queue-reserve-loss-${label}" \
+                "${pool}" queue_set_reserve \
+                --asset "${token}" --metadata "${metadata}" >/dev/null
+            invoke_transaction "set-reserve-loss-${label}" \
+                "${pool}" set_reserve --asset "${token}" >/dev/null
+            reserve_list="$(invoke_view \
+                "query-reserve-loss-reserves-${label}" \
+                "${pool}" get_reserve_list)"
+        fi
+        index=$((index + 1))
+    done < <(jq -r '.reserves[].asset' "${RESERVE_LOSS_FIXTURE}")
+
+    status="$(invoke_view "query-reserve-loss-status" \
+        "${pool}" get_config | jq -er '.status | tostring')"
+    if [[ "${status}" == "6" ]]; then
+        invoke_transaction "on-ice-reserve-loss-pool" \
+            "${pool}" set_status --pool_status 2 >/dev/null
+    fi
+    printf '%s\n' "${pool}"
+}
+
+reserve_loss_user_shares() {
+    local backstop="$1" pool="$2" tier="$3"
+
+    invoke_view "query-reserve-loss-${tier}-shares" \
+        "${backstop}" user_balance \
+        --tier "${tier}" \
+        --pool "${pool}" \
+        --user "$(state_value depositor)" |
+        jq -er '((.shares | tonumber) + ([.q4w[]?.amount | tonumber] | add // 0)) | tostring'
+}
+
+ensure_reserve_loss_backstop_funding() {
+    local backstop="$1" pool="$2" current delta
+
+    current="$(reserve_loss_user_shares "${backstop}" "${pool}" FirstLoss)"
+    (( current <= RESERVE_LOSS_BACKSTOP_LP )) ||
+        die "reserve-loss BLND:USDC shares exceed the fixture target"
+    if (( current < RESERVE_LOSS_BACKSTOP_LP )); then
+        delta=$((RESERVE_LOSS_BACKSTOP_LP - current))
+        ensure_modeled_blnd_usdc_lp_capacity "${delta}"
+        invoke_transaction_as "deposit-reserve-loss-blnd-usdc" \
+            "${DEPOSITOR_IDENTITY}" "${backstop}" deposit \
+            --tier FirstLoss \
+            --from "$(state_value depositor)" \
+            --pool-address "${pool}" \
+            --amount "${delta}" >/dev/null
+    fi
+
+    current="$(reserve_loss_user_shares "${backstop}" "${pool}" SecondLoss)"
+    (( current <= RESERVE_LOSS_BACKSTOP_USDC )) ||
+        die "reserve-loss USDC shares exceed the fixture target"
+    if (( current < RESERVE_LOSS_BACKSTOP_USDC )); then
+        delta=$((RESERVE_LOSS_BACKSTOP_USDC - current))
+        ensure_token_balance "$(state_value usdc_token)" \
+            "${delta}" "reserve-loss-backstop-usdc"
+        invoke_transaction_as "deposit-reserve-loss-usdc" \
+            "${DEPOSITOR_IDENTITY}" "${backstop}" deposit \
+            --tier SecondLoss \
+            --from "$(state_value depositor)" \
+            --pool-address "${pool}" \
+            --amount "${delta}" >/dev/null
+    fi
+
+    verify_non_clawbackable_sac_balance \
+        "reserve-loss backstop USDC" "$(state_value usdc_token)" "${backstop}"
+}
+
+ensure_reserve_loss_pool_active() {
+    local backstop="$1" pool="$2" status reward_zone
+
+    status="$(invoke_view "query-funded-reserve-loss-status" \
+        "${pool}" get_config | jq -er '.status | tostring')"
+    if [[ "${status}" != "0" && "${status}" != "1" ]]; then
+        invoke_transaction "activate-reserve-loss-pool" \
+            "${pool}" set_status --pool_status 0 >/dev/null
+    fi
+
+    reward_zone="$(invoke_view \
+        "query-reserve-loss-reward-zone" "${backstop}" reward_zone)"
+    if ! printf '%s' "${reward_zone}" | jq -e \
+        --arg pool "${pool}" 'index($pool) != null' >/dev/null
+    then
+        invoke_transaction "add-reserve-loss-reward" \
+            "${backstop}" add_reward \
+            --to_add "${pool}" --to_remove null >/dev/null
+    fi
+}
+
+reserve_loss_position_supply() {
+    local pool="$1" user="$2" index="$3"
+
+    invoke_view "query-reserve-loss-position-${index}" \
+        "${pool}" get_positions --address "${user}" |
+        jq -er --arg index "${index}" '(.supply[$index] // "0") | tostring'
+}
+
+ensure_reserve_loss_supply_positions() {
+    local pool="$1" issuer="$2" user="$3" position code token balance deficit
+    local requests="[]" index=0
+
+    position="$(reserve_loss_position_supply "${pool}" "${user}" 1)"
+    if (( position == 0 )); then
+        while IFS= read -r code; do
+            token="$(reserve_loss_asset_id "${code}")"
+            balance="$(normalize_scalar "$(invoke_view_as \
+                "query-reserve-loss-user-${code}-balance" \
+                "${RESERVE_LOSS_USER_IDENTITY}" "${token}" balance \
+                --id "${user}")")"
+            if (( balance < RESERVE_LOSS_SUPPLY )); then
+                deficit=$((RESERVE_LOSS_SUPPLY - balance))
+                invoke_transaction_as "mint-reserve-loss-${code}" \
+                    "${RESERVE_LOSS_ISSUER_IDENTITY}" "${token}" mint \
+                    --to "${user}" --amount "${deficit}" >/dev/null
+            fi
+            requests="$(printf '%s' "${requests}" | jq -c \
+                --arg token "${token}" \
+                --arg amount "${RESERVE_LOSS_SUPPLY}" \
+                '. + [{address: $token, amount: $amount, request_type: 0}]')"
+            index=$((index + 1))
+        done < <(jq -r '.reserves[].asset' "${RESERVE_LOSS_FIXTURE}")
+        invoke_transaction_as "seed-reserve-loss-supplies" \
+            "${RESERVE_LOSS_USER_IDENTITY}" "${pool}" submit \
+            --from "${user}" --spender "${user}" --to "${user}" \
+            --requests "${requests}" >/dev/null
+    fi
+}
+
+reserve_loss_reserve_field() {
+    local pool="$1" token="$2" field="$3"
+
+    invoke_view "query-reserve-loss-${field}" \
+        "${pool}" get_reserve --asset "${token}" |
+        jq -er --arg field "${field}" '.data[$field] | tostring'
+}
+
+reserve_loss_token_balance() {
+    local token="$1" pool="$2"
+
+    normalize_scalar "$(invoke_view \
+        "query-reserve-loss-token-balance" "${token}" balance --id "${pool}")"
+}
+
+verify_clawbackable_sac_balance() {
+    local label="$1" token="$2" holder="$3" entry clawback authorized
+
+    entry="$(read_sac_contract_balance "${label}" "${token}" "${holder}")" ||
+        die "${label} contract-balance entry is unavailable"
+    clawback="$(printf '%s' "${entry}" | jq -er '
+        .entries[0].val.contract_data.val.map[] |
+        select(.key.symbol == "clawback") | .val.bool
+    ')"
+    authorized="$(printf '%s' "${entry}" | jq -er '
+        .entries[0].val.contract_data.val.map[] |
+        select(.key.symbol == "authorized") | .val.bool
+    ')"
+    assert_equal "true" "${clawback}" "${label} clawback flag"
+    assert_equal "true" "${authorized}" "${label} authorization"
+}
+
+exercise_reserve_loss_pool() {
+    local pool="$1" user="$2" healthy impaired exhausted balance b_rate
+
+    healthy="$(reserve_loss_asset_id HLTY)"
+    impaired="$(reserve_loss_asset_id IMPR)"
+    exhausted="$(reserve_loss_asset_id EXHT)"
+    for token in "${healthy}" "${impaired}" "${exhausted}"; do
+        verify_clawbackable_sac_balance \
+            "reserve-loss pool asset" "${token}" "${pool}"
+    done
+
+    balance="$(reserve_loss_token_balance "${healthy}" "${pool}")"
+    if (( balance == RESERVE_LOSS_SUPPLY )); then
+        if ! invoke_transaction_quiet_as "pool-clawback-reserve-loss-healthy" \
+            "${RESERVE_LOSS_ISSUER_IDENTITY}" "${pool}" clawback \
+            --asset "${healthy}" --from "${user}" \
+            --amount "${RESERVE_LOSS_HEALTHY_CLAWBACK}" >/dev/null
+        then
+            balance="$(reserve_loss_token_balance "${healthy}" "${pool}")"
+            assert_equal \
+                "$((RESERVE_LOSS_SUPPLY - RESERVE_LOSS_HEALTHY_CLAWBACK))" \
+                "${balance}" \
+                "healthy custody after Stellar CLI event-rendering failure"
+            note "Accepted the confirmed healthy clawback after the Stellar CLI event-rendering failure."
+        fi
+    fi
+
+    balance="$(reserve_loss_token_balance "${impaired}" "${pool}")"
+    if (( balance == RESERVE_LOSS_SUPPLY )); then
+        if ! invoke_transaction_quiet_as "sac-clawback-reserve-loss-impaired" \
+            "${RESERVE_LOSS_ISSUER_IDENTITY}" "${impaired}" clawback \
+            --from "${pool}" \
+            --amount "${RESERVE_LOSS_IMPAIRED_CLAWBACK}" >/dev/null
+        then
+            balance="$(reserve_loss_token_balance "${impaired}" "${pool}")"
+            assert_equal \
+                "$((RESERVE_LOSS_SUPPLY - RESERVE_LOSS_IMPAIRED_CLAWBACK))" \
+                "${balance}" \
+                "impaired custody after Stellar CLI event-rendering failure"
+            note "Accepted the confirmed impaired SAC clawback after the Stellar CLI event-rendering failure."
+        fi
+    fi
+    b_rate="$(reserve_loss_reserve_field "${pool}" "${impaired}" b_rate)"
+    if (( b_rate == 1000000000000 )); then
+        invoke_transaction "reconcile-reserve-loss-impaired" \
+            "${pool}" reconcile_loss --asset "${impaired}" >/dev/null
+    fi
+
+    balance="$(reserve_loss_token_balance "${exhausted}" "${pool}")"
+    if (( balance == RESERVE_LOSS_SUPPLY )); then
+        if ! invoke_transaction_quiet_as "sac-clawback-reserve-loss-exhausted" \
+            "${RESERVE_LOSS_ISSUER_IDENTITY}" "${exhausted}" clawback \
+            --from "${pool}" --amount "${RESERVE_LOSS_SUPPLY}" >/dev/null
+        then
+            balance="$(reserve_loss_token_balance "${exhausted}" "${pool}")"
+            assert_equal "0" "${balance}" \
+                "exhausted custody after Stellar CLI event-rendering failure"
+            note "Accepted the confirmed exhausted SAC clawback after the Stellar CLI event-rendering failure."
+        fi
+    fi
+    b_rate="$(reserve_loss_reserve_field "${pool}" "${exhausted}" b_rate)"
+    if (( b_rate != 0 )); then
+        invoke_transaction "reconcile-reserve-loss-exhausted" \
+            "${pool}" reconcile_loss --asset "${exhausted}" >/dev/null
+    fi
+    state_set "reserve_loss_exercised_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+
+command_deploy_reserve_loss_pool() {
+    local issuer user code oracle backstop pool
+
+    validate_tools
+    require_network
+    load_state
+    require_reserve_loss_support
+    validate_source_provenance
+    build_artifacts
+    validate_artifacts
+
+    issuer="$(ensure_reserve_loss_issuer)"
+    user="$(ensure_reserve_loss_identity \
+        reserve_loss_user "${RESERVE_LOSS_USER_IDENTITY}" \
+        "reserve-loss supplier")"
+    while IFS= read -r code; do
+        ensure_reserve_loss_asset "${code}" "${issuer}" "${user}" >/dev/null
+    done < <(jq -r '.reserves[].asset' "${RESERVE_LOSS_FIXTURE}")
+    oracle="$(ensure_reserve_loss_oracle)"
+    backstop="$(ensure_reserve_loss_backstop)"
+    pool="$(ensure_reserve_loss_pool "${oracle}")"
+    ensure_reserve_loss_backstop_funding "${backstop}" "${pool}"
+    ensure_reserve_loss_pool_active "${backstop}" "${pool}"
+    ensure_reserve_loss_supply_positions "${pool}" "${issuer}" "${user}"
+    exercise_reserve_loss_pool "${pool}" "${user}"
+    state_set "reserve_loss_deployed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    command_verify_reserve_loss_pool
+}
+
+command_verify_reserve_loss_pool() {
+    local issuer user oracle backstop factory pool registered status reward_zone
+    local active_value expected_reserves="[]" actual_reserves code token index=0
+    local expected_config actual_config b_rate b_supply backstop_credit balance supply
+
+    validate_tools
+    require_network
+    load_state
+    require_reserve_loss_support
+
+    issuer="$(state_value reserve_loss_issuer)"
+    user="$(state_value reserve_loss_user)"
+    oracle="$(state_value reserve_loss_oracle)"
+    backstop="$(state_value reserve_loss_backstop)"
+    factory="$(state_value reserve_loss_pool_factory)"
+    pool="$(state_value reserve_loss_pool)"
+
+    registered="$(normalize_scalar "$(invoke_view \
+        "verify-reserve-loss-registration" "${factory}" is_pool \
+        --pool_address "${pool}")")"
+    assert_equal "true" "${registered}" "reserve-loss factory registration"
+    status="$(invoke_view "verify-reserve-loss-status" \
+        "${pool}" get_config | jq -er '.status | tostring')"
+    [[ "${status}" == "0" || "${status}" == "1" ]] ||
+        die "reserve-loss pool is not active: status ${status}"
+    active_value="$(invoke_view "verify-reserve-loss-backstop-value" \
+        "${backstop}" pool_data --pool "${pool}" |
+        jq -er '.active_value | tostring')"
+    (( active_value >= ACTIVATION_USDC_BALANCE )) ||
+        die "reserve-loss pool is below the activation threshold: ${active_value}"
+    reward_zone="$(invoke_view "verify-reserve-loss-reward-zone" \
+        "${backstop}" reward_zone)"
+    printf '%s' "${reward_zone}" | jq -e \
+        --arg pool "${pool}" 'index($pool) != null' >/dev/null ||
+        die "reserve-loss pool is missing from its reward zone"
+
+    actual_reserves="$(invoke_view "verify-reserve-loss-reserve-list" \
+        "${pool}" get_reserve_list)"
+    while IFS= read -r code; do
+        token="$(reserve_loss_asset_id "${code}")"
+        expected_reserves="$(printf '%s' "${expected_reserves}" | jq -c \
+            --arg token "${token}" '. + [$token]')"
+        expected_config="$(reserve_loss_reserve_config "${index}")"
+        actual_config="$(invoke_view "verify-reserve-loss-${code}-config" \
+            "${pool}" get_reserve --asset "${token}" | jq -c '.config')"
+        assert_json_equal "${expected_config}" "${actual_config}" \
+            "reserve-loss ${code} config"
+        verify_clawbackable_sac_balance \
+            "reserve-loss ${code}" "${token}" "${pool}"
+        index=$((index + 1))
+    done < <(jq -r '.reserves[].asset' "${RESERVE_LOSS_FIXTURE}")
+    assert_json_equal "${expected_reserves}" "${actual_reserves}" \
+        "reserve-loss reserve list"
+
+    token="$(reserve_loss_asset_id HLTY)"
+    b_rate="$(reserve_loss_reserve_field "${pool}" "${token}" b_rate)"
+    b_supply="$(reserve_loss_reserve_field "${pool}" "${token}" b_supply)"
+    backstop_credit="$(reserve_loss_reserve_field "${pool}" "${token}" backstop_credit)"
+    balance="$(reserve_loss_token_balance "${token}" "${pool}")"
+    supply="$(reserve_loss_position_supply "${pool}" "${user}" 0)"
+    assert_equal "1000000000000" "${b_rate}" "healthy reserve b_rate"
+    assert_equal "$((RESERVE_LOSS_SUPPLY - RESERVE_LOSS_HEALTHY_CLAWBACK))" \
+        "${b_supply}" "healthy reserve b_supply"
+    assert_equal "${b_supply}" "${supply}" "healthy user supply"
+    assert_equal "${b_supply}" "${balance}" "healthy reserve custody"
+    assert_equal "0" "${backstop_credit}" "healthy reserve backstop credit"
+
+    token="$(reserve_loss_asset_id IMPR)"
+    b_rate="$(reserve_loss_reserve_field "${pool}" "${token}" b_rate)"
+    b_supply="$(reserve_loss_reserve_field "${pool}" "${token}" b_supply)"
+    backstop_credit="$(reserve_loss_reserve_field "${pool}" "${token}" backstop_credit)"
+    balance="$(reserve_loss_token_balance "${token}" "${pool}")"
+    supply="$(reserve_loss_position_supply "${pool}" "${user}" 1)"
+    assert_equal "600000000000" "${b_rate}" "impaired reserve b_rate"
+    assert_equal "${RESERVE_LOSS_SUPPLY}" "${b_supply}" "impaired reserve b_supply"
+    assert_equal "${RESERVE_LOSS_SUPPLY}" "${supply}" "impaired user supply"
+    assert_equal "$((RESERVE_LOSS_SUPPLY - RESERVE_LOSS_IMPAIRED_CLAWBACK))" \
+        "${balance}" "impaired reserve custody"
+    assert_equal "0" "${backstop_credit}" "impaired reserve backstop credit"
+
+    token="$(reserve_loss_asset_id EXHT)"
+    b_rate="$(reserve_loss_reserve_field "${pool}" "${token}" b_rate)"
+    b_supply="$(reserve_loss_reserve_field "${pool}" "${token}" b_supply)"
+    backstop_credit="$(reserve_loss_reserve_field "${pool}" "${token}" backstop_credit)"
+    balance="$(reserve_loss_token_balance "${token}" "${pool}")"
+    supply="$(reserve_loss_position_supply "${pool}" "${user}" 2)"
+    assert_equal "0" "${b_rate}" "exhausted reserve b_rate"
+    assert_equal "${RESERVE_LOSS_SUPPLY}" "${b_supply}" "exhausted reserve b_supply"
+    assert_equal "${RESERVE_LOSS_SUPPLY}" "${supply}" "exhausted user supply"
+    assert_equal "0" "${balance}" "exhausted reserve custody"
+    assert_equal "0" "${backstop_credit}" "exhausted reserve backstop credit"
+
+    for code in HLTY IMPR EXHT; do
+        token="$(reserve_loss_asset_id "${code}")"
+        assert_equal "0" "$(normalize_scalar "$(invoke_view \
+            "verify-reserve-loss-${code}-reconciled" \
+            "${pool}" reconcile_loss --asset "${token}")")" \
+            "reserve-loss ${code} residual deficit"
+    done
+
+    state_set "reserve_loss_verified_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    cat <<EOF
+${NETWORK_LABEL} reserve-loss pool verified
+  pool:      ${pool}
+  backstop:  ${backstop} (reward-zone member; active value ${active_value})
+  issuer:    ${issuer}
+  supplier:  ${user}
+  HLTY:      healthy after pool.clawback (b_rate 1.0, 750 supplied)
+  IMPR:      recoverably impaired after SAC clawback + reconcile_loss (b_rate 0.6)
+  EXHT:      fully exhausted after SAC clawback + reconcile_loss (b_rate 0)
+EOF
+}
+
 command_status() {
     local emitter_id incumbent_id candidate_id pool_id blnd_xlm_token_id blnd_usdc_token_id
     local unlock_time prepare_not_before activation_deadline phase
@@ -2884,7 +3513,7 @@ EOF
 }
 
 command_refresh_oracle() {
-    local stamp
+    local stamp reserve_loss_oracle
 
     validate_tools
     require_network
@@ -2892,6 +3521,12 @@ command_refresh_oracle() {
     require_modeled_pool_support
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
     refresh_modeled_pool_oracles "refresh-lending-oracles-${stamp}"
+    reserve_loss_oracle="$(state_optional reserve_loss_oracle)"
+    if [[ -n "${reserve_loss_oracle}" ]]; then
+        require_reserve_loss_support
+        seed_reserve_loss_oracle "${reserve_loss_oracle}"
+        note "Refreshed the reserve-loss lending oracle."
+    fi
 }
 
 command_keepalive() {
@@ -3696,6 +4331,8 @@ main() {
         refresh-oracle) command_refresh_oracle ;;
         deploy-modeled-pools) command_deploy_modeled_pools ;;
         verify-modeled-pools) command_verify_modeled_pools ;;
+        deploy-reserve-loss-pool) command_deploy_reserve_loss_pool ;;
+        verify-reserve-loss-pool) command_verify_reserve_loss_pool ;;
         begin) command_begin ;;
         recover) command_recover ;;
         prepare) command_prepare ;;
@@ -3709,4 +4346,6 @@ main() {
     esac
 }
 
-main "$@"
+if [[ "${BLEND_MIGRATION_LIBRARY_ONLY:-false}" != "true" ]]; then
+    main "$@"
+fi

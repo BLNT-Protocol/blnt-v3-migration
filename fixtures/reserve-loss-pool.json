@@ -1,0 +1,69 @@
+{
+  "name": "Reserve Loss",
+  "backstop_take_rate": 2000000,
+  "max_positions": 6,
+  "min_collateral": 50000000,
+  "backstop_config": [
+    {
+      "asset": "BlndUsdc",
+      "take_rate_weight": 2
+    },
+    {
+      "asset": "Usdc",
+      "take_rate_weight": 1
+    }
+  ],
+  "reserves": [
+    {
+      "asset": "HLTY",
+      "outcome": "healthy",
+      "price": 10000000,
+      "config": {
+        "c_factor": 9000000,
+        "l_factor": 9000000,
+        "max_util": 9000000,
+        "r_base": 300000,
+        "r_one": 400000,
+        "r_three": 50000000,
+        "r_two": 1200000,
+        "reactivity": 20,
+        "supply_cap": "10000000000000000",
+        "util": 8000000
+      }
+    },
+    {
+      "asset": "IMPR",
+      "outcome": "impaired",
+      "price": 10000000,
+      "config": {
+        "c_factor": 9000000,
+        "l_factor": 9000000,
+        "max_util": 9000000,
+        "r_base": 300000,
+        "r_one": 400000,
+        "r_three": 50000000,
+        "r_two": 1200000,
+        "reactivity": 20,
+        "supply_cap": "10000000000000000",
+        "util": 8000000
+      }
+    },
+    {
+      "asset": "EXHT",
+      "outcome": "exhausted",
+      "price": 10000000,
+      "config": {
+        "c_factor": 9000000,
+        "l_factor": 9000000,
+        "max_util": 9000000,
+        "r_base": 300000,
+        "r_one": 400000,
+        "r_three": 50000000,
+        "r_two": 1200000,
+        "reactivity": 20,
+        "supply_cap": "10000000000000000",
+        "util": 8000000
+      }
+    }
+  ]
+}

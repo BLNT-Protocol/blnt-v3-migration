@@ -26,9 +26,9 @@ Commands:
   help  Show this message.
 
 Each pass advances the incumbent emitter when it still targets v2, checkpoints
-the v2 and v3 backstops, then gulps each reward-zone modeled pool for the
+the v2 and v3 backstops, then gulps each registered reward-zone pool for the
 corresponding protocol version. It reconciles direct reserve-custody deficits
-across every modeled v3 pool and processes one bounded pending-USDC and
+across every registered v3 pool and processes one bounded pending-USDC and
 pending-XLM buy-and-burn batch when work is available. On Stellar testnet, it
 refreshes the controlled fixture-oracle histories when they are at least 12
 hours old. The default keeper interval is one hour. Configuration may be overridden with
@@ -105,6 +105,11 @@ validate_oracle_refresh_configuration() {
         '.modeled_pools.fixed.v3.oracle' modeled_v3_fixed_oracle "Fixed v3 oracle"
     require_registry_state_match \
         '.modeled_pools.custom.v3.oracle' modeled_v3_custom_oracle "Custom v3 oracle"
+    if jq -e '.test_scenarios.reserve_loss' "${REGISTRY}" >/dev/null; then
+        require_registry_state_match \
+            '.test_scenarios.reserve_loss.contracts.oracle' \
+            reserve_loss_oracle "reserve-loss oracle"
+    fi
 }
 
 oracle_refresh_remaining_seconds() {
@@ -295,7 +300,11 @@ run_call() {
 is_zero_i128_result() {
     local output="$1"
 
-    printf '%s' "${output}" | jq -e '
+    # Newer Stellar CLI releases can print diagnostic event lines before a
+    # scalar contract return value. The final non-empty line remains the JSON
+    # result, so validate that line instead of requiring the entire capture to
+    # be a single JSON document.
+    printf '%s\n' "${output}" | tail -n 1 | jq -e '
         (type == "number" and . == 0) or
         (type == "string" and . == "0")
     ' >/dev/null 2>&1
@@ -304,7 +313,7 @@ is_zero_i128_result() {
 is_positive_i128_result() {
     local output="$1"
 
-    printf '%s' "${output}" | jq -e '
+    printf '%s\n' "${output}" | tail -n 1 | jq -e '
         (type == "number" and . > 0) or
         (type == "string" and test("^[1-9][0-9]*$"))
     ' >/dev/null 2>&1
@@ -474,9 +483,16 @@ load_configuration() {
         V3_POOL_NAMES+=("${pool_name}")
         V3_POOLS+=("${pool_id}")
     done < <(jq -er '
-        .modeled_pools | to_entries[] |
-        select(.value.v3.reward_zone_member == true) |
-        [.key, .value.v3.pool] | @tsv
+        (
+            .modeled_pools | to_entries[] |
+            select(.value.v3.reward_zone_member == true) |
+            [.key, .value.v3.pool]
+        ),
+        (
+            .test_scenarios.reserve_loss? |
+            select(.backstop.reward_zone_member == true) |
+            ["reserve_loss", .contracts.pool]
+        ) | @tsv
     ' "${REGISTRY}")
 
     V3_ALL_POOL_NAMES=()
@@ -486,8 +502,9 @@ load_configuration() {
         V3_ALL_POOL_NAMES+=("${pool_name}")
         V3_ALL_POOLS+=("${pool_id}")
     done < <(jq -er '
-        .modeled_pools | to_entries[] |
-        [.key, .value.v3.pool] | @tsv
+        (.modeled_pools | to_entries[] | [.key, .value.v3.pool]),
+        (.test_scenarios.reserve_loss? | ["reserve_loss", .contracts.pool]) |
+        @tsv
     ' "${REGISTRY}")
 
     (( ${#V2_POOLS[@]} > 0 )) || die "deployment registry contains no modeled v2 pools"

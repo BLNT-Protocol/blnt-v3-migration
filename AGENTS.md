@@ -97,15 +97,18 @@ a side effect of work in this repository.
 - Each user may have at most 20 queued-withdrawal entries in aggregate for one
   pool across all configured tiers. FIFO withdrawal and LIFO dequeue remain
   tier-local.
-- Assets counted as backstop capital must be available to the specified loss
-  waterfall.
+- Only authorization-aware transferable value counts as backstop capital.
+  Deauthorized plain USDC has zero activation, status, reward-zone, take-rate,
+  auction, and supplier-loss value until reauthorized; its shares, queues, and
+  pending interest remain accounted for.
 - Bad-debt auctions use at most one backstop tier at a time in the pool's
   immutable configured order. Every tier with positive
-  available capital and verified value is auction-eligible; zero-value tiers
-  are skipped, while negative, inconsistent, failed, or unavailable valuation
-  is not exhaustion. Supplier loss begins only after all configured tiers have no
-  usable value. Once a lot is committed, later price movement does not cancel
-  it.
+  available capital and verified value is auction-eligible; zero-value and
+  deauthorized plain-USDC tiers are skipped, while negative, inconsistent, or
+  failed valuation is not exhaustion. Supplier loss begins only after all
+  configured tiers have no usable transferable value. Once a lot is committed,
+  later price movement does not cancel it, but issuer deauthorization permits
+  immediate permissionless cancellation so selection can continue.
 - A bad-debt fill transfers only its time-scaled tier-token lot to the
   authenticated filler and impairs the pool-tier exchange rate by exactly that
   transferred amount. The percentage-selected base lot, not the smaller
@@ -157,10 +160,10 @@ a side effect of work in this repository.
   activation valuation. Stored pool status is not an additional reward-zone
   eligibility gate.
 - Backstop value uses current reserves from the immutable BLND:USDC and
-  BLND:XLM 80:20 Comets. BLND:USDC is the USDC anchor, plain USDC is valued
-  one-for-one, and plain XLM is priced by the BLND reserve ratio between the
-  two Comets. Do not introduce a backstop price oracle or caller-supplied
-  production values.
+  BLND:XLM 80:20 Comets. BLND:USDC is the USDC anchor, authorized plain USDC
+  is valued one-for-one, and plain XLM is priced by the BLND reserve ratio
+  between the two Comets. Do not introduce a backstop price oracle or caller-
+  supplied production values.
 - Plain-USDC and plain-XLM interest-auction payments credit 99% to their tier
   and reserve an exact cumulative 1% for bounded swaps through the matching
   canonical BLND Comet followed by an exact BLND burn. Buyback failure must

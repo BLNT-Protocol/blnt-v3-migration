@@ -1,11 +1,10 @@
 # Reserve-loss test pool
 
-The reserve-loss fixture deploys a separate Blend v3 factory, backstop, and
-pool against the current local contract artifacts. It reuses the migration
-lane's canonical BLND, USDC, XLM, and Comet contracts, but it does not replace
-the Fixed or Custom pools or redirect the emitter. Its isolated reward zone is
-therefore suitable for activation and accounting tests, not live BLND emission
-tests.
+The reserve-loss fixture deploys a third pool through the main Blend v3 factory
+and registers it with the main backstop and reward zone. It reuses the
+migration lane's canonical BLND, USDC, XLM, and Comet contracts without
+replacing the Fixed or Custom pools. The ordinary SDK and UI reward-zone
+discovery paths therefore expose it without a pool-specific configuration.
 
 The pool has three synthetic, seven-decimal reserve assets. Each is priced at
 $1 by a controlled test oracle and begins with 1,000 supplied units:
@@ -18,9 +17,9 @@ $1 by a controlled test oracle and begins with 1,000 supplied units:
 
 The dedicated asset issuer enables clawback before any reserve trustline is
 created. Verification confirms all three pool balance entries are authorized
-and clawbackable. The shared backstop is funded with 12,500 USDC plus 10
-BLND:USDC LP tokens, verifies that its USDC balance is non-clawbackable,
-activates the pool, and adds it to the isolated reward zone.
+and clawbackable. The pool receives 12,500 USDC plus 10 BLND:USDC LP tokens in
+the shared backstop, verifies that its USDC balance is non-clawbackable,
+activates, and joins the main reward zone.
 
 Run the complete resumable scenario with:
 
@@ -37,4 +36,5 @@ make testnet-production-verify-reserve-loss-pool
 ```
 
 The deployment identifiers and timestamps are recorded under `reserve_loss_*`
-keys in the network's ignored `state.json`.
+keys in the network's ignored `state.json`. A full `run` deploys and verifies
+this pool after the Fixed and Custom pools.

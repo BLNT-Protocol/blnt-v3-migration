@@ -93,7 +93,6 @@ MODELED_V2_FIXED_SALT="000000000000000000000000000000000000000000000000000000000
 MODELED_V2_CUSTOM_SALT="0000000000000000000000000000000000000000000000000000000000000055"
 MODELED_V3_FIXED_SALT="0000000000000000000000000000000000000000000000000000000000000066"
 MODELED_V3_CUSTOM_SALT="0000000000000000000000000000000000000000000000000000000000000088"
-RESERVE_LOSS_BACKSTOP_SALT="00000000000000000000000000000000000000000000000000000000000000ad"
 RESERVE_LOSS_POOL_SALT="00000000000000000000000000000000000000000000000000000000000000ae"
 MODELED_BLND_XLM_LP_BALANCE=$((10 * SCALAR_7))
 MODELED_V3_USDC_BALANCE=$((12500 * SCALAR_7))
@@ -145,7 +144,8 @@ Commands:
   verify-modeled-pools
             Verify modeled pool configs, registration, status, and backstops.
   deploy-reserve-loss-pool
-            Deploy and exercise the isolated three-reserve clawback scenario.
+            Deploy and exercise the three-reserve clawback scenario in the
+            main v3 factory, backstop, and reward zone.
   verify-reserve-loss-pool
             Verify healthy, impaired, and exhausted reserve outcomes.
   begin     Begin the migration queue after modeled-pool verification succeeds.
@@ -1225,7 +1225,7 @@ refresh_modeled_pool_oracles() {
 }
 
 ensure_modeled_v2_oracle() {
-    local model="$1" state_key oracle assets
+    local model="$1" state_key oracle assets seed_required=false
 
     state_key="$(modeled_oracle_state_key v2 "${model}")"
     oracle="$(state_optional "${state_key}")"
@@ -1239,13 +1239,18 @@ ensure_modeled_v2_oracle() {
             --decimals 7 \
             --resolution "${FIXTURE_ORACLE_RESOLUTION}")"
         state_set "${state_key}" "${oracle}"
+        seed_required=true
     fi
-    seed_modeled_sep40_oracle v2 "${model}" "${oracle}"
+    if [[ "${seed_required}" == "true" ||
+        -z "$(state_optional modeled_oracles_refreshed_at)" ]]
+    then
+        seed_modeled_sep40_oracle v2 "${model}" "${oracle}"
+    fi
     printf '%s\n' "${oracle}"
 }
 
 ensure_modeled_v3_oracle() {
-    local model="$1" state_key oracle assets
+    local model="$1" state_key oracle assets seed_required=false
 
     state_key="$(modeled_oracle_state_key v3 "${model}")"
     oracle="$(state_optional "${state_key}")"
@@ -1260,8 +1265,13 @@ ensure_modeled_v3_oracle() {
             --decimals 7 \
             --resolution "${FIXTURE_ORACLE_RESOLUTION}")"
         state_set "${state_key}" "${oracle}"
+        seed_required=true
     fi
-    seed_modeled_sep40_oracle v3 "${model}" "${oracle}"
+    if [[ "${seed_required}" == "true" ||
+        -z "$(state_optional modeled_oracles_refreshed_at)" ]]
+    then
+        seed_modeled_sep40_oracle v3 "${model}" "${oracle}"
+    fi
     printf '%s\n' "${oracle}"
 }
 
@@ -2244,6 +2254,7 @@ command_deploy() {
     # Every lane establishes Fixed first, then resumes the complete Fixed and
     # Custom topology through command_deploy_modeled_pools. The candidate's
     # backstop valuation remains independent from the test-only lending oracles.
+    state_set "phase" "deploying"
     ensure_modeled_asset EURC
     ensure_modeled_asset PYUSD
     state_set "modeled_pools_fixture_sha256" \
@@ -2341,10 +2352,16 @@ command_deploy_modeled_pools() {
     custom_v2_oracle="$(ensure_modeled_v2_oracle custom)"
     fixed_v3_oracle="$(ensure_modeled_v3_oracle fixed)"
     custom_v3_oracle="$(ensure_modeled_v3_oracle custom)"
+    state_set "modeled_oracles_refreshed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
     fixed_v2_pool="$(ensure_modeled_v2_pool fixed "${fixed_v2_oracle}")"
     custom_v2_pool="$(ensure_modeled_v2_pool custom "${custom_v2_oracle}")"
     fixed_v3_pool="$(ensure_modeled_v3_pool fixed "${fixed_v3_oracle}")"
+    state_set "v3_pool" "${fixed_v3_pool}"
+    state_set "primary_pool_supply_asset" "$(state_value usdc_token)"
+    state_set "primary_pool_emission_reserve_token_id" "4"
+    state_set "modeled_v3_fixed_blnd_usdc_target" \
+        "${AGGREGATE_CANDIDATE_BALANCE}"
 
     # Preserve the custody gate even when this resumable command is entered
     # before the top-level deploy path reaches its first Fixed deposit. Custom
@@ -2442,13 +2459,17 @@ command_deploy_modeled_pools() {
 
     reward_zone="$(invoke_view "query-modeled-v3-reward-zone" \
         "$(state_value candidate_backstop)" reward_zone)"
-    if ! printf '%s' "${reward_zone}" | jq -e \
-        --arg pool "${custom_v3_pool}" 'index($pool) != null' >/dev/null
-    then
-        invoke_transaction "add-custom-v3-reward" \
-            "$(state_value candidate_backstop)" add_reward \
-            --to_add "${custom_v3_pool}" --to_remove null >/dev/null
-    fi
+    for pool in "${fixed_v3_pool}" "${custom_v3_pool}"; do
+        if ! printf '%s' "${reward_zone}" | jq -e \
+            --arg pool "${pool}" 'index($pool) != null' >/dev/null
+        then
+            invoke_transaction "add-modeled-v3-reward" \
+                "$(state_value candidate_backstop)" add_reward \
+                --to_add "${pool}" --to_remove null >/dev/null
+            reward_zone="$(invoke_view "query-updated-modeled-v3-reward-zone" \
+                "$(state_value candidate_backstop)" reward_zone)"
+        fi
+    done
 
     for pool in "${fixed_v2_pool}" "${custom_v2_pool}"; do
         pool_status="$(invoke_view "query-modeled-v2-active-status" \
@@ -2938,47 +2959,18 @@ ensure_reserve_loss_oracle() {
 }
 
 ensure_reserve_loss_backstop() {
-    local pool_hash backstop factory deployed reward_zone
+    local pool_hash backstop factory
 
-    pool_hash="$(state_optional reserve_loss_pool_wasm_hash)"
-    if [[ -z "${pool_hash}" ]]; then
-        pool_hash="$(upload_wasm \
-            "upload-reserve-loss-pool" "${V3_POOL_WASM}")"
-        state_set "reserve_loss_pool_wasm_hash" "${pool_hash}"
-    fi
+    pool_hash="$(state_value v3_pool_wasm_hash)"
+    backstop="$(state_value candidate_backstop)"
+    factory="$(state_value v3_pool_factory)"
 
-    backstop="$(state_optional reserve_loss_backstop)"
-    if [[ -z "${backstop}" ]]; then
-        backstop="$(predict_contract_id "${RESERVE_LOSS_BACKSTOP_SALT}")"
-        state_set "reserve_loss_backstop" "${backstop}"
-    fi
+    state_set "reserve_loss_pool_wasm_hash" "${pool_hash}"
+    state_set "reserve_loss_backstop" "${backstop}"
+    state_set "reserve_loss_pool_factory" "${factory}"
 
-    factory="$(state_optional reserve_loss_pool_factory)"
-    if [[ -z "${factory}" ]]; then
-        factory="$(deploy_wasm \
-            "deploy-reserve-loss-pool-factory" "${V3_FACTORY_WASM}" "" \
-            --pool_init_meta \
-            "{\"backstop\":\"${backstop}\",\"blnd_id\":\"$(state_value blnd_token)\",\"pool_hash\":\"${pool_hash}\"}")"
-        state_set "reserve_loss_pool_factory" "${factory}"
-    fi
-
-    if ! reward_zone="$(invoke_view \
-        "probe-reserve-loss-backstop" "${backstop}" reward_zone 2>/dev/null)"
-    then
-        deployed="$(deploy_wasm \
-            "deploy-reserve-loss-backstop" "${V3_BACKSTOP_WASM}" \
-            "${RESERVE_LOSS_BACKSTOP_SALT}" \
-            --emitter "$(state_value emitter)" \
-            --blnd_token "$(state_value blnd_token)" \
-            --pool_factory "${factory}" \
-            --blnd_usdc_token "$(state_value blnd_usdc_token)" \
-            --blnd_xlm_token "$(state_value blnd_xlm_token)" \
-            --usdc_token "$(state_value usdc_token)" \
-            --xlm_token "$(state_value xlm_token)" \
-            --drop_list '[]')"
-        assert_equal "${backstop}" "${deployed}" \
-            "reserve-loss backstop deterministic address"
-    fi
+    invoke_view "probe-reserve-loss-backstop" \
+        "${backstop}" reward_zone >/dev/null
     printf '%s\n' "${backstop}"
 }
 
@@ -4314,9 +4306,30 @@ command_stop() {
 }
 
 command_run() {
+    local phase
+
     command_validate
     command_start
-    command_deploy true
+    if [[ -f "${STATE_FILE}" ]]; then
+        load_state
+        phase="$(state_optional phase)"
+        case "${phase}" in
+            deploying)
+                note "Resuming modeled-pool deployment from ${STATE_FILE}."
+                command_deploy_modeled_pools
+                ;;
+            open)
+                note "Core deployment is already open; reverifying modeled pools."
+                command_verify_modeled_pools
+                ;;
+            *)
+                die "deployment state exists in non-resumable phase '${phase}' at ${STATE_FILE}"
+                ;;
+        esac
+    else
+        command_deploy true
+    fi
+    command_deploy_reserve_loss_pool
 }
 
 main() {

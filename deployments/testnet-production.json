@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-22T17:16:10Z",
+  "generated_at": "2026-08-23T03:38:42Z",
   "network": {
     "name": "Stellar Testnet",
     "passphrase": "Test SDF Network ; September 2015",
@@ -9,14 +9,14 @@
     "xlm_asset_mode": "native"
   },
   "source": {
-    "migration_repository_commit": "db38faf0f7a7baf18aa96663521c3c2087327bdd",
-    "contracts_repository_commit": "30b9256230bb967b6cbc241c85fa6633624aabbb",
+    "migration_repository_commit": "482d1febb6e3077079dc64b3eba2b471a38969b4",
+    "contracts_repository_commit": "7c386471e03c3c0282cfdf0e4769f15ce15faf85",
     "dirty": true,
-    "patch_sha256": "ee339321f9e28ada2dc225c7d09eff1f46820df6e399512d0b58877578b487db"
+    "patch_sha256": "7a7174702216a81919d025620454b3678dc9d4ef319e54273ed42d1dda8fa5b0"
   },
   "accounts": {
-    "operator": "GCE6CPLHRAFV57RXYEDPATLXYMTERSRG3QGWP7ROOYGSC6FQRL3LXPDL",
-    "depositor": "GDLSWEJW7HEWV2AUK7Z5RED7LGYCHAJ5RDFQVHFIPZA6E37TCGE3DC6R"
+    "operator": "GAAYYEXTZBJ3B4JRJCP53NJBNSUFFHP4FVKMRQLAI5VSGXBVKJ4RNFAZ",
+    "depositor": "GDL2DUMNF5FA4ZV7SSLKY3BL3KEC7PYTKNRFKHZZ3KT56LP4PIK2VH5B"
   },
   "artifacts": {
     "emitter_sha256": "438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89",
@@ -25,42 +25,36 @@
     "v2_pool_sha256": "a41fc53d6753b6c04eb15b021c55052366a4c8e0e21bc72700f461264ec1350e",
     "v3_pool_factory_sha256": "a2a648931707e056cbc78f091f64b3636b76b836f1fbd76314ca871add4925c3",
     "v3_backstop_sha256": "18ea78678ff3c6bd3da64810c80664828833f18a305572ac700411d303a48bda",
-    "v3_pool_sha256": "095f04828521b7029e70448caabdf9f64fee5dc9b9f0f8494e90129fe803df74",
+    "v3_pool_sha256": "44db7ed3e04f15d3ed0aee1eebfa37dc5f35d88e9fdb09fc571bfb9ab5371c8a",
     "comet_sha256": "5d721fa580714291f6846fc01738e86d70acb47e449ea75312e272a0f7436dd8",
     "lending_oracle_sha256": "ee498142dbeb4de4d60a1d5e0741669c28ebe00f6265762fb160afaf412aa0b8"
   },
   "assets": {
-    "BLND": "CAF4KJEWNZZBZVD5W6ZUDU7PYXK26GBMISNDC2SUPO25AXFTQTKR6YPK",
-    "USDC": "CAIMPRVTB3G3RNTITG4UKDZGN5W5CGHZUWP6IWTUV6AE6NQWBRYC6LEH",
+    "BLND": "CCKA7K6SOOBTG3GBYG3AYNQU364KDHS6E4N5QML5BSHERNXY5QJU4YQF",
+    "USDC": "CBEJ7WLEDYTOZVBYCDDXLI5AEJIJLHRE66IOWU3MLDVJYFCDDNYCLNLW",
     "XLM": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
-    "EURC": "CCYMQIDAOYJLD5NHMKQJUKSSP2SH3PTKTRRGEBS4CYRMKVZT27UBVO7A",
-    "PYUSD": "CBPLAQFK344K2Z7WLGOO6AOWAKSBQNLDZOTHE34EYQPKZSMSWM6ISVOD"
+    "EURC": "CBGCEKV7CMGX23JMOY4R36U46GO3HZSKMTH4WPJVZMLCLYHMYNC6Y7T6",
+    "PYUSD": "CBJYHMG2FOCML4DTQOB62J56JERN4QIH2EYR2E467H4LAOOKND6VMGWI"
   },
   "comet_pools": {
     "BLND_USDC": {
-      "contract_id": "CAKASZY564Y62JXL6FQIHHDDGNSUJG6G4OKOXHAD5URVDRNQCIVL57YK",
-      "weights": {
-        "BLND": 80,
-        "USDC": 20
-      }
+      "contract_id": "CA4UKQBAR7YFDUKIJ3CM2LBMZQM4CGQT3RSY3KVWOLBOR6XHG5QOK66I",
+      "weights": { "BLND": 80, "USDC": 20 }
     },
     "BLND_XLM": {
-      "contract_id": "CBIXT3BQMPA6XD5XYLVANUQJENMEPD7BRMQ5HGXOQAZU6AGOK5ZJSLQS",
-      "weights": {
-        "BLND": 80,
-        "XLM": 20
-      }
+      "contract_id": "CDPVPRIIWPWQMKS4UJU5GPPIWBSRB5GMYBSP3ALNTMIPWHA6VRMD56QL",
+      "weights": { "BLND": 80, "XLM": 20 }
     }
   },
   "protocol": {
-    "emitter": "CDHW5QXER6RLRTIQWORJZ33QF26A5H3U5HAOLGA434KJFOZOO4V67KDN",
+    "emitter": "CCT6QOW6XLHKNNTE4ER2VYK3ITJEHHAR7KZLOHLAGX5EEL5OZUGLJYS4",
     "v2": {
-      "backstop": "CD5JQLBAGVC4DTUL72WH2AMUBLDFPDVVF7ROIR54VP5LHN57RB7VMEYL",
-      "pool_factory": "CBC3IWV6RJ7M2MSOV4NIKEXRMKRY7NVHZ6LQTJ6BWSLDTP7H5ULEJOZR"
+      "backstop": "CBC4UOSS4INUJM7YOQ5TFF5WO7R43PUJJFSRUIS4Z6OAONETHSXDU34X",
+      "pool_factory": "CDA5AIPFIH5QXB6BHYB445UGWQI7DKHUSFEFGE7F6MHW3LPKT524RASN"
     },
     "v3": {
-      "backstop": "CDLFU3VM46U33YPNAW6LLELLH2A3TCMRE2IXNQ66M6GHINVIRECKYUWK",
-      "pool_factory": "CD3PZFE4C4JV372KB4QKIW6RERCM63ZOU3BITURI3ZW4RJH45YALECIE"
+      "backstop": "CCPBQYAV2NV7ZV4BJHSOOE7ZKQZ4DNH7IT5AA6EUCBEYNMQYNR27RX42",
+      "pool_factory": "CBUVXGEDZZOI3T6ZXL7TR3VHLAV35XHYXVOARKQQOE56IU4IHHHQVPWV"
     }
   },
   "activation": {
@@ -70,124 +64,79 @@
   "modeled_pools": {
     "fixed": {
       "v2": {
-        "pool": "CC2V77BZ2RSALH5H7GZVLCCPJKT2IIOCKKDGPKMQWY3LSDGBPKMZV25I",
-        "oracle": "CCSM73LM572YLKX7TAN2COM35EXCVM4SSTBOR2GXRAXCJ5IV2VR633MY",
+        "pool": "CCZ3Q7RNWOZQC2OUQLADJMS7XN4L5C7KJSEGAE5ZRUARIGVFY7T66EK4",
+        "oracle": "CA7LJ2YTUHI52T6B7FTY2QSFL4NUWODIZWXCDKS3DFPJYWHKFKZFBJWJ",
         "status": "admin_active",
         "reward_zone_member": true,
         "pool_emission_position": "USDC supply",
         "blnd_usdc_base_units": "220000000000"
       },
       "v3": {
-        "pool": "CAXEWHS62XC72X2DIPXBOPDCQVVUOBCXPQRYHVC6ZLIV2GNWGCDT7FY7",
-        "oracle": "CAKXYHRZ6VDWKAPCTNGG3VI2PN7EJSAGLEK3ERZFVRJP24W54ORC3OWZ",
+        "pool": "CBTVE3IXIHA7PRKUK3AHN5ZUTGSRNHBS53AWRUXDZ5FM4Z5MKSYYAFHN",
+        "oracle": "CBP6GVVP77R5OLA7AQ67KMM6VSLEFFFQTD4XIDL7OPD2TRKNCC5RQBRR",
         "status": "admin_active",
         "reward_zone_member": true,
         "pool_emission_position": "EURC borrow",
         "active_backstop_value_base_units": "675125000005",
         "backstop": [
-          {
-            "tier": "FirstLoss",
-            "asset": "BLND_XLM",
-            "weight": 4,
-            "base_units": "100000000"
-          },
-          {
-            "tier": "SecondLoss",
-            "asset": "BLND_USDC",
-            "weight": 3,
-            "base_units": "440000000001"
-          },
-          {
-            "tier": "ThirdLoss",
-            "asset": "USDC",
-            "weight": 2,
-            "base_units": "125000000000"
-          }
+          { "tier": "FirstLoss", "asset": "BLND_XLM", "weight": 4, "base_units": "100000000" },
+          { "tier": "SecondLoss", "asset": "BLND_USDC", "weight": 3, "base_units": "440000000001" },
+          { "tier": "ThirdLoss", "asset": "USDC", "weight": 2, "base_units": "125000000000" }
         ]
       }
     },
     "custom": {
       "v2": {
-        "pool": "CDZ4FS6EVGMZ5O2ENJDNLXLCIPHLGYUWZGNPODKXVUKP6MA7IHNWIIDW",
-        "oracle": "CCERPANZRF6M7RTRJSCLST7OKMVFBLJUN3NGFEEEKWFA6VBUCPBUXWCV",
+        "pool": "CDZDBWSAKXW76JVWAHJ4WRJ66YW37G4BDLSSMM2RHYNWXPWZRRCASZAU",
+        "oracle": "CDGMFRGIZCS3JASVJSIQNEBB3NZ63LXLA7HN4RC6RVXDQ44PUB7YLMPO",
         "status": "admin_active",
         "reward_zone_member": true,
         "pool_emission_position": "USDC supply",
         "blnd_usdc_base_units": "220000000000"
       },
       "v3": {
-        "pool": "CDR7U5AEACY2FXHNA2ICCVYR4GDDKMZQSMDYSIQIIA7EHTRHI4LHPORL",
-        "oracle": "CC6OZ3ICZ2V5OAZEHZ5VAG77ULHXUPUXNASG6HGYRPCKV4XXA23YLPZQ",
+        "pool": "CCDGQWNCKOOMJ5WLSEDTUSOOCG5NNY37E2BN2XXM4SSMTEZGC67HX7LX",
+        "oracle": "CACCLDFCYAJ76XCEG6KBPUKI2PO7CDLTEQHEOOFG2MNT6HHMXE4RHCEJ",
         "status": "admin_active",
         "reward_zone_member": true,
         "pool_emission_position": null,
-        "reserves": [
-          "XLM",
-          "USDC",
-          "PYUSD"
-        ],
+        "reserves": ["XLM", "USDC", "PYUSD"],
         "active_backstop_value_base_units": "125000000000",
         "backstop": [
-          {
-            "tier": "FirstLoss",
-            "asset": "XLM",
-            "weight": 2,
-            "base_units": "10000000000"
-          },
-          {
-            "tier": "SecondLoss",
-            "asset": "USDC",
-            "weight": 1,
-            "base_units": "122500000000"
-          }
+          { "tier": "FirstLoss", "asset": "XLM", "weight": 2, "base_units": "10000000000" },
+          { "tier": "SecondLoss", "asset": "USDC", "weight": 1, "base_units": "122500000000" }
         ]
       }
     }
   },
   "test_scenarios": {
     "reserve_loss": {
-      "purpose": "Isolated pool clawback, SAC clawback, and reserve-loss reconciliation",
-      "deployed_at": "2026-08-22T17:13:48Z",
-      "verified_at": "2026-08-22T17:14:56Z",
-      "source": {
-        "migration_repository_commit": "ad38631ea1897c7f9f91d8b88a3f0f767b0f290d",
-        "migration_patch_sha256": "4830da51c5df9f4c2a8436a28c9bf34d5885accce7af82679d60a1595b07c1e6",
-        "contracts_repository_commit": "407665562a00e2f6a725cf1f3ca1e4c5c5e7efa1",
-        "contracts_patch_sha256": "830ca49d489cdb0769522f324881f7ff8f6b0af30271a09705d208a20a13d389"
-      },
+      "purpose": "Reward-zone pool for pool clawback, SAC clawback, and reserve-loss reconciliation",
+      "deployed_at": "2026-08-23T00:27:48Z",
+      "verified_at": "2026-08-23T00:29:55Z",
       "accounts": {
-        "issuer": "GCTD4TKWVMWUMCJ7XV426AXIQOZZLOJAW5QWCK2DBSO6R7ZVKR5HQHCB",
-        "supplier": "GB7CLWROHWR3THD74C6YDP2SDHENO6UMW7VPLRBWFXACZCLCHAQLCXMW"
+        "issuer": "GCSLXLQE4EN7IAPQ7D6UH5QJT6R5LW7TQXZOFW27FREXZH4BL44WSTL3",
+        "supplier": "GAHNIBIXOR4KEMXRWO6RGHKHCH7MYFPLSYCZSUS4IZ42HRZGVE5WWKNU"
       },
       "contracts": {
-        "pool_factory": "CDF5WFL3T5QFKF72LHAO54L2VUJCNJGLADUSEWSUNJZIUE6THTUH3REM",
-        "backstop": "CAKBKZAO37BKDF6EXIEZ2UR6PMZY7RYFEP6BFLNJ75GOQ43J4PYK2ZZT",
-        "pool": "CB73ZYVTN52LEE3EXKFTNMRJCBVRK432DYNHDEKESPI6X26NJKFZQ4NF",
-        "oracle": "CAUZ6UMP46CB343N6FKP35A6GC6XGUBYN3DBXUV3AMDJ7TZ5VSCHZBPP",
-        "pool_wasm_sha256": "8e903234125aea8139d479343d8ea54e11dd0cf9f42d0a479be68860600b9f38"
+        "pool_factory": "CBUVXGEDZZOI3T6ZXL7TR3VHLAV35XHYXVOARKQQOE56IU4IHHHQVPWV",
+        "backstop": "CCPBQYAV2NV7ZV4BJHSOOE7ZKQZ4DNH7IT5AA6EUCBEYNMQYNR27RX42",
+        "pool": "CC2UG4PHQHF4XTBZNI6O3P7K34ZDLJI3E7IPXDEKVYIMITKI2DNMN27E",
+        "oracle": "CAKHDVNSXCCN6N7LP3TYPY4KZ2FQJGPJSR75YOMF2PV5HW7IF73W55PO",
+        "pool_wasm_sha256": "44db7ed3e04f15d3ed0aee1eebfa37dc5f35d88e9fdb09fc571bfb9ab5371c8a"
       },
       "backstop": {
         "reward_zone_member": true,
-        "receives_live_emitter_blnd": false,
+        "receives_live_emitter_blnd": true,
         "active_value_base_units": "125125000000",
         "tiers": [
-          {
-            "tier": "FirstLoss",
-            "asset": "BLND_USDC",
-            "weight": 2,
-            "base_units": "100000000"
-          },
-          {
-            "tier": "SecondLoss",
-            "asset": "USDC",
-            "weight": 1,
-            "base_units": "125000000000"
-          }
+          { "tier": "FirstLoss", "asset": "BLND_USDC", "weight": 2, "base_units": "100000000" },
+          { "tier": "SecondLoss", "asset": "USDC", "weight": 1, "base_units": "125000000000" }
         ]
       },
       "reserves": {
         "HLTY": {
-          "contract_id": "CAFZBPGBVMEV6LOCJ7U752T2BGBESOXTQDSR64PXPO2BXXIMNSN2652D",
+          "contract_id": "CCM6GIDDBYK6FC4RDZFPPLDZSAZIJYE3XPH3U6J2WFUB4O5GMLTTJ5HA",
           "mechanism": "pool_clawback",
           "clawback_base_units": "2500000000",
           "custody_base_units": "7500000000",
@@ -196,7 +145,7 @@
           "state": "healthy"
         },
         "IMPR": {
-          "contract_id": "CDKM7UVN4VU2EAOOXNC4SYJ7XJVB4LQGZDTDKBOPOUE3B7MHUZSI6TIY",
+          "contract_id": "CD2VBZFKXOOS64UG3D3RJSI3I4BO6MHNKHALQB7PNVDBJ3WQCVORCIN7",
           "mechanism": "sac_clawback_then_reconcile_loss",
           "clawback_base_units": "4000000000",
           "custody_base_units": "6000000000",
@@ -205,7 +154,7 @@
           "state": "impaired"
         },
         "EXHT": {
-          "contract_id": "CDCKY64B2JJQQNY3JRLMXXXDXDQTM6JE74GHET2SJVCRZBCW6RHTJFHI",
+          "contract_id": "CATTMP6WPNTVX2KU763BHENWMK6I6EIDOGOAY6RZALGOE2VKKANYMLSH",
           "mechanism": "sac_clawback_then_reconcile_loss",
           "clawback_base_units": "10000000000",
           "custody_base_units": "0",
@@ -218,23 +167,24 @@
   },
   "reward_zones": {
     "v2": [
-      "CC2V77BZ2RSALH5H7GZVLCCPJKT2IIOCKKDGPKMQWY3LSDGBPKMZV25I",
-      "CDZ4FS6EVGMZ5O2ENJDNLXLCIPHLGYUWZGNPODKXVUKP6MA7IHNWIIDW"
+      "CCZ3Q7RNWOZQC2OUQLADJMS7XN4L5C7KJSEGAE5ZRUARIGVFY7T66EK4",
+      "CDZDBWSAKXW76JVWAHJ4WRJ66YW37G4BDLSSMM2RHYNWXPWZRRCASZAU"
     ],
     "v3": [
-      "CAXEWHS62XC72X2DIPXBOPDCQVVUOBCXPQRYHVC6ZLIV2GNWGCDT7FY7",
-      "CDR7U5AEACY2FXHNA2ICCVYR4GDDKMZQSMDYSIQIIA7EHTRHI4LHPORL"
+      "CC2UG4PHQHF4XTBZNI6O3P7K34ZDLJI3E7IPXDEKVYIMITKI2DNMN27E",
+      "CCDGQWNCKOOMJ5WLSEDTUSOOCG5NNY37E2BN2XXM4SSMTEZGC67HX7LX",
+      "CBTVE3IXIHA7PRKUK3AHN5ZUTGSRNHBS53AWRUXDZ5FM4Z5MKSYYAFHN"
     ]
   },
   "migration": {
     "phase": "open",
-    "queue_transaction": "1f076426c5702eb7cca3d1cad8227cb801e1125b26f252f7843946d82f5c12eb",
-    "epoch_started_at": "2026-08-18T00:08:51Z",
-    "prepare_not_before": "2026-09-11T00:11:52Z",
-    "unlock_at": "2026-09-18T00:11:52Z",
+    "queue_transaction": "3cebf90b42369e1a1cfe6fdf8c5fb3865958387c7f4a47d0aa2489dabbaf50d3",
+    "epoch_started_at": "2026-08-22T23:59:27Z",
+    "prepare_not_before": "2026-09-16T00:00:07Z",
+    "unlock_at": "2026-09-23T00:00:07Z",
     "incumbent_blnd_usdc_base_units": "440000000000",
     "candidate_blnd_usdc_base_units": "440000000001",
-    "queued_backstop": "CDLFU3VM46U33YPNAW6LLELLH2A3TCMRE2IXNQ66M6GHINVIRECKYUWK",
-    "queued_designated_token": "CBIXT3BQMPA6XD5XYLVANUQJENMEPD7BRMQ5HGXOQAZU6AGOK5ZJSLQS"
+    "queued_backstop": "CCPBQYAV2NV7ZV4BJHSOOE7ZKQZ4DNH7IT5AA6EUCBEYNMQYNR27RX42",
+    "queued_designated_token": "CDPVPRIIWPWQMKS4UJU5GPPIWBSRB5GMYBSP3ALNTMIPWHA6VRMD56QL"
   }
 }

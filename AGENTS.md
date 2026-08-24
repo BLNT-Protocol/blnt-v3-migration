@@ -138,6 +138,11 @@ a side effect of work in this repository.
   continue accruing on the ordinary 100%-utilization curve; all resulting
   interest and positive custody surplus are credited to the backstop because
   no supplier denominator remains. Repayment and liquidation remain available.
+- A deauthorized lending reserve is quarantined without being written off:
+  transfer-dependent requests fail, collateral has zero effective health
+  value, liabilities and interest continue, internal liquidation positions
+  remain transferable, and unauctionable take-rate credit stays pending until
+  reauthorization. Authorization revocation alone is not a custody deficit.
 - Emitter migration qualification uses the candidate contract's direct balance
   of the incumbent emitter-designated token and requires a strictly greater
   balance.

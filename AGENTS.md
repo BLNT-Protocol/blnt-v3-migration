@@ -191,7 +191,7 @@ a side effect of work in this repository.
   policy, 70/30 emission split, contract WASM, or any protocol-wide rule.
 - Each pool factory deployment immutably selects one to three unique assets
   from canonical BLND:XLM LP, BLND:USDC LP, USDC, and XLM and assigns integer
-  take-rate weights from 1 through 10 that strictly decrease by tier. Only the
+  take-rate weights from 1 through 100 independently of tier order. Only the
   two LP assets are BLND-emission eligible; plain USDC and XLM apply the
   failure-isolated 1% buy-and-burn rule above.
 - Preserve the v2-compatible reward-zone shape: at most 30 pools,

@@ -10,3 +10,6 @@
 [submodule "blend-sdk-js"]
 	path = blend-sdk-js
 	url = git@github.com:levinson/blend-sdk-js.git
+[submodule "comet-contracts-v1"]
+	path = comet-contracts-v1
+	url = git@github.com:levinson/comet-contracts-v1.git

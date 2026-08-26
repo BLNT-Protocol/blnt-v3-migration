@@ -1394,7 +1394,8 @@ ensure_modeled_v3_pool() {
             --backstop_take_rate "${take_rate}" \
             --max_positions "${max_positions}" \
             --min_collateral "${min_collateral}" \
-            --backstop_config "${backstop_config}")"
+            --backstop_config "${backstop_config}" \
+            --access_controller null)"
         pool="$(normalize_scalar "${raw}")"
         require_contract_id "${pool}" "${model} v3 pool"
         state_set "${state_key}" "${pool}"
@@ -2632,7 +2633,7 @@ verify_modeled_pool_reserves() {
 
 command_verify_modeled_pools() {
     local version model pool oracle factory registered config expected_config
-    local backstop_config expected_backstop_config
+    local factory_backstop_config backstop_config expected_backstop_config
     local status v2_shares blnd_usdc_shares blnd_xlm_shares usdc_shares
     local custom_xlm_shares custom_usdc_shares
     local incumbent_balance candidate_balance reward_zone stream supply
@@ -2675,12 +2676,16 @@ command_verify_modeled_pools() {
                 registered="$(normalize_scalar "$(invoke_view \
                     "verify-${model}-v3-registration" "${factory}" is_pool \
                     --pool_address "${pool}")")"
-                backstop_config="$(invoke_view \
+                factory_backstop_config="$(invoke_view \
                     "verify-${model}-v3-backstop-config" \
                     "${factory}" backstop_config --pool_address "${pool}")"
+                backstop_config="$(jq -c '.tiers' <<<"${factory_backstop_config}")"
                 expected_backstop_config="$(modeled_v3_backstop_config "${model}")"
                 assert_json_equal "${expected_backstop_config}" \
                     "${backstop_config}" "${version} ${model} backstop config"
+                assert_equal "null" \
+                    "$(jq -c '.access_controller' <<<"${factory_backstop_config}")" \
+                    "${version} ${model} access controller"
                 oracle_admin="$(normalize_scalar "$(invoke_view \
                     "verify-${model}-v3-oracle-admin" \
                     "${oracle}" admin)")"
@@ -3005,7 +3010,8 @@ ensure_reserve_loss_pool() {
             --min_collateral \
             "$(jq -er '.min_collateral' "${RESERVE_LOSS_FIXTURE}")" \
             --backstop_config \
-            "$(jq -c '.backstop_config' "${RESERVE_LOSS_FIXTURE}")")"
+            "$(jq -c '.backstop_config' "${RESERVE_LOSS_FIXTURE}")" \
+            --access_controller null)"
         pool="$(normalize_scalar "${raw}")"
         require_contract_id "${pool}" "reserve-loss pool"
         state_set "reserve_loss_pool" "${pool}"

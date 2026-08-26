@@ -47,6 +47,13 @@ struct BackstopTierConfig {
 
 #[derive(Clone)]
 #[contracttype]
+struct PoolBackstopConfig {
+    access_controller: Option<Address>,
+    tiers: Vec<BackstopTierConfig>,
+}
+
+#[derive(Clone)]
+#[contracttype]
 enum BackstopAsset {
     BlndXlm,
     BlndUsdc,
@@ -354,22 +361,25 @@ impl MockV3PoolFactory {
             .set(&MockV3PoolFactoryKey::Pool(pool), &true);
     }
 
-    pub fn backstop_config(env: Env, _pool: Address) -> Vec<BackstopTierConfig> {
-        vec![
-            &env,
-            BackstopTierConfig {
-                asset: BackstopAsset::BlndXlm,
-                take_rate_weight: 4,
-            },
-            BackstopTierConfig {
-                asset: BackstopAsset::BlndUsdc,
-                take_rate_weight: 3,
-            },
-            BackstopTierConfig {
-                asset: BackstopAsset::Usdc,
-                take_rate_weight: 2,
-            },
-        ]
+    pub fn backstop_config(env: Env, _pool: Address) -> PoolBackstopConfig {
+        PoolBackstopConfig {
+            access_controller: None,
+            tiers: vec![
+                &env,
+                BackstopTierConfig {
+                    asset: BackstopAsset::BlndXlm,
+                    take_rate_weight: 4,
+                },
+                BackstopTierConfig {
+                    asset: BackstopAsset::BlndUsdc,
+                    take_rate_weight: 3,
+                },
+                BackstopTierConfig {
+                    asset: BackstopAsset::Usdc,
+                    take_rate_weight: 2,
+                },
+            ],
+        }
     }
 }
 

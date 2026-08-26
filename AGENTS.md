@@ -46,6 +46,9 @@ git submodule update --init --recursive
 
 - `blend-contracts-v2` is the authoritative SDK-22 source submodule.
 - `blend-contracts-v3` is the sole production v3 contract source submodule.
+- `comet-contracts-v1` is the Protocol-27 Comet weighted-pool source
+  submodule. Do not silently substitute it for frozen or incumbent Comet WASM
+  inputs in migration lanes.
 - `blend-sdk-js` and `blend-ui` are pinned client-integration source
   submodules.
 - `deployed-artifacts/mainnet` contains exact deployed mainnet WASM compatibility
@@ -68,6 +71,9 @@ a side effect of work in this repository.
   silently substituted for those files.
 - New v3 code belongs in the `blend-contracts-v3/` submodule. It MUST target
   Protocol 27 with Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
+- Protocol-27 Comet work belongs in the `comet-contracts-v1/` submodule and
+  MUST use the same Rust, SDK, protocol, and WASM target lane. Migration
+  runners must explicitly opt into rebuilt Comet artifacts.
 - Migration-only tests and fixtures belong in `migration-harness/` and MUST
   NOT become production contract dependencies.
 - Do not add an SDK 26 compatibility lane. Migration compatibility is tested

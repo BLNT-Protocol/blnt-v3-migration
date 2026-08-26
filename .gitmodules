@@ -13,3 +13,9 @@
 [submodule "comet-contracts-v1"]
 	path = comet-contracts-v1
 	url = git@github.com:levinson/comet-contracts-v1.git
+[submodule "sep-41-token"]
+	path = sep-41-token
+	url = git@github.com:levinson/sep-41-token.git
+[submodule "soroban-fixed-point-math"]
+	path = soroban-fixed-point-math
+	url = git@github.com:levinson/soroban-fixed-point-math.git

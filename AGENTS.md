@@ -49,6 +49,9 @@ git submodule update --init --recursive
 - `comet-contracts-v1` is the Protocol-27 Comet weighted-pool source
   submodule. Do not silently substitute it for frozen or incumbent Comet WASM
   inputs in migration lanes.
+- `sep-41-token` and `soroban-fixed-point-math` are the Protocol-27 dependency
+  source submodules used to replace Comet's temporary compatibility ports only
+  through an explicit Comet dependency update.
 - `blend-sdk-js` and `blend-ui` are pinned client-integration source
   submodules.
 - `deployed-artifacts/mainnet` contains exact deployed mainnet WASM compatibility

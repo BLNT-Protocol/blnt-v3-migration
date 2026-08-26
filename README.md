@@ -19,8 +19,9 @@ git submodule update --init --recursive
 The deployed v2 source baseline is Blend Protocol v2 commit
 `ba22b487b2c5057a4ecc28b05b5193c28e4bd117`. The Blend contract submodules are
 `blend-contracts-v2/` and `blend-contracts-v3/`. Protocol-27 Comet weighted-pool
-source is pinned in `comet-contracts-v1/`. The client-integration submodules are
-`blend-sdk-js/` and `blend-ui/`.
+source is pinned in `comet-contracts-v1/`, with its Protocol-27 dependency
+sources pinned in `sep-41-token/` and `soroban-fixed-point-math/`. The
+client-integration submodules are `blend-sdk-js/` and `blend-ui/`.
 
 Exact mainnet emitter, v2 backstop, pool-factory, and pool WASMs are checked in
 under `deployed-artifacts/mainnet/` with their contract IDs and SHA-256 digests. These
@@ -58,8 +59,8 @@ documented in
 
 ## Toolchain lanes
 
-This repository deliberately maintains four independent source and test
-lanes:
+This repository deliberately maintains four independent source and test lanes,
+with supporting Protocol-27 dependency sources pinned separately:
 
 - `blend-contracts-v2/` is the deployed v2 source baseline, pinned to
   Rust 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
@@ -67,6 +68,8 @@ lanes:
   1.91.1, Soroban SDK 27.0.3, Protocol 27 tooling, and `wasm32v1-none`.
 - `comet-contracts-v1/` is the Protocol-27 Comet weighted-pool source
   submodule, pinned to Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
+- `sep-41-token/` and `soroban-fixed-point-math/` are the corresponding
+  Protocol-27 dependency source submodules, pinned to the same toolchain.
 - `migration-harness/` contains only Protocol-27 cross-version tests and
   test-only support contracts.
 

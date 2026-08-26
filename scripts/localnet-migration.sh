@@ -118,7 +118,7 @@ V3_FACTORY_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/p
 V3_BACKSTOP_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
 V3_POOL_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/pool.wasm"
 V3_TEST_SEP40_ORACLE_WASM="${ROOT_DIR}/migration-harness/target/wasm32v1-none/optimized/blend_v3_test_sep40_oracle.wasm"
-COMET_WASM="${ROOT_DIR}/blend-contracts-v2/comet.wasm"
+COMET_WASM="${BLEND_MIGRATION_COMET_WASM:-${ROOT_DIR}/blend-contracts-v2/comet.wasm}"
 
 EXPECTED_EMITTER_SHA256="438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89"
 EMITTER_WASM="${ROOT_DIR}/deployed-artifacts/mainnet/emitter.wasm"
@@ -163,6 +163,9 @@ final seven days and finalize from unlock through the following seven-day grace
 period. The contract retains v2's distribute/drop migration surface. Generated
 configuration, public state, results, and cost logs live below the
 network-specific ignored work directory.
+
+Set BLEND_MIGRATION_COMET_WASM to an already-built Comet artifact to opt in to
+testing rebuilt Comet bytecode. The default remains the frozen SDK-22 artifact.
 EOF
 }
 
@@ -1858,6 +1861,7 @@ Artifacts:
   Frozen incumbent: exact deployed mainnet v2 pool, pool factory, and backstop WASM
   Deployed emitter: exact deployed mainnet emitter WASM
   Candidate: SDK 27 pool, pool factory, and backstop with ${valuation_description}
+  Comet: ${COMET_WASM}
 
 Deployment:
   1. Create and fund isolated issuer/operator, depositor, and one-way Comet-controller identities.

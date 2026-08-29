@@ -24,8 +24,7 @@ retained under `deployed-artifacts/mainnet`. Their mainnet contract IDs, source
 provenance, and SHA-256 digests are recorded in
 `deployed-artifacts/mainnet/manifest.json`. Run `make verify-deployed-artifacts` before using them.
 
-These deployed bytes are authoritative for compatibility tests and isolated
-migration deployments. Locally rebuilt SDK-22 artifacts remain valuable for
+These deployed bytes are authoritative for legacy compatibility tests. Locally rebuilt SDK-22 artifacts remain valuable for
 source verification, but build and optimizer differences can change their
 hashes; they MUST NOT silently replace the exact deployed fixtures.
 
@@ -62,7 +61,7 @@ must not modify the pinned v2 source, its dependency graph, or its lockfile.
 
 ## Contract roles
 
-- `emitter.wasm`: deployed migration and BLND distribution boundary.
+- `emitter.wasm`: deployed legacy BLND distribution boundary for v1/v2.
 - `v2-backstop.wasm`: deployed single-tier incumbent backstop.
 - `v2-pool.wasm`: deployed lending-pool implementation.
 - `v2-pool-factory.wasm`: deployed pool factory.
@@ -71,7 +70,8 @@ must not modify the pinned v2 source, its dependency graph, or its lockfile.
   tests.
 - `blend-contracts-v3`: pinned production v3 contract source and tests.
 
-Emitter replacement changes only the recipient of future BLND distributions.
-It does not migrate or mutate incumbent v2 supplier, borrower, or backstop
-positions; those remain governed by the deployed v2 contracts and their
-existing claim and withdrawal rules.
+V3 does not replace this emitter. It deploys an independent BLNT emitter while
+the recorded artifact remains with v1/v2. Creating v3 does not migrate or
+mutate incumbent supplier, borrower, or backstop positions; those remain
+governed by the deployed v2 contracts and their existing claim and withdrawal
+rules.

@@ -1,6 +1,7 @@
 V2_DIR := blend-contracts-v2
 V3_DIR := blend-contracts-v3
 MIGRATION_HARNESS_DIR := migration-harness
+COMET_V2_DIR := comet-contracts-v1
 
 default: build
 
@@ -24,6 +25,39 @@ test-v2-positions-survive-migration: verify-deployed-artifacts build-v3
 		--locked
 
 test-all: test check-v3
+
+dual-emitter-plan:
+	bash scripts/dual-emitter-deployment.sh plan
+
+dual-emitter-validate:
+	bash scripts/dual-emitter-deployment.sh validate
+
+dual-emitter-start:
+	bash scripts/dual-emitter-deployment.sh start
+
+dual-emitter-deploy:
+	bash scripts/dual-emitter-deployment.sh deploy
+
+dual-emitter-run:
+	bash scripts/dual-emitter-deployment.sh run
+
+dual-emitter-status:
+	bash scripts/dual-emitter-deployment.sh status
+
+dual-emitter-stop:
+	bash scripts/dual-emitter-deployment.sh stop
+
+testnet-dual-emitter-validate:
+	BLEND_MIGRATION_NETWORK=testnet bash scripts/dual-emitter-deployment.sh validate
+
+testnet-dual-emitter-deploy:
+	BLEND_MIGRATION_NETWORK=testnet bash scripts/dual-emitter-deployment.sh deploy
+
+testnet-dual-emitter-run:
+	BLEND_MIGRATION_NETWORK=testnet bash scripts/dual-emitter-deployment.sh run
+
+testnet-dual-emitter-status:
+	BLEND_MIGRATION_NETWORK=testnet bash scripts/dual-emitter-deployment.sh status
 
 localnet-plan:
 	bash scripts/localnet-migration.sh plan
@@ -135,6 +169,7 @@ testnet-production-keeper:
 
 build-v3:
 	$(MAKE) -C $(V3_DIR) build
+	$(MAKE) -C $(COMET_V2_DIR) build
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-test-sep40-oracle --target wasm32v1-none --release --locked
 	mkdir -p $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized
@@ -147,6 +182,7 @@ build-v3:
 
 check-v3: verify-deployed-artifacts build-v3
 	$(MAKE) -C $(V3_DIR) test
+	$(MAKE) -C $(COMET_V2_DIR) test
 	cargo +1.91.1 fmt --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --all -- --check
 	cargo +1.91.1 check --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --all-targets --locked
 	cargo +1.91.1 test --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --workspace --locked
@@ -174,11 +210,13 @@ build: verify-deployed-artifacts
 fmt:
 	cargo +1.81 fmt --manifest-path $(V2_DIR)/Cargo.toml --all
 	$(MAKE) -C $(V3_DIR) fmt
+	cargo +1.91.1 fmt --manifest-path $(COMET_V2_DIR)/Cargo.toml --all
 	cargo +1.91.1 fmt --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --all
 
 clean:
 	cargo +1.81 clean --manifest-path $(V2_DIR)/Cargo.toml
 	$(MAKE) -C $(V3_DIR) clean
+	$(MAKE) -C $(COMET_V2_DIR) clean
 	cargo +1.91.1 clean --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml
 
 generate-js:

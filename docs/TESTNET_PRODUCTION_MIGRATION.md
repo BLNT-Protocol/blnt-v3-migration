@@ -1,4 +1,9 @@
-# Comet-Valued Public-Testnet Migration
+# Legacy queued-emitter public-testnet regression lane
+
+> This is not the active v3 launch design. It is retained to exercise the old
+> deployed-emitter replacement and backfill path. Use
+> [DUAL_EMITTER_DEPLOYMENT.md](DUAL_EMITTER_DEPLOYMENT.md) for the independent
+> BLND/BLNT deployment.
 
 This isolated lane exercises the candidate's integrated Comet valuation with
 native XLM and fresh Comet contracts on public testnet. Its state, keys,

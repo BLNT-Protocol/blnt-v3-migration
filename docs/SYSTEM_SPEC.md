@@ -24,8 +24,8 @@ deployment default, or test expectation.
 ## Migration specification set
 
 1. [MIGRATION_PROTOCOL_SPEC.md](MIGRATION_PROTOCOL_SPEC.md) defines the
-   normative emitter-replacement lifecycle, candidate migration accounting,
-   backfill, incumbent isolation, and recovery behavior.
+   normative dual-emitter topology, BLND-to-BLNT conversion, direct v3 launch,
+   incumbent isolation, Comet V2 LPs, and future replacement behavior.
 2. [BASELINE.md](BASELINE.md) defines the frozen v2 source, deployed artifacts,
    toolchain separation, and submodule provenance.
 3. [MIGRATION_ACCEPTANCE.md](MIGRATION_ACCEPTANCE.md) defines the normative
@@ -39,9 +39,10 @@ in the normative migration documents are acceptance criteria.
 
 ## Source and artifact authority
 
-The exact deployed v2 and deployed-emitter WASMs under `deployed-artifacts/mainnet` are the
-runtime migration boundary. The pinned `blend-contracts-v2` submodule
-provides the frozen SDK-22 source and test baseline.
+The exact deployed v2 and legacy-emitter WASMs under `deployed-artifacts/mainnet`
+are the legacy compatibility boundary. The pinned `blend-contracts-v2`
+submodule provides the frozen SDK-22 source and test baseline. The v3 emitter
+is built from the pinned `blend-contracts-v3` submodule.
 
 The pinned `blend-contracts-v3` submodule is the sole production v3 contract
 source. Migration tests and runners MUST build and invoke its artifacts
@@ -57,9 +58,9 @@ represented as production dependencies.
 
 Apply the following order:
 
-1. Deployed v2 and deployed-emitter bytecode governs compatibility facts.
-2. This migration specification governs emitter replacement, migration
-   accounting, backfill, recovery, orchestration, evidence, and acceptance.
+1. Deployed v2 and legacy-emitter bytecode governs legacy compatibility facts.
+2. This transition specification governs independent emitters, conversion,
+   direct v3 activation, future replacement, orchestration, evidence, and acceptance.
 3. The contract repository's composed specification governs all other v3
    contract behavior.
 
@@ -81,9 +82,9 @@ assets. Every entry MUST exist, be positive and authorized, and record
 `clawback = false`. A local issued-XLM fixture MUST satisfy the same check for
 both Comet and backstop custody; native XLM requires no issuer check.
 
-The complete modeled-pool verification MUST repeat the checks before the
-emitter queue can open. Any missing, malformed, deauthorized, zero, or
-clawbackable entry invalidates the deployment. This is evidence for the
+The complete modeled-pool verification MUST repeat the checks before v3 is
+declared ready. Any missing, malformed, deauthorized, zero, or clawbackable
+entry invalidates the deployment. This is evidence for the
 contract specification's non-clawbackable-custody requirement, not a new
 contract entry point or substitute for lending-reserve admission policy.
 

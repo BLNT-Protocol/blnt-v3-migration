@@ -4,7 +4,7 @@ Experimental migration, compatibility, and deployment harness for the
 transition from Blend Protocol v2 to the v3 candidate on Stellar.
 
 This repository pins the frozen v2 baseline and the v3 candidate contracts to
-test emitter migration, cross-version behavior, and network deployments.
+test independent legacy/v3 emitters, cross-version behavior, and network deployments.
 Production v3 contract behavior belongs to the `blend-contracts-v3` submodule.
 This is not an official or production-ready Blend release.
 
@@ -18,8 +18,8 @@ git submodule update --init --recursive
 
 The deployed v2 source baseline is Blend Protocol v2 commit
 `ba22b487b2c5057a4ecc28b05b5193c28e4bd117`. The Blend contract submodules are
-`blend-contracts-v2/` and `blend-contracts-v3/`. Protocol-27 Comet weighted-pool
-source is pinned in `comet-contracts-v1/`, with its Protocol-27 dependency
+`blend-contracts-v2/` and `blend-contracts-v3/`. Protocol-27 Comet V2 weighted-pool
+source is pinned in the historically named `comet-contracts-v1/`, with its Protocol-27 dependency
 sources pinned in `sep-41-token/` and `soroban-fixed-point-math/`. The
 client-integration submodules are `blend-sdk-js/` and `blend-ui/`.
 
@@ -33,13 +33,12 @@ GitHub Actions requires a `SUBMODULES_TOKEN` repository secret with read
 access to the private `blend-contracts-v3`, `blend-sdk-js`, and `blend-ui`
 repositories.
 
-The emitter migration does not upgrade the deployed v2 contracts or move
-their supplier, borrower, or backstop positions. Immediately before switching
-recipients, the deployed emitter mints its final time-accrued BLND distribution
-to the incumbent backstop. Subsequent emitter distributions go to v3, while
-existing v2 positions and previously accrued v2 claims remain governed by the
-v2 contracts. This routing lasts while v3 remains the emitter's registered
-backstop.
+V3 no longer replaces or depends on the deployed BLND emitter. The legacy
+emitter remains with v1/v2, while v3 deploys a separate emitter that creates
+BLNT for the v3 backstop from launch. The v3 emitter accepts explicit one-way
+BLND-to-BLNT conversion for its first 60 days and retains the established
+31-day backstop-swap API for a future BLNT-based protocol upgrade. Existing v2
+positions and claims remain entirely governed by the legacy contracts.
 
 See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the migration repository
 boundary and [docs/MIGRATION_PROTOCOL_SPEC.md](docs/MIGRATION_PROTOCOL_SPEC.md)
@@ -50,9 +49,9 @@ for the migration protocol. Contract behavior is composed by
 cross-version migration acceptance. The contract submodule's v3 specification
 defines the integrated Comet-based backstop valuation.
 Operational instructions live in
-[docs/LOCALNET_MIGRATION.md](docs/LOCALNET_MIGRATION.md). The isolated
-native-XLM public-testnet lane is documented in
-[docs/TESTNET_PRODUCTION_MIGRATION.md](docs/TESTNET_PRODUCTION_MIGRATION.md).
+[docs/DUAL_EMITTER_DEPLOYMENT.md](docs/DUAL_EMITTER_DEPLOYMENT.md). The older
+queued-migration localnet and testnet runbooks are retained only for regression
+coverage of the legacy replacement path.
 The integrated pool/SAC clawback and reserve-loss reconciliation fixture is
 documented in
 [docs/RESERVE_LOSS_TESTING.md](docs/RESERVE_LOSS_TESTING.md).
@@ -66,7 +65,7 @@ with supporting Protocol-27 dependency sources pinned separately:
   Rust 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
 - `blend-contracts-v3/` is the production candidate submodule, pinned to Rust
   1.91.1, Soroban SDK 27.0.3, Protocol 27 tooling, and `wasm32v1-none`.
-- `comet-contracts-v1/` is the Protocol-27 Comet weighted-pool source
+- `comet-contracts-v1/` is the Protocol-27 Comet V2 weighted-pool source
   submodule, pinned to Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
 - `sep-41-token/` and `soroban-fixed-point-math/` are the corresponding
   Protocol-27 dependency source submodules, pinned to the same toolchain.
@@ -90,14 +89,14 @@ Run the deployed v2 test suite:
 make test
 ```
 
-Run the candidate migration baseline:
+Run the cross-version emitter and position-isolation baseline:
 
 ```bash
 make test-v2-migration
 ```
 
 Run the accelerated Protocol-27 test that proves live SDK-22 v2 lending and
-backstop positions survive the emitter migration unchanged:
+backstop positions remain unchanged beside the independent v3 lane:
 
 ```bash
 make test-v2-positions-survive-migration
@@ -153,7 +152,8 @@ artifacts.
 ## Development principles
 
 - Preserve a passing v2 baseline before introducing behavioral changes.
-- Keep the deployed emitter interface compatible.
+- Keep the established emitter replacement interface compatible while using a
+  separate v3 BLNT emitter.
 - Test both native Rust contracts and deployed WASM.
 - Treat activation, loss absorption, emissions, and emitter migration as
   separate protocol mechanisms.

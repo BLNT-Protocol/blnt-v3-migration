@@ -1,4 +1,9 @@
-# Local-Network Migration Exercise
+# Legacy queued-emitter localnet regression lane
+
+> This is not the active v3 launch design. It is retained to exercise the old
+> deployed-emitter replacement and backfill path. Use
+> [DUAL_EMITTER_DEPLOYMENT.md](DUAL_EMITTER_DEPLOYMENT.md) for the independent
+> BLND/BLNT deployment.
 
 The local-network runner deploys a frozen SDK-22 incumbent and an SDK-27
 candidate against a Protocol-27 Stellar Quickstart network configured with

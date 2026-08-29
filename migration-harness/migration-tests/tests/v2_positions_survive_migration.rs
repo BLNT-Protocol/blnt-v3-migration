@@ -55,8 +55,8 @@ struct PoolBackstopConfig {
 #[derive(Clone)]
 #[contracttype]
 enum BackstopAsset {
-    BlndXlm,
-    BlndUsdc,
+    BlntXlm,
+    BlntUsdc,
     Usdc,
     Xlm,
 }
@@ -367,11 +367,11 @@ impl MockV3PoolFactory {
             tiers: vec![
                 &env,
                 BackstopTierConfig {
-                    asset: BackstopAsset::BlndXlm,
+                    asset: BackstopAsset::BlntXlm,
                     take_rate_weight: 4,
                 },
                 BackstopTierConfig {
-                    asset: BackstopAsset::BlndUsdc,
+                    asset: BackstopAsset::BlntUsdc,
                     take_rate_weight: 3,
                 },
                 BackstopTierConfig {

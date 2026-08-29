@@ -28,20 +28,20 @@ struct PoolBackstopConfig {
 #[derive(Clone)]
 #[contracttype]
 enum BackstopAsset {
-    BlndXlm,
-    BlndUsdc,
+    BlntXlm,
+    BlntUsdc,
     Usdc,
     Xlm,
 }
-const BLND_WEIGHT: i128 = 8_000_000;
+const BLNT_WEIGHT: i128 = 8_000_000;
 const PAIR_WEIGHT: i128 = 2_000_000;
 
 #[derive(Clone)]
 #[contracttype]
 enum CometKey {
     Balance(Address),
-    Blnd,
-    BlndReserve,
+    Blnt,
+    BlntReserve,
     Pair,
     PairReserve,
     TotalSupply,
@@ -54,20 +54,20 @@ struct MockComet;
 impl MockComet {
     pub fn __constructor(
         env: Env,
-        blnd: Address,
+        blnt: Address,
         pair: Address,
         total_supply: i128,
-        blnd_reserve: i128,
+        blnt_reserve: i128,
         pair_reserve: i128,
     ) {
-        env.storage().instance().set(&CometKey::Blnd, &blnd);
+        env.storage().instance().set(&CometKey::Blnt, &blnt);
         env.storage().instance().set(&CometKey::Pair, &pair);
         env.storage()
             .instance()
             .set(&CometKey::TotalSupply, &total_supply);
         env.storage()
             .instance()
-            .set(&CometKey::BlndReserve, &blnd_reserve);
+            .set(&CometKey::BlntReserve, &blnt_reserve);
         env.storage()
             .instance()
             .set(&CometKey::PairReserve, &pair_reserve);
@@ -80,15 +80,15 @@ impl MockComet {
     pub fn get_tokens(env: Env) -> Vec<Address> {
         vec![
             &env,
-            env.storage().instance().get(&CometKey::Blnd).unwrap(),
+            env.storage().instance().get(&CometKey::Blnt).unwrap(),
             env.storage().instance().get(&CometKey::Pair).unwrap(),
         ]
     }
 
     pub fn get_balance(env: Env, token: Address) -> i128 {
-        let blnd: Address = env.storage().instance().get(&CometKey::Blnd).unwrap();
-        let key = if token == blnd {
-            CometKey::BlndReserve
+        let blnt: Address = env.storage().instance().get(&CometKey::Blnt).unwrap();
+        let key = if token == blnt {
+            CometKey::BlntReserve
         } else {
             CometKey::PairReserve
         };
@@ -103,9 +103,9 @@ impl MockComet {
     }
 
     pub fn get_normalized_weight(env: Env, token: Address) -> i128 {
-        let blnd: Address = env.storage().instance().get(&CometKey::Blnd).unwrap();
-        if token == blnd {
-            BLND_WEIGHT
+        let blnt: Address = env.storage().instance().get(&CometKey::Blnt).unwrap();
+        if token == blnt {
+            BLNT_WEIGHT
         } else {
             PAIR_WEIGHT
         }
@@ -180,11 +180,11 @@ impl MockPoolFactory {
             tiers: vec![
                 &env,
                 BackstopTierConfig {
-                    asset: BackstopAsset::BlndXlm,
+                    asset: BackstopAsset::BlntXlm,
                     take_rate_weight: 4,
                 },
                 BackstopTierConfig {
-                    asset: BackstopAsset::BlndUsdc,
+                    asset: BackstopAsset::BlntUsdc,
                     take_rate_weight: 3,
                 },
             ],
@@ -257,23 +257,23 @@ fn register_token(env: &Env) -> Address {
 fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
     let env = Env::default();
     env.mock_all_auths();
-    let blnd = register_token(&env);
+    let blnt = register_token(&env);
     let usdc = register_token(&env);
     let xlm = register_token(&env);
-    let blnd_usdc = env.register(
+    let blnt_usdc = env.register(
         MockComet,
         (
-            &blnd,
+            &blnt,
             &usdc,
             &(100 * SCALAR_7),
             &(1_600 * SCALAR_7),
             &(20 * SCALAR_7),
         ),
     );
-    let blnd_xlm = env.register(
+    let blnt_xlm = env.register(
         MockComet,
         (
-            &blnd,
+            &blnt,
             &xlm,
             &(100 * SCALAR_7),
             &(1_600 * SCALAR_7),
@@ -288,10 +288,10 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
         &candidate_id,
         backstop::WASM,
         (
-            &blnd_usdc,
-            &blnd_xlm,
+            &blnt_usdc,
+            &blnt_xlm,
             &emitter_id,
-            &blnd,
+            &blnt,
             &usdc,
             &xlm,
             &factory_id,
@@ -301,10 +301,10 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
     let pool = env.register(MockPool, ());
     MockPoolFactoryClient::new(&env, &factory_id).set_pool(&pool);
     let provider = Address::generate(&env);
-    let blnd_usdc_client = MockCometClient::new(&env, &blnd_usdc);
-    let blnd_xlm_client = MockCometClient::new(&env, &blnd_xlm);
-    blnd_usdc_client.mint(&provider, &(20 * SCALAR_7));
-    blnd_xlm_client.mint(&provider, &(20 * SCALAR_7));
+    let blnt_usdc_client = MockCometClient::new(&env, &blnt_usdc);
+    let blnt_xlm_client = MockCometClient::new(&env, &blnt_xlm);
+    blnt_usdc_client.mint(&provider, &(20 * SCALAR_7));
+    blnt_xlm_client.mint(&provider, &(20 * SCALAR_7));
     let candidate = backstop::Client::new(&env, &candidate_id);
     candidate.deposit(
         &backstop::BackstopTier::SecondLoss,
@@ -340,19 +340,19 @@ fn optimized_candidate_values_integrated_comet_quotes_with_mainnet_headroom() {
             tiers: vec![
                 &env,
                 backstop::PoolTierData {
-                    asset: backstop::BackstopAsset::BlndXlm,
-                    blnd_emission_eligible: true,
+                    asset: backstop::BackstopAsset::BlntXlm,
+                    blnt_emission_eligible: true,
                     take_rate_weight: 4,
-                    token: blnd_xlm,
+                    token: blnt_xlm,
                     tokens: 20 * SCALAR_7,
                     shares: 20 * SCALAR_7,
                     value: 20 * SCALAR_7,
                 },
                 backstop::PoolTierData {
-                    asset: backstop::BackstopAsset::BlndUsdc,
-                    blnd_emission_eligible: true,
+                    asset: backstop::BackstopAsset::BlntUsdc,
+                    blnt_emission_eligible: true,
                     take_rate_weight: 3,
-                    token: blnd_usdc,
+                    token: blnt_usdc,
                     tokens: 20 * SCALAR_7,
                     shares: 20 * SCALAR_7,
                     value: 20 * SCALAR_7,

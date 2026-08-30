@@ -18,7 +18,113 @@ USDC_MINT=$((2 * COMET_INITIAL_PAIR_TOKEN))
 CONVERSION_TEST_AMOUNT=$((10 * SCALAR_7))
 BLNT_BACKFILL_DROP=$((50000000 * SCALAR_7))
 BLNT_SWAP_CAP=$((20000000 * SCALAR_7))
-BLNT_BACKFILL_CLAIM_LIST="${BLEND_BLNT_BACKFILL_CLAIM_LIST:-[]}"
+BLNT_BACKFILL_ALLOCATION=$((20000000 * SCALAR_7))
+BLNT_BACKFILL_VESTING_SECONDS=$((180 * 24 * 60 * 60))
+BLNT_GRANT_CAP=$((10000000 * SCALAR_7))
+BLNT_GRANT_VESTING_SECONDS=$((720 * 24 * 60 * 60))
+BLNT_MAX_GRANTEES=100
+BLNT_BACKFILL_CLAIMANTS=434
+BLNT_BACKFILL_ACCOUNTS=423
+BLNT_BACKFILL_CONTRACTS=11
+BLNT_BACKFILL_SOURCE="${ROOT_DIR}/comet_cpal_flattened_ownership_before_41c898a1.csv"
+BLNT_BACKFILL_MANIFEST="${ROOT_DIR}/blnt-backfill-contract/allocations/comet_cpal_backfill.json"
+BLNT_BACKFILL_GENERATOR="${ROOT_DIR}/blnt-backfill-contract/scripts/generate-backfill-claims.mjs"
+BLNT_BACKFILL_CLAIM_LIST=""
+BLNT_BACKFILL_CLAIM_TOTAL=""
+BLNT_GRANT_LIST="${BLEND_BLNT_GRANT_LIST:-[]}"
+BLNT_GRANT_TOTAL=""
+BLNT_CLAIM_TOTAL=""
+
+validate_backfill_manifest() {
+    local expected_source_hash actual_source_hash generated_manifest
+
+    require_command cmp
+    require_command node
+    [[ -f "${BLNT_BACKFILL_SOURCE}" ]] ||
+        die "backfill ownership snapshot is missing: ${BLNT_BACKFILL_SOURCE}"
+    [[ -f "${BLNT_BACKFILL_MANIFEST}" ]] ||
+        die "backfill allocation manifest is missing: ${BLNT_BACKFILL_MANIFEST}"
+    [[ -f "${BLNT_BACKFILL_GENERATOR}" ]] ||
+        die "backfill allocation generator is missing: ${BLNT_BACKFILL_GENERATOR}"
+
+    expected_source_hash="$(jq -er '.source_sha256' "${BLNT_BACKFILL_MANIFEST}")"
+    actual_source_hash="$(sha256_file "${BLNT_BACKFILL_SOURCE}")"
+    assert_equal "${expected_source_hash}" "${actual_source_hash}" \
+        "backfill ownership snapshot hash"
+
+    jq -e \
+        --arg allocation "${BLNT_BACKFILL_ALLOCATION}" \
+        --argjson claimants "${BLNT_BACKFILL_CLAIMANTS}" \
+        --argjson accounts "${BLNT_BACKFILL_ACCOUNTS}" \
+        --argjson contracts "${BLNT_BACKFILL_CONTRACTS}" \
+        '
+            .schema_version == 1 and
+            .weight_field == "flattened_total_cpal_raw" and
+            .allocation_total_raw == $allocation and
+            .claimant_count == $claimants and
+            .claimant_type_counts.account == $accounts and
+            .claimant_type_counts.contract == $contracts and
+            (.allocations | length) == $claimants and
+            ([.allocations[].owner_address] | unique | length) == $claimants and
+            ([.allocations[].allocation_raw | test("^[1-9][0-9]*$")] | all) and
+            (([.allocations[].allocation_raw | tonumber] | add | tostring) == $allocation)
+        ' "${BLNT_BACKFILL_MANIFEST}" >/dev/null ||
+        die "backfill allocation manifest failed invariant validation"
+
+    generated_manifest="$(mktemp "${TMPDIR:-/tmp}/blnt-backfill-manifest.XXXXXX")"
+    if ! node "${BLNT_BACKFILL_GENERATOR}" \
+        "${BLNT_BACKFILL_SOURCE}" "${generated_manifest}"
+    then
+        rm -f "${generated_manifest}"
+        die "failed to regenerate backfill allocation manifest"
+    fi
+    if ! cmp -s "${BLNT_BACKFILL_MANIFEST}" "${generated_manifest}"; then
+        rm -f "${generated_manifest}"
+        die "backfill allocation manifest does not match its source snapshot"
+    fi
+    rm -f "${generated_manifest}"
+}
+
+load_claim_lists() {
+    BLNT_BACKFILL_CLAIM_LIST="$(jq -c \
+        '[.allocations[] | [.owner_address, .allocation_raw]]' \
+        "${BLNT_BACKFILL_MANIFEST}")"
+    jq -e --argjson max "${BLNT_BACKFILL_CLAIMANTS}" \
+        '
+            type == "array" and (length as $count | $count <= $max) and
+            ([.[] |
+                type == "array" and length == 2 and
+                (.[0] | type == "string" and test("^[CG][A-Z2-7]{55}$")) and
+                (.[1] | type == "string" and test("^[1-9][0-9]*$"))
+            ] | all) and
+            (length as $count | ([.[][0]] | unique | length) == $count)
+        ' <<<"${BLNT_BACKFILL_CLAIM_LIST}" >/dev/null ||
+        die "invalid committed backfill claim list encoding"
+    jq -e --argjson max "${BLNT_MAX_GRANTEES}" \
+        '
+            type == "array" and (length as $count | $count <= $max) and
+            ([.[] |
+                type == "array" and length == 2 and
+                (.[0] | type == "string" and test("^[CG][A-Z2-7]{55}$")) and
+                (.[1] | type == "string" and test("^[1-9][0-9]*$"))
+            ] | all) and
+            (length as $count | ([.[][0]] | unique | length) == $count)
+        ' <<<"${BLNT_GRANT_LIST}" >/dev/null ||
+        die "invalid BLEND_BLNT_GRANT_LIST encoding"
+    BLNT_BACKFILL_CLAIM_TOTAL="$(jq -er \
+        '[.[][1] | tonumber] | add // 0 | tostring' \
+        <<<"${BLNT_BACKFILL_CLAIM_LIST}")" ||
+        die "invalid committed backfill claim list encoding"
+    BLNT_GRANT_TOTAL="$(jq -er \
+        '[.[][1] | tonumber] | add // 0 | tostring' \
+        <<<"${BLNT_GRANT_LIST}")" ||
+        die "invalid BLEND_BLNT_GRANT_LIST encoding"
+    ((BLNT_BACKFILL_CLAIM_TOTAL <= BLNT_BACKFILL_ALLOCATION)) ||
+        die "backfill claim list exceeds the 20-million-BLNT cap"
+    ((BLNT_GRANT_TOTAL <= BLNT_GRANT_CAP)) ||
+        die "grant list exceeds the 10-million-BLNT cap"
+    BLNT_CLAIM_TOTAL=$((BLNT_BACKFILL_CLAIM_TOTAL + BLNT_GRANT_TOTAL))
+}
 
 usage_dual() {
     cat <<'EOF'
@@ -50,7 +156,8 @@ Dual-emitter ${NETWORK_LABEL} deployment:
   6. Leave the legacy emitter pointed at the deployed v2 backstop.
   7. Point the separate v3 emitter at the v3 backstop with BLNT:USDC designated.
   8. Send the exact 50-million-BLNT initial drop to the immutable backfill
-     contract and smoke-test its one-way BLND-to-BLNT conversion.
+     contract, bind the 180-day backfill and 720-day grant schedules, and
+     smoke-test its one-way BLND-to-BLNT conversion.
   9. Verify separate administrators, recipients, emissions, Comet v2 pools, backfill
      custody, and the immutable 20-million-BLNT conversion cap.
 
@@ -80,6 +187,7 @@ dual_validate_artifacts() {
 dual_validate() {
     validate_tools
     validate_source_provenance
+    validate_backfill_manifest
     build_artifacts
     dual_validate_artifacts
     note "Validated exact legacy artifacts, v3 contracts, and workspace Comet v2."
@@ -116,12 +224,17 @@ dual_deploy() {
     local legacy_blnd_usdc blnt_usdc blnt_xlm xlm_balance
     local v2_pool_hash v2_backstop v2_factory deployed_v2_backstop
     local v3_pool_hash v3_backstop v3_factory deployed_v3_backstop
-    local legacy_emitted v3_emitted swapped remaining_capacity backfill_balance
+    local legacy_emitted v3_emitted swapped remaining_capacity backfill_balance allocated
+    local vesting_start vesting_end grant_vesting_start grant_vesting_end
+    local backfill_allocated grant_allocated
+    local total_claimed backfill_claimed grant_claimed
     local post_backfill_balance holder_blnd_balance holder_blnt_balance backfill_blnd_balance
     local legacy_admin blnt_admin legacy_recipient v3_recipient
 
     validate_tools
     validate_source_provenance
+    validate_backfill_manifest
+    load_claim_lists
     require_network
     [[ ! -e "${STATE_FILE}" ]] ||
         die "dual-emitter state already exists at ${STATE_FILE}; refusing to overwrite it"
@@ -189,11 +302,16 @@ dual_deploy() {
         "deploy-blnt-backfill" "${BLNT_BACKFILL_WASM}" "" \
         --legacy_blnd_token "${legacy_blnd}" \
         --blnt_token "${blnt}" \
-        --claim_list "${BLNT_BACKFILL_CLAIM_LIST}")"
+        --claim_list "${BLNT_BACKFILL_CLAIM_LIST}" \
+        --grant_list "${BLNT_GRANT_LIST}")"
     state_set "legacy_emitter" "${legacy_emitter}"
     state_set "v3_emitter" "${v3_emitter}"
     state_set "blnt_backfill" "${blnt_backfill}"
     state_set "blnt_backfill_claim_list" "${BLNT_BACKFILL_CLAIM_LIST}"
+    state_set "blnt_backfill_claim_total" "${BLNT_BACKFILL_CLAIM_TOTAL}"
+    state_set "blnt_grant_list" "${BLNT_GRANT_LIST}"
+    state_set "blnt_grant_total" "${BLNT_GRANT_TOTAL}"
+    state_set "blnt_backfill_manifest_sha256" "$(sha256_file "${BLNT_BACKFILL_MANIFEST}")"
 
     legacy_blnd_usdc="$(deploy_wasm "deploy-comet-blnd-usdc" "${COMET_WASM}" "")"
     blnt_usdc="$(deploy_wasm "deploy-comet-blnt-usdc" "${COMET_WASM}" "")"
@@ -329,6 +447,45 @@ dual_deploy() {
     assert_equal "${blnt}" "$(normalize_scalar "$(invoke_view \
         "query-backfill-blnt-binding" "${blnt_backfill}" get_blnt_token)")" \
         "backfill payout token"
+    allocated="$(normalize_scalar "$(invoke_view \
+        "query-backfill-total-allocated" "${blnt_backfill}" get_total_allocated)")"
+    assert_equal "${BLNT_CLAIM_TOTAL}" "${allocated}" \
+        "combined immutable claim total"
+    backfill_allocated="$(normalize_scalar "$(invoke_view \
+        "query-backfill-allocated" "${blnt_backfill}" get_backfill_allocated)")"
+    grant_allocated="$(normalize_scalar "$(invoke_view \
+        "query-grant-allocated" "${blnt_backfill}" get_grant_allocated)")"
+    assert_equal "${BLNT_BACKFILL_CLAIM_TOTAL}" "${backfill_allocated}" \
+        "backfill immutable allocation"
+    assert_equal "${BLNT_GRANT_TOTAL}" "${grant_allocated}" \
+        "grant immutable allocation"
+    vesting_start="$(normalize_scalar "$(invoke_view \
+        "query-backfill-vesting-start" "${blnt_backfill}" get_vesting_start)")"
+    vesting_end="$(normalize_scalar "$(invoke_view \
+        "query-backfill-vesting-end" "${blnt_backfill}" get_vesting_end)")"
+    assert_equal "${BLNT_BACKFILL_VESTING_SECONDS}" \
+        "$((vesting_end - vesting_start))" "backfill vesting duration"
+    state_set "blnt_backfill_vesting_start" "${vesting_start}"
+    state_set "blnt_backfill_vesting_end" "${vesting_end}"
+    grant_vesting_start="$(normalize_scalar "$(invoke_view \
+        "query-grant-vesting-start" "${blnt_backfill}" get_grant_vesting_start)")"
+    grant_vesting_end="$(normalize_scalar "$(invoke_view \
+        "query-grant-vesting-end" "${blnt_backfill}" get_grant_vesting_end)")"
+    assert_equal "${vesting_start}" "${grant_vesting_start}" \
+        "shared claim vesting start"
+    assert_equal "${BLNT_GRANT_VESTING_SECONDS}" \
+        "$((grant_vesting_end - grant_vesting_start))" "grant vesting duration"
+    state_set "blnt_grant_vesting_start" "${grant_vesting_start}"
+    state_set "blnt_grant_vesting_end" "${grant_vesting_end}"
+    total_claimed="$(normalize_scalar "$(invoke_view \
+        "query-total-claimed" "${blnt_backfill}" get_total_claimed)")"
+    backfill_claimed="$(normalize_scalar "$(invoke_view \
+        "query-backfill-claimed" "${blnt_backfill}" get_backfill_claimed)")"
+    grant_claimed="$(normalize_scalar "$(invoke_view \
+        "query-grant-claimed" "${blnt_backfill}" get_grant_claimed)")"
+    assert_equal "0" "${total_claimed}" "initial combined claimed total"
+    assert_equal "0" "${backfill_claimed}" "initial backfill claimed total"
+    assert_equal "0" "${grant_claimed}" "initial grant claimed total"
     holder_blnd_balance="$(normalize_scalar "$(invoke_view \
         "query-converted-holder-blnd" "${legacy_blnd}" balance --id "${depositor}")")"
     holder_blnt_balance="$(normalize_scalar "$(invoke_view \
@@ -382,7 +539,9 @@ dual_deploy() {
 
 dual_status() {
     local legacy_emitter v3_emitter blnt_backfill legacy_recipient v3_recipient queued
-    local swapped remaining_capacity backfill_balance
+    local swapped remaining_capacity backfill_balance vesting_start vesting_end
+    local grant_vesting_start grant_vesting_end
+    local backfill_allocated grant_allocated backfill_claimed grant_claimed
 
     validate_tools
     require_network
@@ -401,6 +560,22 @@ dual_status() {
     backfill_balance="$(normalize_scalar "$(invoke_view \
         "status-backfill-balance" "$(state_value blnt_token)" balance \
         --id "${blnt_backfill}")")"
+    vesting_start="$(normalize_scalar "$(invoke_view \
+        "status-backfill-vesting-start" "${blnt_backfill}" get_vesting_start)")"
+    vesting_end="$(normalize_scalar "$(invoke_view \
+        "status-backfill-vesting-end" "${blnt_backfill}" get_vesting_end)")"
+    grant_vesting_start="$(normalize_scalar "$(invoke_view \
+        "status-grant-vesting-start" "${blnt_backfill}" get_grant_vesting_start)")"
+    grant_vesting_end="$(normalize_scalar "$(invoke_view \
+        "status-grant-vesting-end" "${blnt_backfill}" get_grant_vesting_end)")"
+    backfill_allocated="$(normalize_scalar "$(invoke_view \
+        "status-backfill-allocated" "${blnt_backfill}" get_backfill_allocated)")"
+    grant_allocated="$(normalize_scalar "$(invoke_view \
+        "status-grant-allocated" "${blnt_backfill}" get_grant_allocated)")"
+    backfill_claimed="$(normalize_scalar "$(invoke_view \
+        "status-backfill-claimed" "${blnt_backfill}" get_backfill_claimed)")"
+    grant_claimed="$(normalize_scalar "$(invoke_view \
+        "status-grant-claimed" "${blnt_backfill}" get_grant_claimed)")"
     queued="$(invoke_view "status-v3-queue" "${v3_emitter}" get_queued_swap)"
     cat <<EOF
 Dual-emitter ${NETWORK_LABEL} status
@@ -412,6 +587,14 @@ Dual-emitter ${NETWORK_LABEL} status
   v3 queue: ${queued}
   BLNT backfill contract: ${blnt_backfill}
   backfill BLNT balance: ${backfill_balance}
+  backfill vesting start: ${vesting_start}
+  backfill vesting end: ${vesting_end}
+  backfill allocated: ${backfill_allocated}
+  backfill claimed: ${backfill_claimed}
+  grant vesting start: ${grant_vesting_start}
+  grant vesting end: ${grant_vesting_end}
+  grant allocated: ${grant_allocated}
+  grant claimed: ${grant_claimed}
   converted BLND: ${swapped}
   remaining conversion capacity: ${remaining_capacity}
   Comet v2 commit: $(state_value comet_v2_source_commit)

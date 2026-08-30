@@ -55,9 +55,21 @@ Native and optimized-WASM backfill-contract tests MUST cover:
 - cumulative swapped-total and remaining-capacity conservation;
 - atomic rollback on transfer, balance, burn, payout, cap, overflow, or
   reentrancy mismatch;
-- authorized, single-use immutable address claims totaling no more than 30
-  million BLNT, including duplicate, non-positive, count, and total bounds;
-- exact aggregate conservation across the claim and conversion lanes; and
+- authorized immutable address allocations totaling no more than 30 million
+  BLNT, including duplicate, non-positive, count, and total bounds;
+- per-second linear vesting from zero through the exact full allocation over
+  180 days, repeated partial claims, shared progress across both claim entry
+  points, zero-currently-claimable rejection, and indefinite post-vesting
+  claims;
+- independent grant allocations for at most 100 recipients and 10 million
+  BLNT, linearly vested over 720 days through `claim_grant`, including an
+  address present in both lists without cross-lane consumption or acceleration;
+- exact conservation of the 20-million-BLNT production allocation across the
+  434 positive `flattened_total_cpal_raw` snapshot rows (423 accounts and 11
+  contracts), bound to the recorded source hash with deterministic
+  largest-remainder rounding;
+- exact aggregate conservation across the 20-million backfill, 10-million
+  grant, and 20-million conversion lanes; and
 - absence of any BLNT-to-BLND entry point.
 
 ## Initial allocation

@@ -110,6 +110,10 @@ impl MockPoolFactory {
 const SCALAR_7: i128 = 10_000_000;
 const SWAP_QUEUE_SECONDS: u64 = 31 * 24 * 60 * 60;
 const INITIAL_DROP: i128 = 50_000_000 * SCALAR_7;
+const BACKFILL_CLAIMANTS: u32 = 434;
+const GRANT_CLAIMANTS: u32 = 100;
+const VESTING_DURATION_SECONDS: u64 = 180 * 24 * 60 * 60;
+const GRANT_VESTING_DURATION_SECONDS: u64 = 720 * 24 * 60 * 60;
 
 fn create_asset(env: &Env, admin: &Address) -> Address {
     env.register_stellar_asset_contract_v2(admin.clone())
@@ -171,6 +175,75 @@ impl MockComet {
 }
 
 #[test]
+fn optimized_backfill_handles_all_backfill_and_grant_claimants_partially_vested() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token_admin = Address::generate(&env);
+    let legacy_blnd = create_asset(&env, &token_admin);
+    let blnt = create_asset(&env, &token_admin);
+    let mut claims = Vec::new(&env);
+    let mut claimants = Vec::new(&env);
+    for _ in 0..BACKFILL_CLAIMANTS {
+        let claimant = Address::generate(&env);
+        claims.push_back((claimant.clone(), 2_i128));
+        claimants.push_back(claimant);
+    }
+    let mut grants = Vec::new(&env);
+    let mut grantees = Vec::new(&env);
+    for _ in 0..GRANT_CLAIMANTS {
+        let grantee = Address::generate(&env);
+        grants.push_back((grantee.clone(), 8_i128));
+        grantees.push_back(grantee);
+    }
+
+    let backfill_id = env.register(blnt_backfill::WASM, (&legacy_blnd, &blnt, claims, grants));
+    StellarAssetClient::new(&env, &blnt).mint(
+        &backfill_id,
+        &(2 * i128::from(BACKFILL_CLAIMANTS) + 8 * i128::from(GRANT_CLAIMANTS)),
+    );
+    let backfill = blnt_backfill::Client::new(&env, &backfill_id);
+
+    assert_eq!(
+        backfill.get_total_allocated(),
+        2 * i128::from(BACKFILL_CLAIMANTS) + 8 * i128::from(GRANT_CLAIMANTS)
+    );
+    assert_eq!(
+        backfill.get_backfill_allocated(),
+        2 * i128::from(BACKFILL_CLAIMANTS)
+    );
+    assert_eq!(
+        backfill.get_grant_allocated(),
+        8 * i128::from(GRANT_CLAIMANTS)
+    );
+    assert_eq!(
+        backfill.get_vesting_end(),
+        backfill.get_vesting_start() + VESTING_DURATION_SECONDS
+    );
+    assert_eq!(
+        backfill.get_grant_vesting_end(),
+        backfill.get_grant_vesting_start() + GRANT_VESTING_DURATION_SECONDS
+    );
+    env.ledger()
+        .set_timestamp(backfill.get_vesting_start() + VESTING_DURATION_SECONDS / 2);
+    for claimant in claimants.iter() {
+        assert_eq!(backfill.claim_backfill(&claimant, &claimant), 1);
+    }
+    for grantee in grantees.iter() {
+        assert_eq!(backfill.claim_grant(&grantee, &grantee), 1);
+    }
+
+    let first = claimants.first().unwrap();
+    env.ledger().set_timestamp(backfill.get_vesting_end());
+    assert_eq!(backfill.claim_backfill(&first, &first), 1);
+    assert_eq!(backfill.get_claimable(&first), 0);
+
+    let first_grantee = grantees.first().unwrap();
+    env.ledger().set_timestamp(backfill.get_grant_vesting_end());
+    assert_eq!(backfill.claim_grant(&first_grantee, &first_grantee), 7);
+    assert_eq!(backfill.get_grant_claimable(&first_grantee), 0);
+}
+
+#[test]
 fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     let env = Env::default();
     env.mock_all_auths();
@@ -199,6 +272,7 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
             &legacy_blnd,
             &blnt,
             soroban_sdk::vec![&env, (claimant.clone(), SCALAR_7)],
+            Vec::<(Address, i128)>::new(&env),
         ),
     );
     let blnt_usdc = env.register(MockComet, (&blnt, &usdc));
@@ -243,14 +317,20 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     );
 
     let backfill = blnt_backfill::Client::new(&env, &backfill_id);
-    assert_eq!(backfill.claim(&claimant, &claim_recipient), SCALAR_7);
+    assert_eq!(backfill.get_claimable(&claimant), 0);
+    assert!(backfill
+        .try_claim_backfill(&claimant, &claim_recipient)
+        .is_err());
+
+    env.ledger().set_timestamp(1_005);
+    let vested = SCALAR_7 * 5 / i128::from(VESTING_DURATION_SECONDS);
+    assert_eq!(backfill.claim_backfill(&claimant, &claim_recipient), vested);
     assert_eq!(backfill.get_claimable(&claimant), 0);
     assert_eq!(
         TokenClient::new(&env, &blnt).balance(&claim_recipient),
-        SCALAR_7
+        vested
     );
 
-    env.ledger().set_timestamp(1_005);
     assert_eq!(legacy.distribute(), 5 * SCALAR_7);
     assert_eq!(v3.distribute(), 5 * SCALAR_7);
     assert_eq!(

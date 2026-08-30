@@ -66,10 +66,26 @@ NOT bind legacy BLND or expose a conversion entry point.
 The separately deployed `blnt-backfill-contract` immutably binds distinct
 seven-decimal legacy BLND and BLNT Stellar Asset Contracts and receives the
 complete 50-million-BLNT initial drop without receiving BLNT mint authority.
-Its immutable address claim list MUST contain at most 100 unique claimants,
-MUST contain only positive amounts, and MUST total no more than 30 million
-BLNT. A claimant-authorized `claim(claimant, to)` transfers the claimant's
-complete allocation exactly once. Claims do not expire.
+Its immutable backfill list MUST contain at most 434 unique claimants, MUST
+contain only positive amounts, and MUST total no more than 20 million BLNT. The
+production list MUST assign exactly 20 million BLNT in proportion to
+each of the 423 account and 11 contract addresses with a positive
+`flattened_total_cpal_raw` value in the committed pre-incident ownership
+snapshot, using deterministic largest-remainder rounding. A
+claimant's allocation MUST vest linearly per second for 180 days beginning at
+contract construction. A claimant-authorized
+`claim_backfill(claimant, to)` transfers all cumulative vested BLNT not
+previously claimed and MAY be called repeatedly as vesting advances.
+`claim(claimant, to)` is an equivalent compatibility alias over the same claim
+progress. Claims do not expire after vesting completes.
+
+Construction MUST also accept an independent immutable grant list containing
+at most 100 unique positive allocations totaling at most 10 million BLNT.
+`claim_grant(grantee, to)` MUST use separate progress and linearly vest grants
+per second for 720 days from the shared construction timestamp. An address MAY
+appear in both lists without either method reading or consuming the other
+allocation. Backfill and grant allocations together MUST NOT exceed 30 million
+BLNT, preserving the separate 20-million-BLNT conversion capacity.
 
 The backfill contract owns `swap_blnd_for_blnt(from, to, amount)`, which:
 
@@ -84,9 +100,11 @@ The cumulative successful conversion total MUST NOT exceed 20 million BLNT.
 Conversion does not expire. The operation MUST fail atomically on a transfer,
 burn, payout, balance, authorization, cap, overflow, or reentrancy mismatch.
 No BLNT-to-BLND path exists. The contract exposes immutable token bindings,
-claimable amounts, aggregate claim and conversion accounting, and remaining
-conversion capacity as read-only views. It exposes no administrator, upgrade,
-mint, sweep, recovery, allocation-mutation, or deadline API.
+backfill and grant vesting timestamps, currently claimable amounts, separate
+and aggregate claim accounting, conversion accounting, and remaining
+conversion capacity as read-only views.
+It exposes no administrator, upgrade, mint, sweep, recovery,
+allocation-mutation, or claim-deadline API.
 
 ## 3. Canonical v3 liquidity
 
@@ -147,7 +165,7 @@ A deployment SHOULD use the following deterministic order:
    input;
 3. create BLNT with the v3 emitter as administrator;
 4. deploy the BLNT backfill contract bound to legacy BLND, BLNT, and the
-   immutable address claim list;
+   immutable backfill and grant lists;
 5. deploy and initialize the canonical Comet v2 BLNT:USDC and BLNT:XLM pools;
 6. determine the v3 backstop address and deploy its factory;
 7. initialize the v3 emitter with BLNT, the v3 backstop, and BLNT:USDC LP;
@@ -158,6 +176,7 @@ A deployment SHOULD use the following deterministic order:
 
 Deployment evidence MUST record both emitter bindings, both token
 administrators, the backfill-contract artifact and immutable bindings, exact
-50-million-BLNT custody, the 20-million conversion cap, Comet v2 artifact hash
-and pool configuration, v3 direct activation, and the absence of BLND in every
-v3 pool, backstop, and emitter binding.
+50-million-BLNT custody, the immutable 180-day backfill and 720-day grant
+vesting timestamps and allocations, the 20-million conversion cap, Comet v2
+artifact hash and pool configuration, v3 direct activation, and the absence of
+BLND in every v3 pool, backstop, and emitter binding.

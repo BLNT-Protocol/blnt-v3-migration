@@ -33,12 +33,27 @@ make dual-emitter-stop
 To reuse an already-running network, run `make dual-emitter-deploy` after
 `make dual-emitter-validate`.
 
-Set `BLEND_BLNT_BACKFILL_CLAIM_LIST` before `run` or `deploy` to the Stellar
-CLI JSON encoding of the immutable `(address, amount)` claim vector. It
-defaults to `[]`, accepts at most 100 unique positive entries, and may total no
-more than 30 million BLNT in raw seven-decimal units. The selected list cannot
-be changed after construction; the backfill contract receives the complete 50
-million BLNT regardless of the allocated claim total.
+`run` and `deploy` use the committed snapshot manifest. It assigns
+exactly 20 million BLNT proportionally across the 434 positive
+`flattened_total_cpal_raw` rows (423 accounts and 11 contracts) in
+`comet_cpal_flattened_ownership_before_41c898a1.csv`, with deterministic
+largest-remainder rounding. The runner regenerates the manifest from the CSV
+and requires a byte-for-byte match, then verifies the source hash, claimant
+types and count, unique addresses, positive amounts, and exact aggregate before
+deployment. The runner always constructs the immutable `(address, amount)`
+claim vector from that verified manifest; it cannot be overridden through the
+environment. The selected list cannot be changed after construction, and the
+backfill contract receives the complete 50 million BLNT.
+Every address allocation vests linearly per second for 180 days beginning at
+backfill-contract construction. Each claim transfers only the cumulative
+vested amount not previously claimed, and unclaimed amounts remain available
+after vesting completes.
+
+Set `BLEND_BLNT_GRANT_LIST` to the Stellar CLI JSON encoding of the immutable
+`(address, amount)` grant vector. It defaults to `[]`, accepts at most 100
+unique positive entries, and may total no more than 10 million BLNT. Grants
+vest linearly per second for 720 days from the same construction timestamp and
+are claimed independently through `claim_grant`.
 
 ## Public testnet
 
@@ -64,6 +79,8 @@ record:
 - BLND:USDC, BLNT:USDC, and BLNT:XLM Comet v2 IDs;
 - separate emitter and backstop IDs;
 - the backfill-contract artifact hash, address, and immutable token bindings;
+- the immutable 180-day backfill and 720-day grant vesting timestamps and
+  allocation totals;
 - both token administrators and emitter recipients;
 - direct v3 activation and exact 50-million-BLNT backfill custody;
 - exact BLND burn and pre-funded BLNT transfer conversion events;

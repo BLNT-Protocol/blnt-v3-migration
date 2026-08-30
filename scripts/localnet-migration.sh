@@ -56,7 +56,7 @@ esac
 RESERVE_LOSS_ISSUER_IDENTITY="${BLEND_RESERVE_LOSS_ISSUER_IDENTITY:-blend-v3-${NETWORK_MODE}-reserve-loss-issuer}"
 RESERVE_LOSS_USER_IDENTITY="${BLEND_RESERVE_LOSS_USER_IDENTITY:-blend-v3-${NETWORK_MODE}-reserve-loss-user}"
 CONFIG_DIR="${BLEND_MIGRATION_CONFIG_DIR:-${WORK_DIR}/stellar-config}"
-STATE_FILE="${WORK_DIR}/state.json"
+STATE_FILE="${BLEND_MIGRATION_STATE_FILE:-${WORK_DIR}/state.json}"
 CONTAINER_NAME="${BLEND_LOCALNET_CONTAINER:-blend-v3-local}"
 QUICKSTART_CONTAINER_NAME="stellar-${CONTAINER_NAME}"
 
@@ -1357,8 +1357,14 @@ ensure_modeled_v2_pool() {
 modeled_v3_backstop_config() {
     local model="$1"
 
-    jq -c --arg model "${model}" \
-        '.pools[$model].backstop_config' "${MODELED_POOLS_FIXTURE}"
+    # The production snapshot preserves the v2-era BLND tier labels. The
+    # updated v3 factory exposes the corresponding BLNT variants.
+    jq -c --arg model "${model}" '
+        .pools[$model].backstop_config |
+        map(.asset |= if . == "BlndXlm" then "BlntXlm"
+            elif . == "BlndUsdc" then "BlntUsdc"
+            else . end)
+    ' "${MODELED_POOLS_FIXTURE}"
 }
 
 modeled_v3_tiers() {

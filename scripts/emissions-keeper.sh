@@ -3,11 +3,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REGISTRY="${BLEND_KEEPER_REGISTRY:-${ROOT_DIR}/deployments/testnet-production.json}"
-WORK_DIR="${BLEND_KEEPER_WORK_DIR:-${ROOT_DIR}/.testnet-production}"
-CONFIG_DIR="${BLEND_KEEPER_CONFIG_DIR:-${WORK_DIR}/stellar-config}"
-STATE_FILE="${WORK_DIR}/state.json"
-SOURCE_ACCOUNT="${BLEND_KEEPER_SOURCE_ACCOUNT:-blend-v3-production-testnet-operator}"
+REGISTRY="${BLEND_KEEPER_REGISTRY:-${ROOT_DIR}/deployments/testnet-dual-emitter.json}"
+WORK_DIR="${BLEND_KEEPER_WORK_DIR:-${ROOT_DIR}/.testnet-production/dual-emitter-20260830}"
+CONFIG_DIR="${BLEND_KEEPER_CONFIG_DIR:-${ROOT_DIR}/.testnet-production/stellar-config}"
+STATE_FILE="${BLEND_KEEPER_STATE_FILE:-${WORK_DIR}/dual-emitter-state.json}"
+SOURCE_ACCOUNT="${BLEND_KEEPER_SOURCE_ACCOUNT:-blend-v3-dual-20260830-operator}"
 INCLUSION_FEE="${BLEND_KEEPER_INCLUSION_FEE:-10000}"
 INTERVAL_SECONDS="${BLEND_KEEPER_INTERVAL_SECONDS:-3600}"
 ORACLE_REFRESH_INTERVAL_SECONDS="${BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS:-43200}"
@@ -25,15 +25,17 @@ Commands:
   run   Run one pass immediately, then repeat on an internal schedule.
   help  Show this message.
 
-Each pass advances the incumbent emitter when it still targets v2, checkpoints
-the v2 and v3 backstops, then gulps each registered reward-zone pool for the
-corresponding protocol version. It reconciles direct reserve-custody deficits
+Each pass advances the legacy BLND emitter for v2, checkpoints the v2 backstop,
+then advances the independent BLNT emitter through the v3 backstop. It gulps
+each registered reward-zone pool for the corresponding protocol version and
+reconciles direct reserve-custody deficits
 across every registered v3 pool. On Stellar testnet, it
 refreshes the controlled fixture-oracle histories when they are at least 12
 hours old. The default keeper interval is one hour. Configuration may be overridden with
 BLEND_KEEPER_REGISTRY, BLEND_KEEPER_WORK_DIR, BLEND_KEEPER_CONFIG_DIR,
-BLEND_KEEPER_SOURCE_ACCOUNT, BLEND_KEEPER_RPC_URL, BLEND_KEEPER_INCLUSION_FEE,
-BLEND_KEEPER_INTERVAL_SECONDS, and BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS.
+BLEND_KEEPER_STATE_FILE, BLEND_KEEPER_SOURCE_ACCOUNT, BLEND_KEEPER_RPC_URL,
+BLEND_KEEPER_INCLUSION_FEE, BLEND_KEEPER_INTERVAL_SECONDS, and
+BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS.
 EOF
 }
 
@@ -160,6 +162,7 @@ refresh_oracles_if_due() {
     if BLEND_PRODUCTION_TESTNET_RPC_URL="${RPC_URL}" \
         BLEND_PRODUCTION_TESTNET_WORK_DIR="${WORK_DIR}" \
         BLEND_PRODUCTION_TESTNET_CONFIG_DIR="${CONFIG_DIR}" \
+        BLEND_PRODUCTION_TESTNET_STATE_FILE="${STATE_FILE}" \
         BLEND_PRODUCTION_TESTNET_OPERATOR_IDENTITY="${SOURCE_ACCOUNT}" \
         BLEND_PRODUCTION_TESTNET_INCLUSION_FEE="${INCLUSION_FEE}" \
         bash "${ROOT_DIR}/scripts/testnet-production-migration.sh" refresh-oracle; then
@@ -240,9 +243,9 @@ submit_call() {
 }
 
 read_emitter_recipient() {
-    local output recipient
+    local emitter_id="$1" output recipient
 
-    if ! output="$(capture_invoke no "${EMITTER_ID}" get_backstop)"; then
+    if ! output="$(capture_invoke no "${emitter_id}" get_backstop)"; then
         note "read emitter recipient failed: ${output}"
         return 1
     fi
@@ -411,10 +414,12 @@ load_configuration() {
 
     NETWORK_PASSPHRASE="$(jq -er '.network.passphrase' "${REGISTRY}")"
     RPC_URL="${BLEND_KEEPER_RPC_URL:-$(jq -er '.network.rpc_url' "${REGISTRY}")}"
-    EMITTER_ID="$(jq -er '.protocol.emitter' "${REGISTRY}")"
+    V2_EMITTER_ID="$(jq -er '.protocol.legacy_emitter // .protocol.emitter' "${REGISTRY}")"
+    V3_EMITTER_ID="$(jq -er '.protocol.v3_emitter // .protocol.emitter' "${REGISTRY}")"
     V2_BACKSTOP_ID="$(jq -er '.protocol.v2.backstop' "${REGISTRY}")"
     V3_BACKSTOP_ID="$(jq -er '.protocol.v3.backstop' "${REGISTRY}")"
-    require_contract_id "${EMITTER_ID}" "emitter contract ID"
+    require_contract_id "${V2_EMITTER_ID}" "v2 emitter contract ID"
+    require_contract_id "${V3_EMITTER_ID}" "v3 emitter contract ID"
     require_contract_id "${V2_BACKSTOP_ID}" "v2 backstop contract ID"
     require_contract_id "${V3_BACKSTOP_ID}" "v3 backstop contract ID"
 
@@ -457,7 +462,8 @@ load_configuration() {
         V3_ALL_POOLS+=("${pool_id}")
     done < <(jq -er '
         (.modeled_pools | to_entries[] | [.key, .value.v3.pool]),
-        (.test_scenarios.reserve_loss? | ["reserve_loss", .contracts.pool]) |
+        (.test_scenarios.reserve_loss? |
+            select(type == "object") | ["reserve_loss", .contracts.pool]) |
         @tsv
     ' "${REGISTRY}")
 
@@ -468,18 +474,23 @@ load_configuration() {
 }
 
 plan_pass() {
-    local index emitter_recipient
+    local index v2_emitter_recipient v3_emitter_recipient
 
     plan_oracle_refresh
-    emitter_recipient="$(read_emitter_recipient)" || die "cannot determine the emitter recipient"
+    v2_emitter_recipient="$(read_emitter_recipient "${V2_EMITTER_ID}")" ||
+        die "cannot determine the v2 emitter recipient"
+    v3_emitter_recipient="$(read_emitter_recipient "${V3_EMITTER_ID}")" ||
+        die "cannot determine the v3 emitter recipient"
 
     note "Planning v2 emissions pass: ${V2_BACKSTOP_ID}"
-    if [[ "${emitter_recipient}" == "${V2_BACKSTOP_ID}" ]]; then
-        plan_call "advance emitter for v2" "${EMITTER_ID}" distribute
-    elif [[ "${emitter_recipient}" == "${V3_BACKSTOP_ID}" ]]; then
-        note "Emitter targets v3; candidate distribute will advance it."
+    if [[ "${v2_emitter_recipient}" == "${V2_BACKSTOP_ID}" ]]; then
+        plan_call "advance legacy BLND emitter for v2" "${V2_EMITTER_ID}" distribute
+    elif [[ "${V2_EMITTER_ID}" == "${V3_EMITTER_ID}" &&
+        "${v2_emitter_recipient}" == "${V3_BACKSTOP_ID}" ]]
+    then
+        note "Shared emitter targets v3; the v3 backstop will advance it."
     else
-        die "emitter targets unrecognized backstop ${emitter_recipient}"
+        die "v2 emitter targets unrecognized backstop ${v2_emitter_recipient}"
     fi
     plan_call "v2 checkpoint protocol emissions" "${V2_BACKSTOP_ID}" distribute 1000 1010
     for index in "${!V2_POOLS[@]}"; do
@@ -489,6 +500,8 @@ plan_pass() {
     done
 
     note "Planning v3 emissions pass: ${V3_BACKSTOP_ID}"
+    [[ "${v3_emitter_recipient}" == "${V3_BACKSTOP_ID}" ]] ||
+        die "v3 emitter targets unrecognized backstop ${v3_emitter_recipient}"
     plan_reconcile_losses
     plan_call "v3 checkpoint protocol emissions" "${V3_BACKSTOP_ID}" distribute 1030
     for index in "${!V3_POOLS[@]}"; do
@@ -500,21 +513,27 @@ plan_pass() {
 }
 
 run_pass() {
-    local index emitter_recipient failed=0
+    local index v2_emitter_recipient v3_emitter_recipient failed=0
 
     refresh_oracles_if_due || failed=1
-    if ! emitter_recipient="$(read_emitter_recipient)"; then
+    if ! v2_emitter_recipient="$(read_emitter_recipient "${V2_EMITTER_ID}")"; then
         failed=1
-        emitter_recipient=""
+        v2_emitter_recipient=""
+    fi
+    if ! v3_emitter_recipient="$(read_emitter_recipient "${V3_EMITTER_ID}")"; then
+        failed=1
+        v3_emitter_recipient=""
     fi
 
     note "Starting v2 emissions pass: ${V2_BACKSTOP_ID}"
-    if [[ "${emitter_recipient}" == "${V2_BACKSTOP_ID}" ]]; then
-        run_call "advance emitter for v2" "${EMITTER_ID}" distribute || failed=1
-    elif [[ "${emitter_recipient}" == "${V3_BACKSTOP_ID}" ]]; then
-        note "Emitter targets v3; candidate distribute will advance it."
-    elif [[ -n "${emitter_recipient}" ]]; then
-        note "Emitter targets unrecognized backstop ${emitter_recipient}; refusing to advance it."
+    if [[ "${v2_emitter_recipient}" == "${V2_BACKSTOP_ID}" ]]; then
+        run_call "advance legacy BLND emitter for v2" "${V2_EMITTER_ID}" distribute || failed=1
+    elif [[ "${V2_EMITTER_ID}" == "${V3_EMITTER_ID}" &&
+        "${v2_emitter_recipient}" == "${V3_BACKSTOP_ID}" ]]
+    then
+        note "Shared emitter targets v3; the v3 backstop will advance it."
+    elif [[ -n "${v2_emitter_recipient}" ]]; then
+        note "V2 emitter targets unrecognized backstop ${v2_emitter_recipient}; refusing to advance it."
         failed=1
     fi
     run_call "v2 checkpoint protocol emissions" "${V2_BACKSTOP_ID}" distribute 1000 1010 || failed=1
@@ -525,6 +544,12 @@ run_pass() {
     done
 
     note "Starting v3 emissions pass: ${V3_BACKSTOP_ID}"
+    if [[ -n "${v3_emitter_recipient}" &&
+        "${v3_emitter_recipient}" != "${V3_BACKSTOP_ID}" ]]
+    then
+        note "V3 emitter targets unrecognized backstop ${v3_emitter_recipient}; refusing to advance it."
+        failed=1
+    fi
     run_reconcile_losses || failed=1
     run_call "v3 checkpoint protocol emissions" "${V3_BACKSTOP_ID}" distribute 1030 || failed=1
     for index in "${!V3_POOLS[@]}"; do

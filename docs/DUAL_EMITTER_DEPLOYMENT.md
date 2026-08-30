@@ -23,8 +23,9 @@ make dual-emitter-status
 `run` verifies and builds artifacts, starts Protocol-27 Quickstart, deploys the
 two independent lanes, activates v3 directly, executes the exact
 50-million-BLNT backfill drop, converts a small test balance from BLND to BLNT,
-advances each emitter, and verifies all final bindings. Stop the isolated
-network with:
+deploys and activates the modeled Fixed and Custom V2/V3 pools, adds each pair
+to its respective reward zone, advances each emitter, and verifies all final
+bindings. Stop the isolated network with:
 
 ```bash
 make dual-emitter-stop
@@ -68,6 +69,23 @@ make testnet-dual-emitter-status
 Signing identities live only below the ignored testnet Stellar configuration
 directory. The runner never reads a mainnet wallet or submits to mainnet.
 
+## BLNT asset metadata
+
+The on-chain classic asset and SAC expose the asset code `BLNT`; the
+human-readable name and icon are issuer metadata hosted by the issuer's home
+domain. Set `BLEND_BLNT_HOME_DOMAIN=blent.trade` during deployment, then publish
+the following currency entry at `https://blent.trade/.well-known/stellar.toml`,
+replacing the issuer placeholder with the deployment operator account:
+
+```toml
+[[CURRENCIES]]
+code = "BLNT"
+issuer = "<deployment operator account>"
+display_decimals = 7
+name = "Blent Token"
+image = "https://blent.trade/assets/blnt.png"
+```
+
 ## Recorded evidence
 
 The network-specific `dual-emitter-state.json` and timestamped run directory
@@ -76,6 +94,7 @@ record:
 - exact legacy and v3 emitter WASM hashes;
 - the Comet v2 source commit and optimized WASM hash;
 - BLND, BLNT, USDC, and XLM contract IDs;
+- the BLNT metadata name `Blent Token` and configured issuer home domain;
 - BLND:USDC, BLNT:USDC, and BLNT:XLM Comet v2 IDs;
 - separate emitter and backstop IDs;
 - the backfill-contract artifact hash, address, and immutable token bindings;
@@ -85,6 +104,8 @@ record:
 - direct v3 activation and exact 50-million-BLNT backfill custody;
 - exact BLND burn and pre-funded BLNT transfer conversion events;
 - positive independent BLND and BLNT distributions; and
+- active modeled Fixed and Custom pools in their respective V2 and V3 reward
+  zones;
 - the immutable 20-million-BLNT conversion cap and empty initial v3 queue.
 
 The runner initializes all three Comet v2 pools at 80:20, verifies positive authorized

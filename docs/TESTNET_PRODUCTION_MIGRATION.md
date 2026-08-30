@@ -106,16 +106,15 @@ make testnet-production-emissions
 
 ## Run the emissions keeper
 
-Soroban contracts do not execute on their own. While the emitter still targets
-v2, the permissionless keeper first calls the emitter's `distribute()`. It then
-calls each deployed v2 and v3 backstop's `distribute()` and
-`gulp_emissions()` on every corresponding reward-zone modeled pool. This keeps incumbent
-v2 emissions moving before migration while also checkpointing v3 backfill.
+Soroban contracts do not execute on their own. The current dual-emitter keeper
+advances the legacy BLND emitter and v2 backstop independently from the BLNT
+emitter and v3 backstop. It then calls `gulp_emissions()` on every corresponding
+reward-zone modeled pool. This keeps v2 BLND and v3 BLNT emissions moving
+without coupling either lane to an emitter migration.
 Before the v3 emissions pass, it simulates `reconcile_loss(asset)` for every
 reserve in every modeled v3 pool and submits only positive custody deficits.
-After migration, the v3 candidate advances the emitter from its own
-`distribute()`; v2 stops receiving new BLND while any existing pool streams
-remain governed by v2.
+The v3 backstop advances its bound BLNT emitter from its own `distribute()`;
+the legacy emitter remains bound to the v2 backstop.
 
 Preview one complete pass without mutation, submit one pass, or run the keeper
 continuously in the foreground:
@@ -153,8 +152,9 @@ Automatic oracle refresh is guarded by the Stellar testnet passphrase and
 uses the same controlled fixed-price fixture path as
 `testnet-production-refresh-oracle`. It is not a production oracle service.
 When deployment paths are overridden, the keeper verifies that the registry's
-modeled assets and oracle contracts match the selected work-directory state
-and forwards the selected Stellar configuration to the refresher.
+modeled assets and oracle contracts match the selected state file and forwards
+the selected Stellar configuration and state file to the refresher. The
+`BLEND_KEEPER_STATE_FILE` override selects a non-default deployment state.
 
 The internal scheduler runs only while the process and host remain running. A
 service manager such as `launchd` can supervise it for unattended operation,

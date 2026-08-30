@@ -34,6 +34,13 @@ BLNT_BACKFILL_CLAIM_TOTAL=""
 BLNT_GRANT_LIST="${BLEND_BLNT_GRANT_LIST:-[]}"
 BLNT_GRANT_TOTAL=""
 BLNT_CLAIM_TOTAL=""
+BLNT_TOKEN_NAME="Blent Token"
+BLNT_HOME_DOMAIN="${BLEND_BLNT_HOME_DOMAIN:-}"
+DUAL_MODELED_V2_LP_TOTAL=$((2 * MODELED_BACKSTOP_LP_BALANCE))
+DUAL_MODELED_V3_LP_BALANCE=$((10 * SCALAR_7))
+DUAL_MODELED_BLND_MINT=$((440000 * SCALAR_7))
+DUAL_MODELED_BLNT_MINT=$((200 * SCALAR_7))
+DUAL_MODELED_USDC_MINT=$((50000 * SCALAR_7))
 
 validate_backfill_manifest() {
     local expected_source_hash actual_source_hash generated_manifest
@@ -161,6 +168,8 @@ Dual-emitter ${NETWORK_LABEL} deployment:
   9. Verify separate administrators, recipients, emissions, Comet v2 pools, backfill
      custody, and the immutable 20-million-BLNT conversion cap.
 
+BLNT Stellar TOML metadata name: ${BLNT_TOKEN_NAME}
+
 No legacy-emitter queue or migration backfill is used.
 EOF
 }
@@ -177,6 +186,7 @@ dual_validate_artifacts() {
         "${V3_BACKSTOP_WASM}" \
         "${V3_EMITTER_WASM}" \
         "${V3_POOL_WASM}" \
+        "${V3_TEST_SEP40_ORACLE_WASM}" \
         "${BLNT_BACKFILL_WASM}" \
         "${COMET_WASM}"
     do
@@ -217,6 +227,129 @@ initialize_comet() {
         --swap_fee 30000 >/dev/null
 }
 
+dual_deploy_modeled_pools() {
+    local fixed_v2_oracle custom_v2_oracle fixed_v3_oracle custom_v3_oracle
+    local fixed_v2_pool custom_v2_pool fixed_v3_pool custom_v3_pool
+    local pool status v2_reward_zone v3_reward_zone
+
+    # Reuse the common modeled-pool builders with the independent-lane state
+    # names recorded by this runner.
+    state_set "v2_pool_factory" "$(state_value v2_factory)"
+    state_set "v3_pool_factory" "$(state_value v3_factory)"
+    state_set "incumbent_backstop" "$(state_value v2_backstop)"
+    state_set "candidate_backstop" "$(state_value v3_backstop)"
+
+    ensure_modeled_asset EURC
+    ensure_modeled_asset PYUSD
+    fixed_v2_oracle="$(ensure_modeled_v2_oracle fixed)"
+    custom_v2_oracle="$(ensure_modeled_v2_oracle custom)"
+    fixed_v3_oracle="$(ensure_modeled_v3_oracle fixed)"
+    custom_v3_oracle="$(ensure_modeled_v3_oracle custom)"
+    state_set "modeled_oracles_refreshed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    fixed_v2_pool="$(ensure_modeled_v2_pool fixed "${fixed_v2_oracle}")"
+    custom_v2_pool="$(ensure_modeled_v2_pool custom "${custom_v2_oracle}")"
+    fixed_v3_pool="$(ensure_modeled_v3_pool fixed "${fixed_v3_oracle}")"
+    custom_v3_pool="$(ensure_modeled_v3_pool custom "${custom_v3_oracle}")"
+
+    ensure_modeled_v2_backstop_deposit fixed "${fixed_v2_pool}"
+    ensure_modeled_v2_backstop_deposit custom "${custom_v2_pool}"
+    ensure_modeled_v3_backstop_deposit \
+        fixed "${fixed_v3_pool}" FirstLoss "${DUAL_MODELED_V3_LP_BALANCE}"
+    ensure_modeled_v3_backstop_deposit \
+        fixed "${fixed_v3_pool}" SecondLoss "${DUAL_MODELED_V3_LP_BALANCE}"
+    ensure_token_balance "$(state_value usdc_token)" \
+        "$((2 * MODELED_V3_USDC_BALANCE))" "dual-modeled-usdc"
+    ensure_modeled_v3_backstop_deposit \
+        fixed "${fixed_v3_pool}" ThirdLoss "${MODELED_V3_USDC_BALANCE}"
+    ensure_modeled_xlm_balance "${MODELED_CUSTOM_V3_XLM_BALANCE}"
+    ensure_modeled_v3_backstop_deposit \
+        custom "${custom_v3_pool}" FirstLoss "${MODELED_CUSTOM_V3_XLM_BALANCE}"
+    ensure_modeled_v3_backstop_deposit \
+        custom "${custom_v3_pool}" SecondLoss "${MODELED_CUSTOM_V3_USDC_BALANCE}"
+
+    for pool in "${fixed_v2_pool}" "${custom_v2_pool}"; do
+        invoke_transaction "activate-dual-modeled-v2" \
+            "${pool}" set_status --pool_status 0 >/dev/null
+        status="$(invoke_view "query-dual-modeled-v2-status" \
+            "${pool}" get_config | jq -er '.status | tostring')"
+        assert_equal "0" "${status}" "modeled v2 active status"
+    done
+    for pool in "${fixed_v3_pool}" "${custom_v3_pool}"; do
+        invoke_transaction "activate-dual-modeled-v3" \
+            "${pool}" set_status --pool_status 0 >/dev/null
+        status="$(invoke_view "query-dual-modeled-v3-status" \
+            "${pool}" get_config | jq -er '.status | tostring')"
+        assert_equal "0" "${status}" "modeled v3 active status"
+    done
+
+    v2_reward_zone="$(invoke_view "query-dual-v2-reward-zone" \
+        "$(state_value v2_backstop)" reward_zone)"
+    if ! printf '%s' "${v2_reward_zone}" | jq -e \
+        --arg pool "${fixed_v2_pool}" 'index($pool) != null' >/dev/null
+    then
+        invoke_transaction "add-dual-modeled-v2-fixed-reward" \
+            "$(state_value v2_backstop)" add_reward \
+            --to_add "${fixed_v2_pool}" --to_remove null >/dev/null
+        v2_reward_zone="$(invoke_view "query-updated-dual-v2-reward-zone" \
+            "$(state_value v2_backstop)" reward_zone)"
+    fi
+    if ! printf '%s' "${v2_reward_zone}" | jq -e \
+        --arg pool "${custom_v2_pool}" 'index($pool) != null' >/dev/null
+    then
+        # Once V2's reward zone is nonempty, its anti-reordering guard requires
+        # a backstop distribution based on an emitter timestamp from the last
+        # hour before another pool can be added.
+        invoke_transaction "advance-dual-v2-emitter-for-reward" \
+            "$(state_value legacy_emitter)" distribute >/dev/null
+        invoke_transaction "prime-dual-v2-reward-distribution" \
+            "$(state_value v2_backstop)" distribute >/dev/null
+        invoke_transaction "add-dual-modeled-v2-custom-reward" \
+            "$(state_value v2_backstop)" add_reward \
+            --to_add "${custom_v2_pool}" --to_remove null >/dev/null
+        v2_reward_zone="$(invoke_view "query-final-dual-v2-reward-zone" \
+            "$(state_value v2_backstop)" reward_zone)"
+    fi
+    for pool in "${fixed_v2_pool}" "${custom_v2_pool}"; do
+        printf '%s' "${v2_reward_zone}" | jq -e \
+            --arg pool "${pool}" 'index($pool) != null' >/dev/null ||
+            die "modeled v2 pool missing from reward zone: ${pool}"
+    done
+
+    v3_reward_zone="$(invoke_view "query-dual-v3-reward-zone" \
+        "$(state_value v3_backstop)" reward_zone)"
+    for pool in "${fixed_v3_pool}" "${custom_v3_pool}"; do
+        if ! printf '%s' "${v3_reward_zone}" | jq -e \
+            --arg pool "${pool}" 'index($pool) != null' >/dev/null
+        then
+            invoke_transaction "add-dual-modeled-v3-reward" \
+                "$(state_value v3_backstop)" add_reward \
+                --to_add "${pool}" --to_remove null >/dev/null
+            v3_reward_zone="$(invoke_view "query-updated-dual-v3-reward-zone" \
+                "$(state_value v3_backstop)" reward_zone)"
+        fi
+    done
+    for pool in "${fixed_v3_pool}" "${custom_v3_pool}"; do
+        printf '%s' "${v3_reward_zone}" | jq -e \
+            --arg pool "${pool}" 'index($pool) != null' >/dev/null ||
+            die "modeled v3 pool missing from reward zone: ${pool}"
+    done
+
+    ensure_modeled_v3_emissions_config fixed "${fixed_v3_pool}"
+    ensure_modeled_v3_supply fixed "${fixed_v3_pool}"
+    ensure_modeled_v3_supply custom "${custom_v3_pool}"
+    ensure_fixed_v3_eurc_borrow "${fixed_v3_pool}"
+    ensure_modeled_v2_supply fixed "${fixed_v2_pool}"
+    ensure_modeled_v2_supply custom "${custom_v2_pool}"
+
+    state_set "modeled_pools_fixture_sha256" \
+        "$(sha256_file "${MODELED_POOLS_FIXTURE}")"
+    state_set "modeled_v3_lending_oracle_wasm_sha256" \
+        "$(sha256_file "${V3_TEST_SEP40_ORACLE_WASM}")"
+    state_set "modeled_pools_deployed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    note "Deployed and activated modeled Fixed and Custom v2/v3 pools."
+}
+
 dual_deploy() {
     local skip_build="${1:-false}"
     local operator depositor controller issuer
@@ -250,6 +383,18 @@ dual_deploy() {
     issuer="${operator}"
     initialize_state "${operator}"
     state_set "topology" "dual-emitter-blnd-blnt"
+    state_set "blnt_token_name" "${BLNT_TOKEN_NAME}"
+    if [[ -n "${BLNT_HOME_DOMAIN}" ]]; then
+        [[ "${BLNT_HOME_DOMAIN}" =~ ^[A-Za-z0-9.-]+$ ]] ||
+            die "invalid BLEND_BLNT_HOME_DOMAIN: ${BLNT_HOME_DOMAIN}"
+        capture "set-blnt-issuer-home-domain" \
+            stellar_cli tx new set-options \
+            --source-account "${OPERATOR_IDENTITY}" \
+            --home-domain "${BLNT_HOME_DOMAIN}" \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+        state_set "blnt_home_domain" "${BLNT_HOME_DOMAIN}"
+    fi
     state_set "legacy_emitter_wasm_sha256" "${EXPECTED_EMITTER_SHA256}"
     state_set "v3_emitter_wasm_sha256" "$(sha256_file "${V3_EMITTER_WASM}")"
     state_set "v3_backstop_wasm_sha256" "$(sha256_file "${V3_BACKSTOP_WASM}")"
@@ -287,6 +432,11 @@ dual_deploy() {
 
     create_trustline "trust-depositor-blnd" "${DEPOSITOR_IDENTITY}" "BLND:${issuer}"
     create_trustline "trust-depositor-blnt" "${DEPOSITOR_IDENTITY}" "BLNT:${issuer}"
+    create_trustline "trust-depositor-usdc" "${DEPOSITOR_IDENTITY}" "USDC:${issuer}"
+    if [[ "${XLM_ASSET_MODE}" == "issued" ]]; then
+        create_trustline "trust-depositor-xlm" \
+            "${DEPOSITOR_IDENTITY}" "XLM:${issuer}"
+    fi
     create_trustline "trust-controller-blnd" "${COMET_CONTROLLER_IDENTITY}" "BLND:${issuer}"
     create_trustline "trust-controller-blnt" "${COMET_CONTROLLER_IDENTITY}" "BLNT:${issuer}"
     create_trustline "trust-controller-usdc" "${COMET_CONTROLLER_IDENTITY}" "USDC:${issuer}"
@@ -323,7 +473,17 @@ dual_deploy() {
     invoke_transaction "mint-controller-blnd" "${legacy_blnd}" mint \
         --to "${controller}" --amount "${COMET_INITIAL_BLND}" >/dev/null
     invoke_transaction "mint-depositor-blnd" "${legacy_blnd}" mint \
-        --to "${depositor}" --amount "${CONVERSION_TEST_AMOUNT}" >/dev/null
+        --to "${depositor}" \
+        --amount "$((DUAL_MODELED_BLND_MINT + CONVERSION_TEST_AMOUNT))" >/dev/null
+    invoke_transaction "mint-depositor-blnt" "${blnt}" mint \
+        --to "${depositor}" --amount "${DUAL_MODELED_BLNT_MINT}" >/dev/null
+    invoke_transaction "mint-depositor-usdc" "${usdc}" mint \
+        --to "${depositor}" --amount "${DUAL_MODELED_USDC_MINT}" >/dev/null
+    if [[ "${XLM_ASSET_MODE}" == "issued" ]]; then
+        invoke_transaction "mint-depositor-xlm" "${xlm}" mint \
+            --to "${depositor}" \
+            --amount "$((1100 * SCALAR_7))" >/dev/null
+    fi
     invoke_transaction "mint-controller-blnt" "${blnt}" mint \
         --to "${controller}" --amount "${BLNT_MINT}" >/dev/null
     invoke_transaction "mint-controller-usdc" "${usdc}" mint \
@@ -339,6 +499,25 @@ dual_deploy() {
         "${blnt}" "${usdc}" "${COMET_INITIAL_BLND}" "${COMET_INITIAL_PAIR_TOKEN}"
     initialize_comet "comet-blnt-xlm" "${blnt_xlm}" "${controller}" \
         "${blnt}" "${xlm}" "${COMET_INITIAL_BLND}" "${xlm_balance}"
+
+    invoke_transaction_as "join-modeled-v2-blnd-usdc" \
+        "${DEPOSITOR_IDENTITY}" "${legacy_blnd_usdc}" join_pool \
+        --pool_amount_out "${DUAL_MODELED_V2_LP_TOTAL}" \
+        --user "${depositor}" \
+        --max_amounts_in \
+        "[\"${DUAL_MODELED_BLND_MINT}\",\"${DUAL_MODELED_USDC_MINT}\"]" >/dev/null
+    invoke_transaction_as "join-modeled-v3-blnt-usdc" \
+        "${DEPOSITOR_IDENTITY}" "${blnt_usdc}" join_pool \
+        --pool_amount_out "${DUAL_MODELED_V3_LP_BALANCE}" \
+        --user "${depositor}" \
+        --max_amounts_in \
+        "[\"${DUAL_MODELED_BLNT_MINT}\",\"${DUAL_MODELED_USDC_MINT}\"]" >/dev/null
+    invoke_transaction_as "join-modeled-v3-blnt-xlm" \
+        "${DEPOSITOR_IDENTITY}" "${blnt_xlm}" join_pool \
+        --pool_amount_out "${DUAL_MODELED_V3_LP_BALANCE}" \
+        --user "${depositor}" \
+        --max_amounts_in \
+        "[\"${DUAL_MODELED_BLNT_MINT}\",\"${COMET_INITIAL_XLM}\"]" >/dev/null
 
     capture "lock-comet-controller" \
         stellar_cli tx new set-options \
@@ -502,6 +681,8 @@ dual_deploy() {
     assert_equal "$((BLNT_BACKFILL_DROP - CONVERSION_TEST_AMOUNT))" \
         "${post_backfill_balance}" "backfill BLNT balance after conversion"
 
+    dual_deploy_modeled_pools
+
     sleep "${EMISSION_START_DELAY_SECONDS}"
     legacy_emitted="$(normalize_scalar "$(invoke_transaction \
         "emit-legacy-blnd" "${legacy_emitter}" distribute)")"
@@ -580,6 +761,8 @@ dual_status() {
     cat <<EOF
 Dual-emitter ${NETWORK_LABEL} status
   phase: $(state_value phase)
+  BLNT metadata name: $(state_optional blnt_token_name)
+  BLNT home domain: $(state_optional blnt_home_domain)
   legacy BLND emitter: ${legacy_emitter}
   legacy recipient: ${legacy_recipient}
   v3 BLNT emitter: ${v3_emitter}

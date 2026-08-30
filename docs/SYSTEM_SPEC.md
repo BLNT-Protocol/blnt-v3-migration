@@ -9,6 +9,8 @@ This repository owns:
 
 - the pinned frozen v2 source and deployed-WASM compatibility fixtures;
 - the pinned `blend-contracts-v3` production-contract submodule;
+- the pinned `blnt-backfill-contract` production transition-contract
+  submodule;
 - the pinned SDK and UI client-integration source submodules;
 - cross-version compatibility and migration-only test contracts;
 - localnet and public-testnet migration orchestration;
@@ -44,9 +46,11 @@ are the legacy compatibility boundary. The pinned `blend-contracts-v2`
 submodule provides the frozen SDK-22 source and test baseline. The v3 emitter
 is built from the pinned `blend-contracts-v3` submodule.
 
-The pinned `blend-contracts-v3` submodule is the sole production v3 contract
-source. Migration tests and runners MUST build and invoke its artifacts
-directly. They MUST NOT maintain a second production implementation or copy
+The pinned `blend-contracts-v3` submodule is the production v3 protocol
+contract source. The pinned `blnt-backfill-contract` submodule is the sole
+production source for initial BLNT address claims and legacy-token conversion.
+Migration tests and runners MUST build and invoke both artifacts directly.
+They MUST NOT maintain a second production implementation or copy either
 contract source into this repository.
 
 Migration-only contracts and cross-version tests live under
@@ -59,8 +63,10 @@ represented as production dependencies.
 Apply the following order:
 
 1. Deployed v2 and legacy-emitter bytecode governs legacy compatibility facts.
-2. This transition specification governs independent emitters, conversion,
-   direct v3 activation, future replacement, orchestration, evidence, and acceptance.
+2. This transition specification and the pinned backfill-contract
+   specification govern independent emitters, initial distribution,
+   conversion, direct v3 activation, future replacement, orchestration,
+   evidence, and acceptance.
 3. The contract repository's composed specification governs all other v3
    contract behavior.
 

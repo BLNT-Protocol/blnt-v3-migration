@@ -18,6 +18,12 @@ mod v3_emitter {
     );
 }
 
+mod blnt_backfill {
+    soroban_sdk::contractimport!(
+        file = "../../blnt-backfill-contract/target/wasm32v1-none/optimized/blnt_backfill_contract.wasm"
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 mod v3_backstop {
     soroban_sdk::contractimport!(
@@ -103,7 +109,7 @@ impl MockPoolFactory {
 
 const SCALAR_7: i128 = 10_000_000;
 const SWAP_QUEUE_SECONDS: u64 = 31 * 24 * 60 * 60;
-const CONVERSION_SECONDS: u64 = 60 * 24 * 60 * 60;
+const INITIAL_DROP: i128 = 50_000_000 * SCALAR_7;
 
 fn create_asset(env: &Env, admin: &Address) -> Address {
     env.register_stellar_asset_contract_v2(admin.clone())
@@ -183,8 +189,18 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     legacy.initialize(&legacy_blnd, &incumbent, &legacy_blnd_usdc);
 
     let initializer = Address::generate(&env);
-    let v3_emitter_id = env.register(v3_emitter::WASM, (&legacy_blnd, &initializer));
+    let v3_emitter_id = env.register(v3_emitter::WASM, (&initializer,));
     let blnt = create_asset(&env, &v3_emitter_id);
+    let claimant = Address::generate(&env);
+    let claim_recipient = Address::generate(&env);
+    let backfill_id = env.register(
+        blnt_backfill::WASM,
+        (
+            &legacy_blnd,
+            &blnt,
+            soroban_sdk::vec![&env, (claimant.clone(), SCALAR_7)],
+        ),
+    );
     let blnt_usdc = env.register(MockComet, (&blnt, &usdc));
     let blnt_xlm = env.register(MockComet, (&blnt, &xlm));
 
@@ -204,7 +220,7 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
             &usdc,
             &xlm,
             &factory,
-            Vec::<(Address, i128)>::new(&env),
+            soroban_sdk::vec![&env, (backfill_id.clone(), INITIAL_DROP)],
         ),
     );
     let candidate = v3_backstop::Client::new(&env, &candidate_id);
@@ -220,6 +236,19 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     );
     assert_eq!(legacy.get_backstop(), incumbent);
     assert_eq!(v3.get_backstop(), candidate_id);
+    candidate.drop();
+    assert_eq!(
+        TokenClient::new(&env, &blnt).balance(&backfill_id),
+        INITIAL_DROP
+    );
+
+    let backfill = blnt_backfill::Client::new(&env, &backfill_id);
+    assert_eq!(backfill.claim(&claimant, &claim_recipient), SCALAR_7);
+    assert_eq!(backfill.get_claimable(&claimant), 0);
+    assert_eq!(
+        TokenClient::new(&env, &blnt).balance(&claim_recipient),
+        SCALAR_7
+    );
 
     env.ledger().set_timestamp(1_005);
     assert_eq!(legacy.distribute(), 5 * SCALAR_7);
@@ -251,7 +280,7 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     let recipient = Address::generate(&env);
     StellarAssetClient::new(&env, &legacy_blnd).mint(&holder, &(10 * SCALAR_7));
     assert_eq!(
-        v3.swap_blnd_for_blnt(&holder, &recipient, &(4 * SCALAR_7)),
+        backfill.swap_blnd_for_blnt(&holder, &recipient, &(4 * SCALAR_7)),
         4 * SCALAR_7
     );
     assert_eq!(
@@ -259,16 +288,20 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
         6 * SCALAR_7
     );
     assert_eq!(
-        TokenClient::new(&env, &legacy_blnd).balance(&v3_emitter_id),
+        TokenClient::new(&env, &legacy_blnd).balance(&backfill_id),
         0
     );
     assert_eq!(
         TokenClient::new(&env, &blnt).balance(&recipient),
         4 * SCALAR_7
     );
-    assert_eq!(v3.get_total_swapped(), 4 * SCALAR_7);
-    assert_eq!(v3.get_legacy_blnd_token(), legacy_blnd);
-    assert_eq!(v3.get_swap_deadline(), 1_000 + CONVERSION_SECONDS);
+    assert_eq!(backfill.get_total_swapped(), 4 * SCALAR_7);
+    assert_eq!(
+        backfill.get_remaining_swap_capacity(),
+        19_999_996 * SCALAR_7
+    );
+    assert_eq!(backfill.get_legacy_blnd_token(), legacy_blnd);
+    assert_eq!(backfill.get_blnt_token(), blnt);
 
     let future_backstop = Address::generate(&env);
     MockCometClient::new(&env, &blnt_usdc).mint(&candidate_id, &(100 * SCALAR_7));
@@ -285,8 +318,9 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     assert_eq!(v3.get_backstop(), future_backstop);
     assert!(v3.get_queued_swap().is_none());
 
-    env.ledger().set_timestamp(1_000 + CONVERSION_SECONDS);
-    assert!(v3
-        .try_swap_blnd_for_blnt(&holder, &recipient, &SCALAR_7)
-        .is_err());
+    env.ledger().set_timestamp(u64::MAX);
+    assert_eq!(
+        backfill.swap_blnd_for_blnt(&holder, &recipient, &SCALAR_7),
+        5 * SCALAR_7
+    );
 }

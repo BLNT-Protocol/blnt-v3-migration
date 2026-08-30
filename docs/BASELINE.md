@@ -50,9 +50,11 @@ Before changing protocol behavior:
 Do not upgrade or edit the inherited v2 source submodule. It remains frozen on
 Rust 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
 
-New v3 implementation work belongs in the `blend-contracts-v3` submodule,
-which targets Protocol 27 using Rust 1.91.1, Soroban SDK 27.0.3, and
-`wasm32v1-none`. There is intentionally no SDK 26 compatibility lane.
+New v3 protocol implementation work belongs in the `blend-contracts-v3`
+submodule. Initial-allocation claim and conversion work belongs in the
+`blnt-backfill-contract` submodule. Both target Protocol 27 using Rust 1.91.1,
+Soroban SDK 27.0.3, and `wasm32v1-none`. There is intentionally no SDK 26
+compatibility lane.
 Compatibility is defined by the exact deployed v2 and emitter bytecode running
 on the current host and interacting with the pinned v3 contracts.
 
@@ -69,6 +71,8 @@ must not modify the pinned v2 source, its dependency graph, or its lockfile.
 - `migration-harness/migration-tests`: current-host compatibility and migration
   tests.
 - `blend-contracts-v3`: pinned production v3 contract source and tests.
+- `blnt-backfill-contract`: pinned production initial-allocation claim and
+  conversion contract source and tests.
 
 V3 does not replace this emitter. It deploys an independent BLNT emitter while
 the recorded artifact remains with v1/v2. Creating v3 does not migrate or

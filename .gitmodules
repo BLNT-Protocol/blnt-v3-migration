@@ -19,3 +19,6 @@
 [submodule "soroban-fixed-point-math"]
 	path = soroban-fixed-point-math
 	url = git@github.com:levinson/soroban-fixed-point-math.git
+[submodule "blnt-backfill-contract"]
+	path = blnt-backfill-contract
+	url = git@github.com:levinson/blnt-backfill-contract.git

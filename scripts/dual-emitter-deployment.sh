@@ -12,9 +12,13 @@ unset BLEND_MIGRATION_LIBRARY_ONLY
 
 STATE_FILE="${WORK_DIR}/dual-emitter-state.json"
 V3_EMITTER_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/emitter.wasm"
+BLNT_BACKFILL_WASM="${ROOT_DIR}/blnt-backfill-contract/target/wasm32v1-none/optimized/blnt_backfill_contract.wasm"
 BLNT_MINT=$((2000 * SCALAR_7))
 USDC_MINT=$((2 * COMET_INITIAL_PAIR_TOKEN))
 CONVERSION_TEST_AMOUNT=$((10 * SCALAR_7))
+BLNT_BACKFILL_DROP=$((50000000 * SCALAR_7))
+BLNT_SWAP_CAP=$((20000000 * SCALAR_7))
+BLNT_BACKFILL_CLAIM_LIST="${BLEND_BLNT_BACKFILL_CLAIM_LIST:-[]}"
 
 usage_dual() {
     cat <<'EOF'
@@ -26,7 +30,7 @@ Commands:
   start     Start local Protocol-27 Quickstart or verify public testnet RPC.
   deploy    Deploy and verify the independent legacy and v3 lanes.
   run       Validate, start, and deploy.
-  status    Query the recorded token, emitter, backstop, and deadline bindings.
+  status    Query the recorded token, emitter, backstop, and backfill bindings.
   stop      Stop the local Quickstart container.
 
 Set BLEND_MIGRATION_NETWORK=testnet for the public-testnet lane. Signing keys
@@ -39,16 +43,16 @@ dual_plan() {
     cat <<EOF
 Dual-emitter ${NETWORK_LABEL} deployment:
   1. Verify the exact deployed legacy emitter and v2 artifacts.
-  2. Build the v3 emitter/backstop/factory/pool and workspace Comet V2.
+  2. Build the v3 contracts, BLNT backfill contract, and workspace Comet V2.
   3. Deploy legacy BLND, BLNT, USDC, and ${XLM_ASSET_MODE} XLM assets.
   4. Deploy BLND:USDC, BLNT:USDC, and BLNT:XLM Comet V2 pools.
   5. Lock the shared Comet controller at 100/100/100 with signer weight zero.
   6. Leave the legacy emitter pointed at the deployed v2 backstop.
   7. Point the separate v3 emitter at the v3 backstop with BLNT:USDC designated.
-  8. Activate v3 immediately, execute its empty initial drop, and smoke-test
-     one-way BLND-to-BLNT conversion.
-  9. Verify separate administrators, recipients, emissions, Comets, and the
-     immutable 60-day conversion deadline.
+  8. Send the exact 50-million-BLNT initial drop to the immutable backfill
+     contract and smoke-test its one-way BLND-to-BLNT conversion.
+  9. Verify separate administrators, recipients, emissions, Comets, backfill
+     custody, and the immutable 20-million-BLNT conversion cap.
 
 No legacy-emitter queue or migration backfill is used.
 EOF
@@ -66,6 +70,7 @@ dual_validate_artifacts() {
         "${V3_BACKSTOP_WASM}" \
         "${V3_EMITTER_WASM}" \
         "${V3_POOL_WASM}" \
+        "${BLNT_BACKFILL_WASM}" \
         "${COMET_WASM}"
     do
         [[ -s "${artifact}" ]] || die "missing or empty WASM artifact: ${artifact}"
@@ -107,11 +112,12 @@ initialize_comet() {
 dual_deploy() {
     local skip_build="${1:-false}"
     local operator depositor controller issuer
-    local legacy_emitter v3_emitter legacy_blnd blnt usdc xlm
+    local legacy_emitter v3_emitter blnt_backfill legacy_blnd blnt usdc xlm
     local legacy_blnd_usdc blnt_usdc blnt_xlm xlm_balance
     local v2_pool_hash v2_backstop v2_factory deployed_v2_backstop
     local v3_pool_hash v3_backstop v3_factory deployed_v3_backstop
-    local legacy_emitted v3_emitted swapped deadline now
+    local legacy_emitted v3_emitted swapped remaining_capacity backfill_balance
+    local post_backfill_balance holder_blnd_balance holder_blnt_balance backfill_blnd_balance
     local legacy_admin blnt_admin legacy_recipient v3_recipient
 
     validate_tools
@@ -134,6 +140,9 @@ dual_deploy() {
     state_set "legacy_emitter_wasm_sha256" "${EXPECTED_EMITTER_SHA256}"
     state_set "v3_emitter_wasm_sha256" "$(sha256_file "${V3_EMITTER_WASM}")"
     state_set "v3_backstop_wasm_sha256" "$(sha256_file "${V3_BACKSTOP_WASM}")"
+    state_set "blnt_backfill_wasm_sha256" "$(sha256_file "${BLNT_BACKFILL_WASM}")"
+    state_set "blnt_backfill_source_commit" \
+        "$(git -C "${ROOT_DIR}/blnt-backfill-contract" rev-parse HEAD)"
     state_set "comet_v2_wasm_sha256" "$(sha256_file "${COMET_WASM}")"
     state_set "comet_v2_source_commit" \
         "$(git -C "${ROOT_DIR}/comet-contracts-v1" rev-parse HEAD)"
@@ -175,10 +184,16 @@ dual_deploy() {
     legacy_emitter="$(deploy_wasm "deploy-legacy-emitter" "${EMITTER_WASM}" "")"
     v3_emitter="$(deploy_wasm \
         "deploy-v3-emitter" "${V3_EMITTER_WASM}" "" \
-        --legacy_blnd_token "${legacy_blnd}" \
         --initializer "${operator}")"
+    blnt_backfill="$(deploy_wasm \
+        "deploy-blnt-backfill" "${BLNT_BACKFILL_WASM}" "" \
+        --legacy_blnd_token "${legacy_blnd}" \
+        --blnt_token "${blnt}" \
+        --claim_list "${BLNT_BACKFILL_CLAIM_LIST}")"
     state_set "legacy_emitter" "${legacy_emitter}"
     state_set "v3_emitter" "${v3_emitter}"
+    state_set "blnt_backfill" "${blnt_backfill}"
+    state_set "blnt_backfill_claim_list" "${BLNT_BACKFILL_CLAIM_LIST}"
 
     legacy_blnd_usdc="$(deploy_wasm "deploy-comet-blnd-usdc" "${COMET_WASM}" "")"
     blnt_usdc="$(deploy_wasm "deploy-comet-blnt-usdc" "${COMET_WASM}" "")"
@@ -286,25 +301,55 @@ dual_deploy() {
         --usdc_token "${usdc}" \
         --xlm_token "${xlm}" \
         --pool_factory "${v3_factory}" \
-        --drop_list "[]")"
+        --drop_list "[[\"${blnt_backfill}\",\"${BLNT_BACKFILL_DROP}\"]]")"
     assert_equal "${v3_backstop}" "${deployed_v3_backstop}" "v3 backstop address"
 
     invoke_transaction "activate-v3-directly" "${v3_backstop}" distribute >/dev/null
-    invoke_transaction "execute-empty-v3-drop" "${v3_backstop}" drop >/dev/null
+    invoke_transaction "execute-v3-backfill-drop" "${v3_backstop}" drop >/dev/null
+
+    backfill_balance="$(normalize_scalar "$(invoke_view \
+        "query-backfill-blnt-balance" "${blnt}" balance --id "${blnt_backfill}")")"
+    assert_equal "${BLNT_BACKFILL_DROP}" "${backfill_balance}" \
+        "backfill BLNT custody after initial drop"
 
     invoke_transaction_as "convert-test-blnd-to-blnt" \
-        "${DEPOSITOR_IDENTITY}" "${v3_emitter}" swap_blnd_for_blnt \
+        "${DEPOSITOR_IDENTITY}" "${blnt_backfill}" swap_blnd_for_blnt \
         --from "${depositor}" --to "${depositor}" \
         --amount "${CONVERSION_TEST_AMOUNT}" >/dev/null
     swapped="$(normalize_scalar "$(invoke_view \
-        "query-total-converted" "${v3_emitter}" get_total_swapped)")"
+        "query-total-converted" "${blnt_backfill}" get_total_swapped)")"
     assert_equal "${CONVERSION_TEST_AMOUNT}" "${swapped}" "conversion total"
+    remaining_capacity="$(normalize_scalar "$(invoke_view \
+        "query-conversion-capacity" "${blnt_backfill}" get_remaining_swap_capacity)")"
+    assert_equal "$((BLNT_SWAP_CAP - CONVERSION_TEST_AMOUNT))" \
+        "${remaining_capacity}" "remaining conversion capacity"
+    assert_equal "${legacy_blnd}" "$(normalize_scalar "$(invoke_view \
+        "query-backfill-blnd-binding" "${blnt_backfill}" get_legacy_blnd_token)")" \
+        "backfill legacy token"
+    assert_equal "${blnt}" "$(normalize_scalar "$(invoke_view \
+        "query-backfill-blnt-binding" "${blnt_backfill}" get_blnt_token)")" \
+        "backfill payout token"
+    holder_blnd_balance="$(normalize_scalar "$(invoke_view \
+        "query-converted-holder-blnd" "${legacy_blnd}" balance --id "${depositor}")")"
+    holder_blnt_balance="$(normalize_scalar "$(invoke_view \
+        "query-converted-holder-blnt" "${blnt}" balance --id "${depositor}")")"
+    backfill_blnd_balance="$(normalize_scalar "$(invoke_view \
+        "query-backfill-blnd-balance" "${legacy_blnd}" balance --id "${blnt_backfill}")")"
+    post_backfill_balance="$(normalize_scalar "$(invoke_view \
+        "query-post-conversion-backfill-blnt" "${blnt}" balance \
+        --id "${blnt_backfill}")")"
+    assert_equal "0" "${holder_blnd_balance}" "converted holder BLND balance"
+    assert_equal "${CONVERSION_TEST_AMOUNT}" "${holder_blnt_balance}" \
+        "converted holder BLNT balance"
+    assert_equal "0" "${backfill_blnd_balance}" "backfill retained BLND balance"
+    assert_equal "$((BLNT_BACKFILL_DROP - CONVERSION_TEST_AMOUNT))" \
+        "${post_backfill_balance}" "backfill BLNT balance after conversion"
 
     sleep "${EMISSION_START_DELAY_SECONDS}"
     legacy_emitted="$(normalize_scalar "$(invoke_transaction \
         "emit-legacy-blnd" "${legacy_emitter}" distribute)")"
     v3_emitted="$(normalize_scalar "$(invoke_transaction \
-        "emit-v3-blnt" "${v3_emitter}" distribute)")"
+        "emit-v3-blnt" "${v3_backstop}" distribute)")"
     [[ "${legacy_emitted}" =~ ^[1-9][0-9]*$ ]] || die "legacy emitter minted no BLND"
     [[ "${v3_emitted}" =~ ^[1-9][0-9]*$ ]] || die "v3 emitter minted no BLNT"
 
@@ -321,12 +366,8 @@ dual_deploy() {
     assert_equal "${v2_backstop}" "${legacy_recipient}" "legacy emitter recipient"
     assert_equal "${v3_backstop}" "${v3_recipient}" "v3 emitter recipient"
 
-    deadline="$(normalize_scalar "$(invoke_view \
-        "query-conversion-deadline" "${v3_emitter}" get_swap_deadline)")"
-    now="$(date +%s)"
-    [[ "${deadline}" =~ ^[0-9]+$ ]] || die "invalid conversion deadline"
-    (( deadline > now )) || die "conversion deadline is not in the future"
-    state_set "swap_deadline" "${deadline}"
+    state_set "blnt_swap_cap" "${BLNT_SWAP_CAP}"
+    state_set "blnt_backfill_initial_balance" "${BLNT_BACKFILL_DROP}"
     state_set "legacy_emitted" "${legacy_emitted}"
     state_set "v3_emitted" "${v3_emitted}"
     state_set "phase" "verified"
@@ -340,19 +381,26 @@ dual_deploy() {
 }
 
 dual_status() {
-    local legacy_emitter v3_emitter legacy_recipient v3_recipient deadline queued
+    local legacy_emitter v3_emitter blnt_backfill legacy_recipient v3_recipient queued
+    local swapped remaining_capacity backfill_balance
 
     validate_tools
     require_network
     load_state
     legacy_emitter="$(state_value legacy_emitter)"
     v3_emitter="$(state_value v3_emitter)"
+    blnt_backfill="$(state_value blnt_backfill)"
     legacy_recipient="$(normalize_scalar "$(invoke_view \
         "status-legacy-recipient" "${legacy_emitter}" get_backstop)")"
     v3_recipient="$(normalize_scalar "$(invoke_view \
         "status-v3-recipient" "${v3_emitter}" get_backstop)")"
-    deadline="$(normalize_scalar "$(invoke_view \
-        "status-swap-deadline" "${v3_emitter}" get_swap_deadline)")"
+    swapped="$(normalize_scalar "$(invoke_view \
+        "status-total-swapped" "${blnt_backfill}" get_total_swapped)")"
+    remaining_capacity="$(normalize_scalar "$(invoke_view \
+        "status-swap-capacity" "${blnt_backfill}" get_remaining_swap_capacity)")"
+    backfill_balance="$(normalize_scalar "$(invoke_view \
+        "status-backfill-balance" "$(state_value blnt_token)" balance \
+        --id "${blnt_backfill}")")"
     queued="$(invoke_view "status-v3-queue" "${v3_emitter}" get_queued_swap)"
     cat <<EOF
 Dual-emitter ${NETWORK_LABEL} status
@@ -362,7 +410,10 @@ Dual-emitter ${NETWORK_LABEL} status
   v3 BLNT emitter: ${v3_emitter}
   v3 recipient: ${v3_recipient}
   v3 queue: ${queued}
-  conversion deadline: $(format_timestamp "${deadline}") (${deadline})
+  BLNT backfill contract: ${blnt_backfill}
+  backfill BLNT balance: ${backfill_balance}
+  converted BLND: ${swapped}
+  remaining conversion capacity: ${remaining_capacity}
   Comet V2 commit: $(state_value comet_v2_source_commit)
   Comet V2 WASM: $(state_value comet_v2_wasm_sha256)
   state: ${STATE_FILE}

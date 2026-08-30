@@ -5,7 +5,8 @@ transition from Blend Protocol v2 to the v3 candidate on Stellar.
 
 This repository pins the frozen v2 baseline and the v3 candidate contracts to
 test independent legacy/v3 emitters, cross-version behavior, and network deployments.
-Production v3 contract behavior belongs to the `blend-contracts-v3` submodule.
+Production v3 protocol behavior belongs to `blend-contracts-v3`; initial
+allocation and conversion behavior belongs to `blnt-backfill-contract`.
 This is not an official or production-ready Blend release.
 
 ## Baseline
@@ -18,10 +19,12 @@ git submodule update --init --recursive
 
 The deployed v2 source baseline is Blend Protocol v2 commit
 `ba22b487b2c5057a4ecc28b05b5193c28e4bd117`. The Blend contract submodules are
-`blend-contracts-v2/` and `blend-contracts-v3/`. Protocol-27 Comet V2 weighted-pool
-source is pinned in the historically named `comet-contracts-v1/`, with its Protocol-27 dependency
-sources pinned in `sep-41-token/` and `soroban-fixed-point-math/`. The
-client-integration submodules are `blend-sdk-js/` and `blend-ui/`.
+`blend-contracts-v2/` and `blend-contracts-v3/`. The production transition
+contract is pinned in `blnt-backfill-contract/`. Protocol-27 Comet V2
+weighted-pool source is pinned in the historically named
+`comet-contracts-v1/`, with its Protocol-27 dependency sources pinned in
+`sep-41-token/` and `soroban-fixed-point-math/`. The client-integration
+submodules are `blend-sdk-js/` and `blend-ui/`.
 
 Exact mainnet emitter, v2 backstop, pool-factory, and pool WASMs are checked in
 under `deployed-artifacts/mainnet/` with their contract IDs and SHA-256 digests. These
@@ -31,14 +34,16 @@ verify both inputs.
 
 GitHub Actions requires a `SUBMODULES_TOKEN` repository secret with read
 access to the private `blend-contracts-v3`, `blend-sdk-js`, and `blend-ui`
-repositories.
+repositories, plus `blnt-backfill-contract`.
 
 V3 no longer replaces or depends on the deployed BLND emitter. The legacy
 emitter remains with v1/v2, while v3 deploys a separate emitter that creates
-BLNT for the v3 backstop from launch. The v3 emitter accepts explicit one-way
-BLND-to-BLNT conversion for its first 60 days and retains the established
-31-day backstop-swap API for a future BLNT-based protocol upgrade. Existing v2
-positions and claims remain entirely governed by the legacy contracts.
+BLNT for the v3 backstop from launch. The v3 emitter sends its complete
+50-million-BLNT initial drop to the immutable backfill contract. That contract
+owns address claims and perpetual one-way BLND-to-BLNT conversion capped at 20
+million BLNT. The emitter retains the established 31-day backstop-swap API for
+a future BLNT-based protocol upgrade. Existing v2 positions and claims remain
+entirely governed by the legacy contracts.
 
 See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the migration repository
 boundary and [docs/MIGRATION_PROTOCOL_SPEC.md](docs/MIGRATION_PROTOCOL_SPEC.md)
@@ -65,6 +70,8 @@ with supporting Protocol-27 dependency sources pinned separately:
   Rust 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
 - `blend-contracts-v3/` is the production candidate submodule, pinned to Rust
   1.91.1, Soroban SDK 27.0.3, Protocol 27 tooling, and `wasm32v1-none`.
+- `blnt-backfill-contract/` is the production transition-contract submodule,
+  pinned to the same Protocol-27 toolchain.
 - `comet-contracts-v1/` is the Protocol-27 Comet V2 weighted-pool source
   submodule, pinned to Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
 - `sep-41-token/` and `soroban-fixed-point-math/` are the corresponding

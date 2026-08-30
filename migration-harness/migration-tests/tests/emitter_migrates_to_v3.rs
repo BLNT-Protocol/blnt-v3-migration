@@ -235,7 +235,7 @@ fn optimized_backfill_handles_all_backfill_and_grant_claimants_partially_vested(
     let first = claimants.first().unwrap();
     env.ledger().set_timestamp(backfill.get_vesting_end());
     assert_eq!(backfill.claim_backfill(&first, &first), 1);
-    assert_eq!(backfill.get_claimable(&first), 0);
+    assert_eq!(backfill.get_backfill_claimable(&first), 0);
 
     let first_grantee = grantees.first().unwrap();
     env.ledger().set_timestamp(backfill.get_grant_vesting_end());
@@ -317,7 +317,7 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     );
 
     let backfill = blnt_backfill::Client::new(&env, &backfill_id);
-    assert_eq!(backfill.get_claimable(&claimant), 0);
+    assert_eq!(backfill.get_backfill_claimable(&claimant), 0);
     assert!(backfill
         .try_claim_backfill(&claimant, &claim_recipient)
         .is_err());
@@ -325,7 +325,7 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     env.ledger().set_timestamp(1_005);
     let vested = SCALAR_7 * 5 / i128::from(VESTING_DURATION_SECONDS);
     assert_eq!(backfill.claim_backfill(&claimant, &claim_recipient), vested);
-    assert_eq!(backfill.get_claimable(&claimant), 0);
+    assert_eq!(backfill.get_backfill_claimable(&claimant), 0);
     assert_eq!(
         TokenClient::new(&env, &blnt).balance(&claim_recipient),
         vested

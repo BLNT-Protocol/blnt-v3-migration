@@ -58,9 +58,8 @@ Native and optimized-WASM backfill-contract tests MUST cover:
 - authorized immutable address allocations totaling no more than 30 million
   BLNT, including duplicate, non-positive, count, and total bounds;
 - per-second linear vesting from zero through the exact full allocation over
-  180 days, repeated partial claims, shared progress across both claim entry
-  points, zero-currently-claimable rejection, and indefinite post-vesting
-  claims;
+  180 days, repeated partial claims, zero-currently-claimable rejection, and
+  indefinite post-vesting claims;
 - independent grant allocations for at most 100 recipients and 10 million
   BLNT, linearly vested over 720 days through `claim_grant`, including an
   address present in both lists without cross-lane consumption or acceleration;

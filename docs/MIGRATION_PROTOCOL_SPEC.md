@@ -76,8 +76,7 @@ claimant's allocation MUST vest linearly per second for 180 days beginning at
 contract construction. A claimant-authorized
 `claim_backfill(claimant, to)` transfers all cumulative vested BLNT not
 previously claimed and MAY be called repeatedly as vesting advances.
-`claim(claimant, to)` is an equivalent compatibility alias over the same claim
-progress. Claims do not expire after vesting completes.
+Claims do not expire after vesting completes.
 
 Construction MUST also accept an independent immutable grant list containing
 at most 100 unique positive allocations totaling at most 10 million BLNT.

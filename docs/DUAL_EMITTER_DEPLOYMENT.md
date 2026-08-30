@@ -105,7 +105,7 @@ record:
 - exact BLND burn and pre-funded BLNT transfer conversion events;
 - positive independent BLND and BLNT distributions; and
 - active modeled Fixed and Custom pools in their respective V2 and V3 reward
-  zones;
+  zones, including verified seven-day V2 USDC-supply emission streams;
 - the immutable 20-million-BLNT conversion cap and empty initial v3 queue.
 
 The runner initializes all three Comet v2 pools at 80:20, verifies positive authorized

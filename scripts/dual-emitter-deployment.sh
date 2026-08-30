@@ -41,6 +41,8 @@ DUAL_MODELED_V3_LP_BALANCE=$((10 * SCALAR_7))
 DUAL_MODELED_BLND_MINT=$((440000 * SCALAR_7))
 DUAL_MODELED_BLNT_MINT=$((200 * SCALAR_7))
 DUAL_MODELED_USDC_MINT=$((50000 * SCALAR_7))
+DUAL_MODELED_V2_EMISSION_CONFIG='[{"res_index":1,"res_type":1,"share":1}]'
+DUAL_MODELED_V2_EMISSION_START_DELAY_SECONDS=15
 
 validate_backfill_manifest() {
     local expected_source_hash actual_source_hash generated_manifest
@@ -275,6 +277,13 @@ dual_deploy_modeled_pools() {
             "${pool}" get_config | jq -er '.status | tostring')"
         assert_equal "0" "${status}" "modeled v2 active status"
     done
+    for pool in "${fixed_v2_pool}" "${custom_v2_pool}"; do
+        invoke_transaction "configure-dual-modeled-v2-emissions" \
+            "${pool}" set_emissions_config \
+            --res_emission_metadata "${DUAL_MODELED_V2_EMISSION_CONFIG}" >/dev/null
+    done
+    state_set "modeled_v2_emissions_configured_at" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     for pool in "${fixed_v3_pool}" "${custom_v3_pool}"; do
         invoke_transaction "activate-dual-modeled-v3" \
             "${pool}" set_status --pool_status 0 >/dev/null
@@ -357,7 +366,8 @@ dual_deploy() {
     local legacy_blnd_usdc blnt_usdc blnt_xlm xlm_balance
     local v2_pool_hash v2_backstop v2_factory deployed_v2_backstop
     local v3_pool_hash v3_backstop v3_factory deployed_v3_backstop
-    local legacy_emitted v3_emitted swapped remaining_capacity backfill_balance allocated
+    local legacy_emitted legacy_distributed v3_emitted swapped remaining_capacity
+    local backfill_balance allocated pool pool_gulped stream now
     local vesting_start vesting_end grant_vesting_start grant_vesting_end
     local backfill_allocated grant_allocated
     local total_claimed backfill_claimed grant_claimed
@@ -683,12 +693,38 @@ dual_deploy() {
 
     dual_deploy_modeled_pools
 
-    sleep "${EMISSION_START_DELAY_SECONDS}"
+    # V2 sends 30% of each pool's share to reserve emissions and rejects a
+    # gulp below one BLND. With two equally weighted pools, fifteen seconds
+    # provides sufficient headroom for both initial streams.
+    sleep "${DUAL_MODELED_V2_EMISSION_START_DELAY_SECONDS}"
     legacy_emitted="$(normalize_scalar "$(invoke_transaction \
         "emit-legacy-blnd" "${legacy_emitter}" distribute)")"
+    legacy_distributed="$(normalize_scalar "$(invoke_transaction \
+        "distribute-legacy-blnd" "${v2_backstop}" distribute)")"
+    for pool in \
+        "$(state_value modeled_v2_fixed_pool)" \
+        "$(state_value modeled_v2_custom_pool)"
+    do
+        pool_gulped="$(normalize_scalar "$(invoke_transaction \
+            "gulp-dual-modeled-v2-emissions" "${pool}" gulp_emissions)")"
+        [[ "${pool_gulped}" =~ ^[1-9][0-9]*$ ]] ||
+            die "modeled v2 pool gulped no BLND: ${pool}"
+    done
+    now="$(date +%s)"
+    for pool in \
+        "$(state_value modeled_v2_fixed_pool)" \
+        "$(state_value modeled_v2_custom_pool)"
+    do
+        stream="$(invoke_view "verify-dual-modeled-v2-emission-stream" \
+            "${pool}" get_reserve_emissions --reserve_token_index 3)"
+        modeled_v2_emission_stream_is_active "${stream}" "${now}" ||
+            die "modeled v2 USDC supply emission stream is inactive: ${pool}"
+    done
     v3_emitted="$(normalize_scalar "$(invoke_transaction \
         "emit-v3-blnt" "${v3_backstop}" distribute)")"
     [[ "${legacy_emitted}" =~ ^[1-9][0-9]*$ ]] || die "legacy emitter minted no BLND"
+    [[ "${legacy_distributed}" =~ ^[1-9][0-9]*$ ]] ||
+        die "v2 backstop distributed no BLND"
     [[ "${v3_emitted}" =~ ^[1-9][0-9]*$ ]] || die "v3 emitter minted no BLNT"
 
     legacy_admin="$(normalize_scalar "$(invoke_view \
@@ -707,6 +743,9 @@ dual_deploy() {
     state_set "blnt_swap_cap" "${BLNT_SWAP_CAP}"
     state_set "blnt_backfill_initial_balance" "${BLNT_BACKFILL_DROP}"
     state_set "legacy_emitted" "${legacy_emitted}"
+    state_set "legacy_backstop_distributed" "${legacy_distributed}"
+    state_set "modeled_v2_emissions_started_at" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     state_set "v3_emitted" "${v3_emitted}"
     state_set "phase" "verified"
     state_set "verified_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"

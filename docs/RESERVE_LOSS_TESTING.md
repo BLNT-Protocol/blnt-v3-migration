@@ -2,7 +2,7 @@
 
 The reserve-loss fixture deploys a third pool through the main Blend v3 factory
 and registers it with the main backstop and reward zone. It reuses the
-migration lane's canonical BLND, USDC, XLM, and Comet contracts without
+migration lane's canonical BLND, USDC, XLM, and Comet v2 contracts without
 replacing the Fixed or Custom pools. The ordinary SDK and UI reward-zone
 discovery paths therefore expose it without a pool-specific configuration.
 

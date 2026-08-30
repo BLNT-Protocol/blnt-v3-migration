@@ -28,8 +28,7 @@ Commands:
 Each pass advances the incumbent emitter when it still targets v2, checkpoints
 the v2 and v3 backstops, then gulps each registered reward-zone pool for the
 corresponding protocol version. It reconciles direct reserve-custody deficits
-across every registered v3 pool and processes one bounded pending-USDC and
-pending-XLM buy-and-burn batch when work is available. On Stellar testnet, it
+across every registered v3 pool. On Stellar testnet, it
 refreshes the controlled fixture-oracle histories when they are at least 12
 hours old. The default keeper interval is one hour. Configuration may be overridden with
 BLEND_KEEPER_REGISTRY, BLEND_KEEPER_WORK_DIR, BLEND_KEEPER_CONFIG_DIR,
@@ -404,51 +403,6 @@ run_reconcile_losses() {
     return "${failed}"
 }
 
-plan_buy_and_burn() {
-    local asset output
-
-    for asset in Usdc Xlm; do
-        if ! output="$(capture_invoke no "${V3_BACKSTOP_ID}" buy_and_burn --asset "${asset}")"; then
-            die "v3 ${asset} buy and burn simulation failed: ${output}"
-        fi
-        if is_zero_i128_result "${output}"; then
-            note "v3 buy and burn: no pending ${asset}"
-        elif is_positive_i128_result "${output}"; then
-            note "v3 ${asset} buy and burn: ready (${output} BLND)"
-        else
-            die "v3 ${asset} buy and burn returned an invalid amount: ${output}"
-        fi
-    done
-}
-
-run_buy_and_burn() {
-    local asset output failed=0
-
-    for asset in Usdc Xlm; do
-        if ! output="$(capture_invoke no "${V3_BACKSTOP_ID}" buy_and_burn --asset "${asset}")"; then
-            note "v3 ${asset} buy and burn simulation failed: ${output}"
-            failed=1
-            continue
-        fi
-        if is_zero_i128_result "${output}"; then
-            note "v3 buy and burn: no pending ${asset}"
-            continue
-        fi
-        if ! is_positive_i128_result "${output}"; then
-            note "v3 ${asset} buy and burn returned an invalid amount: ${output}"
-            failed=1
-            continue
-        fi
-        if ! output="$(capture_invoke yes "${V3_BACKSTOP_ID}" buy_and_burn --asset "${asset}")"; then
-            note "v3 ${asset} buy and burn submission failed: ${output}"
-            failed=1
-            continue
-        fi
-        note "v3 ${asset} buy and burn: submitted (${output} BLND)"
-    done
-    return "${failed}"
-}
-
 load_configuration() {
     local pool_name pool_id
 
@@ -542,7 +496,6 @@ plan_pass() {
             "v3 gulp ${V3_POOL_NAMES[index]} pool ${V3_POOLS[index]}" \
             "${V3_POOLS[index]}" gulp_emissions 1034 1200
     done
-    plan_buy_and_burn
     note "Plan only: pool simulations reflect current state before either simulated distribution."
 }
 
@@ -579,8 +532,6 @@ run_pass() {
             "v3 gulp ${V3_POOL_NAMES[index]} pool ${V3_POOLS[index]}" \
             "${V3_POOLS[index]}" gulp_emissions 1034 1200 || failed=1
     done
-    run_buy_and_burn || failed=1
-
     if (( failed != 0 )); then
         note "Emissions pass completed with one or more unexpected failures."
         return 1

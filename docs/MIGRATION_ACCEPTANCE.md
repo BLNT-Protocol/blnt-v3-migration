@@ -12,7 +12,7 @@ Acceptance requires:
 
 1. the frozen SDK-22 v2 tests and deployed-artifact verification to pass;
 2. the complete native and optimized-WASM v3 contract suite to pass;
-3. the Comet V2 workspace build and tests to pass;
+3. the Comet v2 workspace build and tests to pass;
 4. the v3 WASM-size and resource guards to pass; and
 5. the Protocol-27 compatibility harness to pass without rebuilding deployed
    v2 or the legacy emitter as SDK-27 contracts.
@@ -69,10 +69,10 @@ launch harness MUST use exactly one recipient, verify that it is the immutable
 backfill-contract address, and verify that contract receives exactly 50 million
 BLNT. V3 launch MUST schedule no migration backfill.
 
-## Comet V2 canonical LPs
+## Comet v2 canonical LPs
 
 Build and deployment evidence MUST identify the workspace's historically named
-`comet-contracts-v1` checkout as the Comet V2 source and record its commit and
+`comet-contracts-v1` checkout as the Comet v2 source and record its commit and
 optimized WASM hash. Tests and network verification MUST prove that canonical
 v3 BLNT:USDC and BLNT:XLM pools:
 
@@ -113,7 +113,7 @@ No test or deployment may add a privileged replacement route.
 | Native Soroban `Env` | Conversion cap, address claims, direct activation, queue compatibility, conservation, and rollback |
 | Optimized WASM | Public ABI, constructor encoding, serialization, cross-contract behavior, and resource limits |
 | Protocol-27 compatibility harness | Exact deployed v2 and legacy emitter alongside independent optimized v3 emitter/backstop WASM |
-| Local Quickstart | Reproducible dual-emitter deployment, Comet V2 bindings, initial activation, and recorded costs |
+| Local Quickstart | Reproducible dual-emitter deployment, Comet v2 bindings, initial activation, and recorded costs |
 | Public testnet | Production transaction assembly, signer separation, artifact hashes, backfill custody and caps, and final bindings |
 
 ## Transition-ready gate

@@ -14,7 +14,7 @@ This repository owns:
 - the pinned SDK and UI client-integration source submodules;
 - cross-version compatibility and migration-only test contracts;
 - localnet and public-testnet migration orchestration;
-- integrated Comet-derived backstop valuation evidence; and
+- integrated Comet v2-derived backstop valuation evidence; and
 - reproducible deployment manifests and resource evidence.
 
 Contract behavior and economic policy are owned by the contract specification
@@ -27,7 +27,7 @@ deployment default, or test expectation.
 
 1. [MIGRATION_PROTOCOL_SPEC.md](MIGRATION_PROTOCOL_SPEC.md) defines the
    normative dual-emitter topology, BLND-to-BLNT conversion, direct v3 launch,
-   incumbent isolation, Comet V2 LPs, and future replacement behavior.
+   incumbent isolation, Comet v2 LPs, and future replacement behavior.
 2. [BASELINE.md](BASELINE.md) defines the frozen v2 source, deployed artifacts,
    toolchain separation, and submodule provenance.
 3. [MIGRATION_ACCEPTANCE.md](MIGRATION_ACCEPTANCE.md) defines the normative
@@ -83,10 +83,10 @@ production approval.
 The deployment runner MUST establish Fixed Pool v3 before any other v3 pool
 and use its first plain-USDC backstop deposit to create the candidate's shared
 USDC SAC balance. It MUST then read the Protocol-27 persistent balance entries
-for that custody and for both canonical Comets' issuer-controlled underlying
+for that custody and for both canonical Comet v2 pools' issuer-controlled underlying
 assets. Every entry MUST exist, be positive and authorized, and record
 `clawback = false`. A local issued-XLM fixture MUST satisfy the same check for
-both Comet and backstop custody; native XLM requires no issuer check.
+both Comet v2 and backstop custody; native XLM requires no issuer check.
 
 The complete modeled-pool verification MUST repeat the checks before v3 is
 declared ready. Any missing, malformed, deauthorized, zero, or clawbackable
@@ -94,11 +94,11 @@ entry invalidates the deployment. This is evidence for the
 contract specification's non-clawbackable-custody requirement, not a new
 contract entry point or substitute for lending-reserve admission policy.
 
-Both canonical Comets MUST use the same dedicated classic-account controller.
-After both Comets are initialized unfrozen, the runner MUST atomically set that
+Both canonical Comet v2 pools MUST use the same dedicated classic-account controller.
+After both Comet v2 pools are initialized unfrozen, the runner MUST atomically set that
 account's low, medium, and high thresholds to 100 and its only signer weight to
-zero, matching the canonical mainnet BLND:USDC Comet. It MUST then verify each
-Comet's exact token pair, 80:20 weights, controller address, and the controller
+zero, matching the canonical mainnet BLND:USDC Comet v1 pool. It MUST then verify each
+Comet v2 pool's exact token pair, 80:20 weights, controller address, and the controller
 account's thresholds and signer weights. A failed check invalidates the
 deployment, and successful locking makes later freeze or controller changes
 unfulfillable.

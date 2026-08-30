@@ -3,7 +3,7 @@
 The active deployment lane uses independent emitters: the exact deployed
 legacy emitter continues BLND to v2, while the new v3 emitter sends BLNT to v3
 from launch. It deploys canonical BLNT:USDC and BLNT:XLM pools from the
-workspace's Comet V2 artifact and does not queue a legacy-emitter replacement.
+workspace's Comet v2 artifact and does not queue a legacy-emitter replacement.
 The v3 emitter constructor binds the deployment operator as a one-time
 initializer; successful initialization consumes that authority, leaving no
 ongoing emitter administrator. A separate immutable backfill contract receives
@@ -59,9 +59,9 @@ The network-specific `dual-emitter-state.json` and timestamped run directory
 record:
 
 - exact legacy and v3 emitter WASM hashes;
-- the Comet V2 source commit and optimized WASM hash;
+- the Comet v2 source commit and optimized WASM hash;
 - BLND, BLNT, USDC, and XLM contract IDs;
-- BLND:USDC, BLNT:USDC, and BLNT:XLM Comet V2 IDs;
+- BLND:USDC, BLNT:USDC, and BLNT:XLM Comet v2 IDs;
 - separate emitter and backstop IDs;
 - the backfill-contract artifact hash, address, and immutable token bindings;
 - both token administrators and emitter recipients;
@@ -70,7 +70,7 @@ record:
 - positive independent BLND and BLNT distributions; and
 - the immutable 20-million-BLNT conversion cap and empty initial v3 queue.
 
-The runner initializes all three Comets at 80:20, verifies positive authorized
+The runner initializes all three Comet v2 pools at 80:20, verifies positive authorized
 non-clawbackable custody, and then locks their shared classic controller at
 100/100/100 thresholds with its only signer weight set to zero.
 

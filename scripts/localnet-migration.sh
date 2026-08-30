@@ -164,7 +164,7 @@ period. The contract retains v2's distribute/drop migration surface. Generated
 configuration, public state, results, and cost logs live below the
 network-specific ignored work directory.
 
-The canonical v3 LP default is the Comet V2 artifact built from the workspace's
+The canonical v3 LP default is the Comet v2 artifact built from the workspace's
 `comet-contracts-v1` checkout. Set BLEND_MIGRATION_COMET_WASM only to test an
 explicit alternate build.
 EOF
@@ -1595,7 +1595,7 @@ ensure_modeled_blnd_usdc_lp_capacity() {
     (( available >= required )) && return 0
 
     deficit=$((required - available))
-    # The controlled Comet is initialized at 10 BLND and 0.25 USDC per LP.
+    # The controlled Comet v2 pool is initialized at 10 BLND and 0.25 USDC per LP.
     # These transaction bounds leave margin for integer rounding while keeping
     # the synthetic test-only issuance explicitly bounded.
     max_blnd=$((deficit * 11))
@@ -1845,7 +1845,7 @@ command_plan() {
     else
         asset_description="isolated BLND, USDC, and XLM assets"
     fi
-    valuation_description="integrated Comet-derived backstop valuation and bounded test-only lending oracles"
+    valuation_description="integrated Comet v2-derived backstop valuation and bounded test-only lending oracles"
     pool_funding_description="Fixed's three candidate tiers, Custom's 2:1 XLM/USDC tiers, and their lending positions"
     incumbent_funding_description="Fund both modeled v2 pools with ${INCUMBENT_BALANCE} BLNDUSDC each while retaining the candidate's one-base-unit aggregate majority."
     cat <<EOF
@@ -1862,15 +1862,15 @@ Artifacts:
   Frozen incumbent: exact deployed mainnet v2 pool, pool factory, and backstop WASM
   Deployed emitter: exact deployed mainnet emitter WASM
   Candidate: SDK 27 pool, pool factory, and backstop with ${valuation_description}
-  Comet: ${COMET_WASM}
+  Comet v2: ${COMET_WASM}
 
 Deployment:
-  1. Create and fund isolated issuer/operator, depositor, and one-way Comet-controller identities.
-  2. Provision ${asset_description}; deploy real 80:20 BLND:USDC and BLND:XLM Comets; then lock their shared controller at zero signer weight.
+  1. Create and fund isolated issuer/operator, depositor, and one-way Comet v2-controller identities.
+  2. Provision ${asset_description}; deploy real 80:20 BLND:USDC and BLND:XLM Comet v2 pools; then lock their shared controller at zero signer weight.
   3. Deploy the exact emitter WASM and a coherent SDK-22 incumbent stack.
   4. Predict the candidate address, bind its immutable factory, and deploy it.
   5. Deploy the modeled Fixed v2/v3 pools with transferable v2-style admins.
-  6. Fund Fixed v3 first and reject the deployment unless its shared USDC and canonical-Comet custody entries prove non-clawbackable.
+  6. Fund Fixed v3 first and reject the deployment unless its shared USDC and canonical Comet v2 custody entries prove non-clawbackable.
   7. Deploy the modeled Custom v2/v3 pools, fund all remaining tiers with ${pool_funding_description}, activate the pools, admit them to their reward zones, and configure selected reserve-position emissions.
   8. ${incumbent_funding_description}
   9. Assert strict candidate qualification, start backfill through distribute, queue the emitter swap, and observe it through distribute.
@@ -1935,7 +1935,7 @@ command_begin() {
     [[ -n "$(state_optional backstop_non_clawbackable_custody_verified_at)" ]] ||
         die "backstop custody must pass non-clawbackable verification before beginning migration"
     [[ -n "$(state_optional canonical_comet_controllers_verified_at)" ]] ||
-        die "canonical Comet controllers must be irreversibly locked before beginning migration"
+        die "canonical Comet v2 controllers must be irreversibly locked before beginning migration"
     begin_deployed_migration
 }
 
@@ -2082,7 +2082,7 @@ command_deploy() {
     fund_and_wait_for_account "${depositor}"
     state_set "depositor" "${depositor}"
 
-    note "Creating and funding one-way ${NETWORK_LABEL} Comet controller ${COMET_CONTROLLER_IDENTITY}..."
+    note "Creating and funding one-way ${NETWORK_LABEL} Comet v2 controller ${COMET_CONTROLLER_IDENTITY}..."
     stellar_cli keys generate "${COMET_CONTROLLER_IDENTITY}" \
         --overwrite >/dev/null
     comet_controller="$(stellar_cli keys public-key "${COMET_CONTROLLER_IDENTITY}")"
@@ -2295,7 +2295,7 @@ command_deploy() {
         --pool-address "${pool_id}" \
         --amount "${ACTIVATION_USDC_BALANCE}" >/dev/null
     # This first real plain-USDC deposit creates the candidate's one shared
-    # SAC balance entry. Verify it and both Comets' underlying custody before
+    # SAC balance entry. Verify it and both Comet v2 pools' underlying custody before
     # any later pool is deployed; a failure invalidates this deployment lane.
     verify_fixed_v3_backstop_custody
     invoke_transaction \
@@ -3916,7 +3916,7 @@ ${NETWORK_LABEL} migration verified
   candidate pool: ${pool_id}
   candidate pool admin: ${pool_operator}
   candidate pool status: ${pool_status}
-  candidate valuation: integrated Comet reserve valuation
+  candidate valuation: integrated Comet v2 reserve valuation
   activation timestamp: ${activated_at}
   scheduled and funded backfill: ${scheduled_backfill}
   evidence directory: ${RUN_DIR}

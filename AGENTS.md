@@ -46,12 +46,13 @@ git submodule update --init --recursive
 
 - `blend-contracts-v2` is the authoritative SDK-22 source submodule.
 - `blend-contracts-v3` is the sole production v3 contract source submodule.
-- `comet-contracts-v1` is the Protocol-27 Comet weighted-pool source
-  submodule. Do not silently substitute it for frozen or incumbent Comet WASM
+- `comet-contracts-v1` is the historically named Protocol-27 Comet v2
+  weighted-pool source submodule. Do not silently substitute it for frozen or
+  incumbent Comet v1 WASM
   inputs in migration lanes.
 - `sep-41-token` and `soroban-fixed-point-math` are the Protocol-27 dependency
-  source submodules used to replace Comet's temporary compatibility ports only
-  through an explicit Comet dependency update.
+  source submodules used to replace Comet v2's temporary compatibility ports
+  only through an explicit Comet v2 dependency update.
 - `blend-sdk-js` and `blend-ui` are pinned client-integration source
   submodules.
 - `deployed-artifacts/mainnet` contains exact deployed mainnet WASM compatibility
@@ -74,9 +75,9 @@ a side effect of work in this repository.
   silently substituted for those files.
 - New v3 code belongs in the `blend-contracts-v3/` submodule. It MUST target
   Protocol 27 with Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
-- Protocol-27 Comet work belongs in the `comet-contracts-v1/` submodule and
+- Protocol-27 Comet v2 work belongs in the `comet-contracts-v1/` submodule and
   MUST use the same Rust, SDK, protocol, and WASM target lane. Migration
-  runners must explicitly opt into rebuilt Comet artifacts.
+  runners must explicitly opt into rebuilt Comet v2 artifacts.
 - Migration-only tests and fixtures belong in `migration-harness/` and MUST
   NOT become production contract dependencies.
 - Do not add an SDK 26 compatibility lane. Migration compatibility is tested
@@ -134,8 +135,8 @@ a side effect of work in this repository.
   loss with intentional saturation at zero; invalid or unavailable valuation
   fails closed.
 - The sole exception is reconciliation of an unexplained lending-reserve
-  custody deficit. That reserve absorbs the deficit through its supplier rate
-  and then its unpaid take-rate credit, without creating backstop debt or
+  custody deficit. That reserve absorbs the deficit through unpaid protocol
+  credit, its supplier rate, and then its unpaid take-rate credit, without creating backstop debt or
   touching another reserve. Only subsequent borrower bad debt follows the
   configured waterfall. Complete supplier-value exhaustion sets the bToken
   exchange rate exactly to zero. New supply, collateral supply, borrowing, and
@@ -175,14 +176,15 @@ a side effect of work in this repository.
   activation valuation. Stored pool status is not an additional reward-zone
   eligibility gate.
 - Backstop value uses current reserves from the immutable BLND:USDC and
-  BLND:XLM 80:20 Comets. BLND:USDC is the USDC anchor, authorized plain USDC
+  BLND:XLM 80:20 Comet v2 pools. BLND:USDC is the USDC anchor, authorized plain USDC
   is valued one-for-one, and plain XLM is priced by the BLND reserve ratio
-  between the two Comets. Do not introduce a backstop price oracle or caller-
+  between the two Comet v2 pools. Do not introduce a backstop price oracle or caller-
   supplied production values.
-- Plain-USDC and plain-XLM interest-auction payments credit 99% to their tier
-  and reserve an exact cumulative 1% for bounded swaps through the matching
-  canonical BLND Comet followed by an exact BLND burn. Buyback failure must
-  not unwind or block the completed interest settlement.
+- Every positive borrower-interest accrual reserves an immutable 0.2% of gross
+  interest as separate protocol credit before applying the pool take rate.
+  Protocol credit is sold for BLNT and the exact bid burned in an independent
+  type-3 auction; one type-2 and one type-3 auction may coexist. Every type-2
+  bid is donated in full, and no legacy buy-and-burn path or accounting remains.
 - Candidate construction must validate its immutable BLND, USDC, XLM,
   BLND:USDC, and BLND:XLM bindings exactly.
 - Pool status preserves v2 codes and hard Q4W thresholds: normal On-Ice at
@@ -201,8 +203,8 @@ a side effect of work in this repository.
 - Each pool factory deployment immutably selects one to three unique assets
   from canonical BLND:XLM LP, BLND:USDC LP, USDC, and XLM and assigns integer
   take-rate weights from 1 through 100 independently of tier order. Only the
-  two LP assets are BLND-emission eligible; plain USDC and XLM apply the
-  failure-isolated 1% buy-and-burn rule above.
+  two LP assets are BLND-emission eligible; plain USDC and XLM otherwise use
+  the same full-donation interest settlement as the LP tiers.
 - Preserve the v2-compatible reward-zone shape: at most 30 pools,
   permissionless threshold-qualified entry/removal/replacement, and no
   additional stored pool-status gate. V3 replacement weight uses eligible

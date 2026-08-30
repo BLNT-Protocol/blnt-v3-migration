@@ -91,9 +91,9 @@ mint, sweep, recovery, allocation-mutation, or deadline API.
 ## 3. Canonical v3 liquidity
 
 V3 deploys new canonical 80:20 BLNT:USDC and BLNT:XLM LPs from the Protocol-27
-Comet V2 source pinned in the workspace directory named
+Comet v2 source pinned in the workspace directory named
 `comet-contracts-v1`. The directory name is historical; its pinned checkout is
-the Comet V2 implementation used by this repository.
+the Comet v2 implementation used by this repository.
 
 Both pools MUST contain exactly their expected seven-decimal Stellar Asset
 Contracts, use normalized weights 80% BLNT and 20% paired asset, start
@@ -148,7 +148,7 @@ A deployment SHOULD use the following deterministic order:
 3. create BLNT with the v3 emitter as administrator;
 4. deploy the BLNT backfill contract bound to legacy BLND, BLNT, and the
    immutable address claim list;
-5. deploy and initialize the canonical Comet V2 BLNT:USDC and BLNT:XLM pools;
+5. deploy and initialize the canonical Comet v2 BLNT:USDC and BLNT:XLM pools;
 6. determine the v3 backstop address and deploy its factory;
 7. initialize the v3 emitter with BLNT, the v3 backstop, and BLNT:USDC LP;
 8. deploy the v3 backstop with the single 50-million-BLNT backfill-contract
@@ -158,6 +158,6 @@ A deployment SHOULD use the following deterministic order:
 
 Deployment evidence MUST record both emitter bindings, both token
 administrators, the backfill-contract artifact and immutable bindings, exact
-50-million-BLNT custody, the 20-million conversion cap, Comet V2 artifact hash
+50-million-BLNT custody, the 20-million conversion cap, Comet v2 artifact hash
 and pool configuration, v3 direct activation, and the absence of BLND in every
 v3 pool, backstop, and emitter binding.

@@ -26,7 +26,7 @@ Usage: scripts/dual-emitter-deployment.sh COMMAND
 
 Commands:
   plan      Describe the independent BLND/BLNT deployment.
-  validate  Verify legacy artifacts and build v3 plus Comet V2 artifacts.
+  validate  Verify legacy artifacts and build v3 plus Comet v2 artifacts.
   start     Start local Protocol-27 Quickstart or verify public testnet RPC.
   deploy    Deploy and verify the independent legacy and v3 lanes.
   run       Validate, start, and deploy.
@@ -43,15 +43,15 @@ dual_plan() {
     cat <<EOF
 Dual-emitter ${NETWORK_LABEL} deployment:
   1. Verify the exact deployed legacy emitter and v2 artifacts.
-  2. Build the v3 contracts, BLNT backfill contract, and workspace Comet V2.
+  2. Build the v3 contracts, BLNT backfill contract, and workspace Comet v2.
   3. Deploy legacy BLND, BLNT, USDC, and ${XLM_ASSET_MODE} XLM assets.
-  4. Deploy BLND:USDC, BLNT:USDC, and BLNT:XLM Comet V2 pools.
-  5. Lock the shared Comet controller at 100/100/100 with signer weight zero.
+  4. Deploy BLND:USDC, BLNT:USDC, and BLNT:XLM Comet v2 pools.
+  5. Lock the shared Comet v2 controller at 100/100/100 with signer weight zero.
   6. Leave the legacy emitter pointed at the deployed v2 backstop.
   7. Point the separate v3 emitter at the v3 backstop with BLNT:USDC designated.
   8. Send the exact 50-million-BLNT initial drop to the immutable backfill
      contract and smoke-test its one-way BLND-to-BLNT conversion.
-  9. Verify separate administrators, recipients, emissions, Comets, backfill
+  9. Verify separate administrators, recipients, emissions, Comet v2 pools, backfill
      custody, and the immutable 20-million-BLNT conversion cap.
 
 No legacy-emitter queue or migration backfill is used.
@@ -82,7 +82,7 @@ dual_validate() {
     validate_source_provenance
     build_artifacts
     dual_validate_artifacts
-    note "Validated exact legacy artifacts, v3 contracts, and workspace Comet V2."
+    note "Validated exact legacy artifacts, v3 contracts, and workspace Comet v2."
 }
 
 create_trustline() {
@@ -414,8 +414,8 @@ Dual-emitter ${NETWORK_LABEL} status
   backfill BLNT balance: ${backfill_balance}
   converted BLND: ${swapped}
   remaining conversion capacity: ${remaining_capacity}
-  Comet V2 commit: $(state_value comet_v2_source_commit)
-  Comet V2 WASM: $(state_value comet_v2_wasm_sha256)
+  Comet v2 commit: $(state_value comet_v2_source_commit)
+  Comet v2 WASM: $(state_value comet_v2_wasm_sha256)
   state: ${STATE_FILE}
 EOF
 }

@@ -213,7 +213,7 @@ impl MockComet {
     ) -> i128 {
         // A deterministic 1:1 LP output makes each claim return the exact BLND
         // amount consumed, so the differential test compares emission
-        // accounting rather than Comet slippage.
+        // accounting rather than Comet v1 slippage.
         if amount <= 0 || amount < min_lp_tokens_out {
             panic!("invalid single-sided deposit");
         }

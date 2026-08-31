@@ -1,15 +1,15 @@
 [submodule "blend-contracts-v2"]
 	path = blend-contracts-v2
 	url = git@github.com:blend-capital/blend-contracts-v2.git
-[submodule "blend-contracts-v3"]
-	path = blend-contracts-v3
-	url = git@github.com:levinson/blend-contracts-v3.git
-[submodule "blend-ui"]
-	path = blend-ui
-	url = git@github.com:levinson/blend-ui.git
-[submodule "blend-sdk-js"]
-	path = blend-sdk-js
-	url = git@github.com:levinson/blend-sdk-js.git
+[submodule "blnt-contracts-v3"]
+	path = blnt-contracts-v3
+	url = git@github.com:levinson/blnt-contracts-v3.git
+[submodule "blnt-ui"]
+	path = blnt-ui
+	url = git@github.com:levinson/blnt-ui.git
+[submodule "blnt-sdk-js"]
+	path = blnt-sdk-js
+	url = git@github.com:levinson/blnt-sdk-js.git
 [submodule "comet-contracts-v1"]
 	path = comet-contracts-v1
 	url = git@github.com:levinson/comet-contracts-v1.git

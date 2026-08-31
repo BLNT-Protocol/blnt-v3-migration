@@ -32,7 +32,7 @@ hashes; they MUST NOT silently replace the exact deployed fixtures.
 
 The frozen executable behavior and candidate-only changes are documented by
 the contract submodule's
-[composed specification](../blend-contracts-v3/docs/SYSTEM_SPEC.md).
+[composed specification](../blnt-contracts-v3/docs/SYSTEM_SPEC.md).
 Migration requirements compose separately under
 [SYSTEM_SPEC.md](SYSTEM_SPEC.md). Migration fixtures MUST NOT silently restate
 or redefine contract behavior.
@@ -44,13 +44,13 @@ Before changing protocol behavior:
 3. Run the Protocol-27 compatibility harness with
    `make test-v2-migration`.
 4. Record every intentional compatibility change in
-   `blend-contracts-v3/docs/V3_SYSTEM_SPEC.md`.
+   `blnt-contracts-v3/docs/V3_SYSTEM_SPEC.md`.
 5. Add a regression test before changing an existing invariant.
 
 Do not upgrade or edit the inherited v2 source submodule. It remains frozen on
 Rust 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
 
-New v3 protocol implementation work belongs in the `blend-contracts-v3`
+New v3 protocol implementation work belongs in the `blnt-contracts-v3`
 submodule. Initial-allocation claim and conversion work belongs in the
 `blnt-backfill-contract` submodule. Both target Protocol 27 using Rust 1.91.1,
 Soroban SDK 27.0.3, and `wasm32v1-none`. There is intentionally no SDK 26
@@ -70,7 +70,7 @@ must not modify the pinned v2 source, its dependency graph, or its lockfile.
 - `blend-contracts-v2`: source tests, audit reference, and rebuild lane.
 - `migration-harness/migration-tests`: current-host compatibility and migration
   tests.
-- `blend-contracts-v3`: pinned production v3 contract source and tests.
+- `blnt-contracts-v3`: pinned production v3 contract source and tests.
 - `blnt-backfill-contract`: pinned production initial-allocation claim and
   conversion contract source and tests.
 

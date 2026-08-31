@@ -25,9 +25,9 @@ Read these before changing protocol behavior:
 
 1. `docs/SYSTEM_SPEC.md`
 2. `docs/MIGRATION_PROTOCOL_SPEC.md`
-3. `blend-contracts-v3/docs/SYSTEM_SPEC.md`
-4. `blend-contracts-v3/docs/V2_SYSTEM_SPEC.md`
-5. `blend-contracts-v3/docs/V3_SYSTEM_SPEC.md`
+3. `blnt-contracts-v3/docs/SYSTEM_SPEC.md`
+4. `blnt-contracts-v3/docs/V2_SYSTEM_SPEC.md`
+5. `blnt-contracts-v3/docs/V3_SYSTEM_SPEC.md`
 6. `docs/MIGRATION_ACCEPTANCE.md`
 7. `docs/BASELINE.md`
 8. Existing contract tests and the implementation being changed
@@ -45,7 +45,7 @@ git submodule update --init --recursive
 ```
 
 - `blend-contracts-v2` is the authoritative SDK-22 source submodule.
-- `blend-contracts-v3` is the sole production v3 contract source submodule.
+- `blnt-contracts-v3` is the sole production v3 contract source submodule.
 - `comet-contracts-v1` is the historically named Protocol-27 Comet v2
   weighted-pool source submodule. Do not silently substitute it for frozen or
   incumbent Comet v1 WASM
@@ -53,7 +53,7 @@ git submodule update --init --recursive
 - `sep-41-token` and `soroban-fixed-point-math` are the Protocol-27 dependency
   source submodules used to replace Comet v2's temporary compatibility ports
   only through an explicit Comet v2 dependency update.
-- `blend-sdk-js` and `blend-ui` are pinned client-integration source
+- `blnt-sdk-js` and `blnt-ui` are pinned client-integration source
   submodules.
 - `deployed-artifacts/mainnet` contains exact deployed mainnet WASM compatibility
   fixtures, verified by `make verify-deployed-artifacts`.
@@ -73,7 +73,7 @@ a side effect of work in this repository.
 - `deployed-artifacts/mainnet` is the authoritative bytecode boundary for compatibility
   tests and isolated migration deployments. A local source rebuild MUST NOT be
   silently substituted for those files.
-- New v3 code belongs in the `blend-contracts-v3/` submodule. It MUST target
+- New v3 code belongs in the `blnt-contracts-v3/` submodule. It MUST target
   Protocol 27 with Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
 - Protocol-27 Comet v2 work belongs in the `comet-contracts-v1/` submodule and
   MUST use the same Rust, SDK, protocol, and WASM target lane. Migration
@@ -269,7 +269,7 @@ emissions.
 ## Specification discipline
 
 Requirements marked `MUST` in the normative specifications listed by
-`docs/SYSTEM_SPEC.md` and `blend-contracts-v3/docs/SYSTEM_SPEC.md` are
+`docs/SYSTEM_SPEC.md` and `blnt-contracts-v3/docs/SYSTEM_SPEC.md` are
 acceptance criteria under their respective composition rules.
 Items listed under “Open decisions” are not implementation authorization.
 When an open decision blocks safe implementation, update the specification or

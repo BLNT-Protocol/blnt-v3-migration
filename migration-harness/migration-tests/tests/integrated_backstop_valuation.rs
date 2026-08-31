@@ -5,7 +5,7 @@ use soroban_sdk::{
 #[allow(clippy::too_many_arguments)]
 mod backstop {
     soroban_sdk::contractimport!(
-        file = "../../blend-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
+        file = "../../blnt-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
     );
 }
 

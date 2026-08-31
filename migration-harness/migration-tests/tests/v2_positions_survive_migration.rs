@@ -32,7 +32,7 @@ mod v2_pool_factory {
 #[allow(clippy::too_many_arguments)]
 mod v3_backstop {
     soroban_sdk::contractimport!(
-        file = "../../blend-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
+        file = "../../blnt-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
     );
 }
 

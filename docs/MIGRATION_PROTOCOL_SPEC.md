@@ -3,7 +3,7 @@
 This document defines the approved transition from legacy BLND emissions in
 Blend v1/v2 to independent BLNT emissions in Blend v3. It composes with
 [SYSTEM_SPEC.md](SYSTEM_SPEC.md) and the production-contract requirements in
-the pinned `blend-contracts-v3` and `blnt-backfill-contract` submodules.
+the pinned `blnt-contracts-v3` and `blnt-backfill-contract` submodules.
 
 Normative terms `MUST`, `MUST NOT`, `SHOULD`, and `MAY` are acceptance
 criteria.

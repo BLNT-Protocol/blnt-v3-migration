@@ -3,7 +3,7 @@
 This document defines the evidence required to accept the dual-emitter BLND to
 BLNT transition in
 [MIGRATION_PROTOCOL_SPEC.md](MIGRATION_PROTOCOL_SPEC.md). Production contract
-behavior remains governed by the pinned `blend-contracts-v3` and
+behavior remains governed by the pinned `blnt-contracts-v3` and
 `blnt-backfill-contract` specifications.
 
 ## Contract-suite prerequisites

@@ -8,7 +8,7 @@ compatibility, deployment, and evidence repository.
 This repository owns:
 
 - the pinned frozen v2 source and deployed-WASM compatibility fixtures;
-- the pinned `blend-contracts-v3` production-contract submodule;
+- the pinned `blnt-contracts-v3` production-contract submodule;
 - the pinned `blnt-backfill-contract` production transition-contract
   submodule;
 - the pinned SDK and UI client-integration source submodules;
@@ -19,7 +19,7 @@ This repository owns:
 
 Contract behavior and economic policy are owned by the contract specification
 set composed by
-[`blend-contracts-v3/docs/SYSTEM_SPEC.md`](../blend-contracts-v3/docs/SYSTEM_SPEC.md).
+[`blnt-contracts-v3/docs/SYSTEM_SPEC.md`](../blnt-contracts-v3/docs/SYSTEM_SPEC.md).
 This repository MUST NOT redefine that behavior through a script, fixture,
 deployment default, or test expectation.
 
@@ -44,9 +44,9 @@ in the normative migration documents are acceptance criteria.
 The exact deployed v2 and legacy-emitter WASMs under `deployed-artifacts/mainnet`
 are the legacy compatibility boundary. The pinned `blend-contracts-v2`
 submodule provides the frozen SDK-22 source and test baseline. The v3 emitter
-is built from the pinned `blend-contracts-v3` submodule.
+is built from the pinned `blnt-contracts-v3` submodule.
 
-The pinned `blend-contracts-v3` submodule is the production v3 protocol
+The pinned `blnt-contracts-v3` submodule is the production v3 protocol
 contract source. The pinned `blnt-backfill-contract` submodule is the sole
 production source for initial BLNT address claims and legacy-token conversion.
 Migration tests and runners MUST build and invoke both artifacts directly.

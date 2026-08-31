@@ -5,7 +5,7 @@ transition from Blend Protocol v2 to the v3 candidate on Stellar.
 
 This repository pins the frozen v2 baseline and the v3 candidate contracts to
 test independent legacy/v3 emitters, cross-version behavior, and network deployments.
-Production v3 protocol behavior belongs to `blend-contracts-v3`; initial
+Production v3 protocol behavior belongs to `blnt-contracts-v3`; initial
 allocation and conversion behavior belongs to `blnt-backfill-contract`.
 This is not an official or production-ready Blend release.
 
@@ -19,12 +19,12 @@ git submodule update --init --recursive
 
 The deployed v2 source baseline is Blend Protocol v2 commit
 `ba22b487b2c5057a4ecc28b05b5193c28e4bd117`. The Blend contract submodules are
-`blend-contracts-v2/` and `blend-contracts-v3/`. The production transition
+`blend-contracts-v2/` and `blnt-contracts-v3/`. The production transition
 contract is pinned in `blnt-backfill-contract/`. Protocol-27 Comet v2
 weighted-pool source is pinned in the historically named
 `comet-contracts-v1/`, with its Protocol-27 dependency sources pinned in
 `sep-41-token/` and `soroban-fixed-point-math/`. The client-integration
-submodules are `blend-sdk-js/` and `blend-ui/`.
+submodules are `blnt-sdk-js/` and `blnt-ui/`.
 
 Blend v1/v2 LPs use Comet v1. The fresh BLNT LPs deployed for Blend v3 use
 Comet v2; the `comet-contracts-v1/` directory name is historical.
@@ -36,7 +36,7 @@ compatibility and isolated-migration fixtures. Run `make verify-deployed-artifac
 verify both inputs.
 
 GitHub Actions requires a `SUBMODULES_TOKEN` repository secret with read
-access to the private `blend-contracts-v3`, `blend-sdk-js`, and `blend-ui`
+access to the private `blnt-contracts-v3`, `blnt-sdk-js`, and `blnt-ui`
 repositories, plus `blnt-backfill-contract`.
 
 V3 no longer replaces or depends on the deployed BLND emitter. The legacy
@@ -56,7 +56,7 @@ entirely governed by the legacy contracts.
 See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the migration repository
 boundary and [docs/MIGRATION_PROTOCOL_SPEC.md](docs/MIGRATION_PROTOCOL_SPEC.md)
 for the migration protocol. Contract behavior is composed by
-[blend-contracts-v3/docs/SYSTEM_SPEC.md](blend-contracts-v3/docs/SYSTEM_SPEC.md).
+[blnt-contracts-v3/docs/SYSTEM_SPEC.md](blnt-contracts-v3/docs/SYSTEM_SPEC.md).
 [docs/BASELINE.md](docs/BASELINE.md) defines source and artifact policy, and
 [docs/MIGRATION_ACCEPTANCE.md](docs/MIGRATION_ACCEPTANCE.md) defines
 cross-version migration acceptance. The contract submodule's v3 specification
@@ -76,7 +76,7 @@ with supporting Protocol-27 dependency sources pinned separately:
 
 - `blend-contracts-v2/` is the deployed v2 source baseline, pinned to
   Rust 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
-- `blend-contracts-v3/` is the production candidate submodule, pinned to Rust
+- `blnt-contracts-v3/` is the production candidate submodule, pinned to Rust
   1.91.1, Soroban SDK 27.0.3, Protocol 27 tooling, and `wasm32v1-none`.
 - `blnt-backfill-contract/` is the production transition-contract submodule,
   pinned to the same Protocol-27 toolchain.
@@ -141,10 +141,10 @@ Build the local v3-aware SDK once, then start the UI with the committed
 testnet configuration:
 
 ```bash
-cd blend-sdk-js
+cd blnt-sdk-js
 npm install
 npm run build
-cd ../blend-ui
+cd ../blnt-ui
 npm install
 npm run dev:testnet
 ```

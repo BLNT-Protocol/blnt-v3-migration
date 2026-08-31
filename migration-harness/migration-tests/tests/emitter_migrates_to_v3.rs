@@ -14,7 +14,7 @@ mod legacy_emitter {
 
 mod v3_emitter {
     soroban_sdk::contractimport!(
-        file = "../../blend-contracts-v3/target/wasm32v1-none/optimized/emitter.wasm"
+        file = "../../blnt-contracts-v3/target/wasm32v1-none/optimized/emitter.wasm"
     );
 }
 
@@ -27,7 +27,7 @@ mod blnt_backfill {
 #[allow(clippy::too_many_arguments)]
 mod v3_backstop {
     soroban_sdk::contractimport!(
-        file = "../../blend-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
+        file = "../../blnt-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
     );
 }
 

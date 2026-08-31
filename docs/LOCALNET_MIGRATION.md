@@ -89,7 +89,7 @@ The runner verifies and deploys the exact mainnet emitter and incumbent v2
 WASMs recorded in `deployed-artifacts/mainnet/manifest.json`. The pinned SDK-22 source
 submodule remains a separate build-and-test lane; its rebuilt bytes are not
 substituted into this migration exercise. The candidate builds directly from
-the pinned `blend-contracts-v3/` submodule, which also owns the contract
+the pinned `blnt-contracts-v3/` submodule, which also owns the contract
 specifications. Its build rejects an optimized backstop above the conservative
 120,000-byte deployment guard.
 

@@ -114,9 +114,9 @@ RESERVE_LOSS_IMPAIRED_CLAWBACK=$((400 * SCALAR_7))
 V2_FACTORY_WASM="${ROOT_DIR}/deployed-artifacts/mainnet/v2-pool-factory.wasm"
 V2_BACKSTOP_WASM="${ROOT_DIR}/deployed-artifacts/mainnet/v2-backstop.wasm"
 V2_POOL_WASM="${ROOT_DIR}/deployed-artifacts/mainnet/v2-pool.wasm"
-V3_FACTORY_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/pool_factory.wasm"
-V3_BACKSTOP_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
-V3_POOL_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/pool.wasm"
+V3_FACTORY_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/pool_factory.wasm"
+V3_BACKSTOP_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
+V3_POOL_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/pool.wasm"
 V3_TEST_SEP40_ORACLE_WASM="${ROOT_DIR}/migration-harness/target/wasm32v1-none/optimized/blend_v3_test_sep40_oracle.wasm"
 COMET_WASM="${BLEND_MIGRATION_COMET_WASM:-${ROOT_DIR}/comet-contracts-v1/target/wasm32v1-none/optimized/comet.wasm}"
 

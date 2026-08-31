@@ -11,7 +11,7 @@ source "${SCRIPT_DIR}/localnet-migration.sh"
 unset BLEND_MIGRATION_LIBRARY_ONLY
 
 STATE_FILE="${WORK_DIR}/dual-emitter-state.json"
-V3_EMITTER_WASM="${ROOT_DIR}/blend-contracts-v3/target/wasm32v1-none/optimized/emitter.wasm"
+V3_EMITTER_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/emitter.wasm"
 BLNT_BACKFILL_WASM="${ROOT_DIR}/blnt-backfill-contract/target/wasm32v1-none/optimized/blnt_backfill_contract.wasm"
 BLNT_MINT=$((2000 * SCALAR_7))
 USDC_MINT=$((2 * COMET_INITIAL_PAIR_TOKEN))

@@ -43,20 +43,22 @@ remain unchanged and usable after the independent v3 lane is created.
 Native and optimized-WASM backfill-contract tests MUST cover:
 
 - successful authorized 1:1 conversion in raw seven-decimal units;
-- exact BLND receipt and complete burn, leaving no received BLND in the
-  backfill contract;
-- exact pre-funded BLNT transfer to an independently selected recipient with
-  no BLNT mint;
+- exact BLND receipt into refundable escrow and exact pre-funded BLNT transfer
+  back to the same authorized address, with no BLNT mint;
+- full and partial same-user refunds, rejection above per-user credit, and
+  restored conversion capacity;
 - rejection of zero and negative amounts;
 - rejection when BLND and BLNT bindings are identical or use incompatible
   decimals;
-- conversion through the ledger immediately before the 270-day deadline,
-  rejection at the deadline, and permissionless burning of the unused reserve;
-- exact success at the 120-million-BLNT aggregate cap and rejection above it;
-- exact expired-reserve burn accounting, idempotent zero-return behavior, and
+- conversion and refund through the ledger immediately before the 270-day
+  deadline, rejection at the deadline, and permissionless finalization;
+- exact success at the 120-million-BLNT net cap and rejection above it;
+- exact expired BLND-escrow and BLNT-reserve burn accounting, idempotent
+  zero-return behavior, and
   preservation of every outstanding backfill and grant claim after burning;
-- cumulative swapped-total and remaining-capacity conservation;
-- atomic rollback on transfer, balance, burn, payout, cap, overflow, or
+- gross-swap, refund, net-swap, per-user credit, and remaining-capacity
+  conservation;
+- atomic rollback on transfer, balance, burn, payout, credit, cap, overflow, or
   reentrancy mismatch;
 - authorized immutable address allocations totaling no more than 30 million
   BLNT, including duplicate, non-positive, count, and total bounds;
@@ -72,7 +74,7 @@ Native and optimized-WASM backfill-contract tests MUST cover:
   largest-remainder rounding;
 - exact aggregate conservation across the 20-million backfill, 10-million
   grant, and 120-million conversion lanes; and
-- absence of any BLNT-to-BLND entry point.
+- absence of any refund path not bounded by the caller's own unrefunded swaps.
 
 ## Initial allocation
 

@@ -8,8 +8,9 @@ The v3 emitter constructor binds the deployment operator as a one-time
 initializer; successful initialization consumes that authority, leaving no
 ongoing emitter administrator. A separate immutable backfill contract receives
 the complete 150-million-BLNT initial drop, manages address claims, and owns a
-270-day conversion path capped at 120 million BLNT. After that window, anyone
-may burn the unused conversion reserve without affecting claim liabilities.
+270-day refundable conversion path capped at 120 million BLNT net. After that
+window, anyone may burn the unrefunded BLND escrow and unused BLNT conversion
+reserve without affecting claim liabilities.
 
 ## Local Quickstart
 
@@ -23,10 +24,10 @@ make dual-emitter-status
 
 `run` verifies and builds artifacts, starts Protocol-27 Quickstart, deploys the
 two independent lanes, activates v3 directly, executes the exact
-150-million-BLNT backfill drop, converts a small test balance from BLND to BLNT,
-deploys and activates the modeled Fixed and Custom V2/V3 pools, adds each pair
-to its respective reward zone, advances each emitter, and verifies all final
-bindings. Stop the isolated network with:
+150-million-BLNT backfill drop, converts and partially refunds a small test
+balance, deploys and activates the modeled Fixed and Custom V2/V3 pools, adds
+each pair to its respective reward zone, advances each emitter, and verifies
+all final bindings. Stop the isolated network with:
 
 ```bash
 make dual-emitter-stop
@@ -103,12 +104,12 @@ record:
   allocation totals;
 - both token administrators and emitter recipients;
 - direct v3 activation and exact 150-million-BLNT backfill custody;
-- exact BLND burn and pre-funded BLNT transfer conversion events;
+- exact same-user BLND escrow, pre-funded BLNT transfer, and partial refund events;
 - positive independent BLND and BLNT distributions;
 - active modeled Fixed and Custom pools in their respective V2 and V3 reward
   zones, including verified seven-day V2 USDC-supply emission streams; and
-- the immutable 120-million-BLNT conversion cap, 270-day deadline, zero initial
-  expired-reserve burn, and empty initial v3 queue.
+- the immutable 120-million-BLNT net conversion cap, 270-day deadline, zero
+  initial BLND/BLNT expiry burns, and empty initial v3 queue.
 
 The runner initializes all three Comet v2 pools at 80:20, verifies positive authorized
 non-clawbackable custody, and then locks their shared classic controller at

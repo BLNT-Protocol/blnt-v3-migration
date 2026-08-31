@@ -232,20 +232,20 @@ fn optimized_backfill_handles_all_backfill_and_grant_claimants_partially_vested(
     env.ledger()
         .set_timestamp(backfill.get_vesting_start() + VESTING_DURATION_SECONDS / 2);
     for claimant in claimants.iter() {
-        assert_eq!(backfill.claim_backfill(&claimant, &claimant), 1);
+        assert_eq!(backfill.claim_backfill(&claimant), 1);
     }
     for grantee in grantees.iter() {
-        assert_eq!(backfill.claim_grant(&grantee, &grantee), 1);
+        assert_eq!(backfill.claim_grant(&grantee), 1);
     }
 
     let first = claimants.first().unwrap();
     env.ledger().set_timestamp(backfill.get_vesting_end());
-    assert_eq!(backfill.claim_backfill(&first, &first), 1);
+    assert_eq!(backfill.claim_backfill(&first), 1);
     assert_eq!(backfill.get_backfill_claimable(&first), 0);
 
     let first_grantee = grantees.first().unwrap();
     env.ledger().set_timestamp(backfill.get_grant_vesting_end());
-    assert_eq!(backfill.claim_grant(&first_grantee, &first_grantee), 7);
+    assert_eq!(backfill.claim_grant(&first_grantee), 7);
     assert_eq!(backfill.get_grant_claimable(&first_grantee), 0);
 }
 
@@ -271,7 +271,6 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     let v3_emitter_id = env.register(v3_emitter::WASM, (&initializer,));
     let blnt = create_asset(&env, &v3_emitter_id);
     let claimant = Address::generate(&env);
-    let claim_recipient = Address::generate(&env);
     let backfill_id = env.register(
         blnt_backfill::WASM,
         (
@@ -324,18 +323,13 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
 
     let backfill = blnt_backfill::Client::new(&env, &backfill_id);
     assert_eq!(backfill.get_backfill_claimable(&claimant), 0);
-    assert!(backfill
-        .try_claim_backfill(&claimant, &claim_recipient)
-        .is_err());
+    assert!(backfill.try_claim_backfill(&claimant).is_err());
 
     env.ledger().set_timestamp(1_005);
     let vested = SCALAR_7 * 5 / i128::from(VESTING_DURATION_SECONDS);
-    assert_eq!(backfill.claim_backfill(&claimant, &claim_recipient), vested);
+    assert_eq!(backfill.claim_backfill(&claimant), vested);
     assert_eq!(backfill.get_backfill_claimable(&claimant), 0);
-    assert_eq!(
-        TokenClient::new(&env, &blnt).balance(&claim_recipient),
-        vested
-    );
+    assert_eq!(TokenClient::new(&env, &blnt).balance(&claimant), vested);
 
     assert_eq!(legacy.distribute(), 5 * SCALAR_7);
     assert_eq!(v3.distribute(), 5 * SCALAR_7);
@@ -363,28 +357,28 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     );
 
     let holder = Address::generate(&env);
-    let recipient = Address::generate(&env);
     StellarAssetClient::new(&env, &legacy_blnd).mint(&holder, &(10 * SCALAR_7));
     assert_eq!(
-        backfill.swap_blnd_for_blnt(&holder, &recipient, &(4 * SCALAR_7)),
+        backfill.swap_blnd_for_blnt(&holder, &(4 * SCALAR_7)),
         4 * SCALAR_7
     );
+    assert_eq!(backfill.refund_blnt_for_blnd(&holder, &SCALAR_7), SCALAR_7);
     assert_eq!(
         TokenClient::new(&env, &legacy_blnd).balance(&holder),
-        6 * SCALAR_7
+        7 * SCALAR_7
     );
     assert_eq!(
         TokenClient::new(&env, &legacy_blnd).balance(&backfill_id),
-        0
+        3 * SCALAR_7
     );
-    assert_eq!(
-        TokenClient::new(&env, &blnt).balance(&recipient),
-        4 * SCALAR_7
-    );
+    assert_eq!(TokenClient::new(&env, &blnt).balance(&holder), 3 * SCALAR_7);
     assert_eq!(backfill.get_total_swapped(), 4 * SCALAR_7);
+    assert_eq!(backfill.get_total_refunded(), SCALAR_7);
+    assert_eq!(backfill.get_net_swapped(), 3 * SCALAR_7);
+    assert_eq!(backfill.get_refundable(&holder), 3 * SCALAR_7);
     assert_eq!(
         backfill.get_remaining_swap_capacity(),
-        119_999_996 * SCALAR_7
+        119_999_997 * SCALAR_7
     );
     assert_eq!(backfill.get_legacy_blnd_token(), legacy_blnd);
     assert_eq!(backfill.get_blnt_token(), blnt);
@@ -405,11 +399,27 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     assert!(v3.get_queued_swap().is_none());
 
     env.ledger().set_timestamp(backfill.get_swap_deadline());
+    assert!(backfill.try_swap_blnd_for_blnt(&holder, &SCALAR_7).is_err());
     assert!(backfill
-        .try_swap_blnd_for_blnt(&holder, &recipient, &SCALAR_7)
+        .try_refund_blnt_for_blnd(&holder, &SCALAR_7)
         .is_err());
+    assert_eq!(backfill.get_refundable(&holder), 0);
     assert_eq!(backfill.get_remaining_swap_capacity(), 0);
-    assert_eq!(backfill.burn_expired(), SWAP_CAP - 4 * SCALAR_7);
-    assert_eq!(backfill.get_expired_swap_burned(), SWAP_CAP - 4 * SCALAR_7);
-    assert_eq!(backfill.burn_expired(), 0);
+    assert_eq!(
+        backfill.burn_expired(),
+        blnt_backfill::ExpiredBurn {
+            blnd: 3 * SCALAR_7,
+            blnt: SWAP_CAP - 3 * SCALAR_7,
+        }
+    );
+    assert_eq!(backfill.get_expired_blnd_burned(), 3 * SCALAR_7);
+    assert_eq!(backfill.get_expired_blnt_burned(), SWAP_CAP - 3 * SCALAR_7);
+    assert_eq!(
+        backfill.burn_expired(),
+        blnt_backfill::ExpiredBurn { blnd: 0, blnt: 0 }
+    );
+    assert_eq!(
+        TokenClient::new(&env, &legacy_blnd).balance(&backfill_id),
+        0
+    );
 }

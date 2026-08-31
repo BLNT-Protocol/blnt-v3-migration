@@ -22,9 +22,10 @@ The deployed v2 source baseline is Blend Protocol v2 commit
 `blend-contracts-v2/` and `blnt-contracts-v3/`. The production transition
 contract is pinned in `blnt-backfill-contract/`. Protocol-27 Comet v2
 weighted-pool source is pinned in `comet-contracts-v2/`, with its Protocol-27
-dependency sources pinned in `sep-41-token/` and
-`soroban-fixed-point-math/`. The client-integration submodules are
-`blnt-sdk-js/` and `blnt-ui/`.
+fixed-point dependency source pinned in `soroban-fixed-point-math/`. V3's
+SEP-41 compatibility wrapper is maintained within
+`blnt-contracts-v3/compat/sep-41-token/`. The client-integration submodules
+are `blnt-sdk-js/` and `blnt-ui/`.
 
 Blend v1/v2 LPs use Comet v1. The fresh BLNT LPs deployed for Blend v3 use
 Comet v2.
@@ -84,8 +85,8 @@ with supporting Protocol-27 dependency sources pinned separately:
   pinned to the same Protocol-27 toolchain.
 - `comet-contracts-v2/` is the Protocol-27 Comet v2 weighted-pool source
   submodule, pinned to Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
-- `sep-41-token/` and `soroban-fixed-point-math/` are the corresponding
-  Protocol-27 dependency source submodules, pinned to the same toolchain.
+- `soroban-fixed-point-math/` is Comet v2's Protocol-27 fixed-point dependency
+  source submodule, pinned to the same toolchain.
 - `migration-harness/` contains only Protocol-27 cross-version tests and
   test-only support contracts.
 

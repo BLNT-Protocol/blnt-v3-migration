@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "generated_at": "2026-08-30T11:51:36Z",
+  "generated_at": "2026-08-31T22:02:55Z",
   "network": {
     "name": "Stellar Testnet",
     "passphrase": "Test SDF Network ; September 2015",
@@ -78,12 +78,94 @@
       }
     }
   },
+  "test_scenarios": {
+    "reserve_loss": {
+      "purpose": "Reward-zone pool for pool clawback, SAC clawback, and reserve-loss reconciliation",
+      "deployed_at": "2026-08-31T21:30:41Z",
+      "verified_at": "2026-08-31T21:33:38Z",
+      "accounts": {
+        "issuer": "GCPARE2YHWLP7YXLGIJYVHOPSJ4ZUIIC24CWFSCUOL6FLUH3JWSGNXCV",
+        "supplier": "GCLEV7EQOZHGNTDFCCRAJ7H2D3T43BQ6W2EOCMVNWLFK66Y3JFT74QV7"
+      },
+      "contracts": {
+        "pool_factory": "CCHQM5GCUFUKOAHEU3BPY2N4XBREQYNEXUKYX7CD24IUHOVUOGPVHC3C",
+        "backstop": "CDZVGXSH7STVK5YHKGXDDU4YZKWPCZLCPZLFO7TBDBXJMYBELWHW67EA",
+        "pool": "CBBE7VBN4SPURX4WQPG2WOCNXAXG7IROBUWY45M4U55YPYZ7IRSK6NVN",
+        "oracle": "CAVELE5MEC3ZYXVZVB4JTOGGHGKEMQFPTQU62RPXNVHGJ6C7QYE7MLAK",
+        "pool_wasm_sha256": "26a90ccc9ae45e406966a192d94cd15fe98a951f728cacf0281a455248cebf67"
+      },
+      "backstop": {
+        "reward_zone_member": true,
+        "receives_live_emitter_blnt": true,
+        "active_value_base_units": "125124868481",
+        "tiers": [
+          {
+            "tier": "FirstLoss",
+            "asset": "BLNT_USDC",
+            "weight": 2,
+            "base_units": "100000000"
+          },
+          {
+            "tier": "SecondLoss",
+            "asset": "USDC",
+            "weight": 1,
+            "base_units": "125000000000"
+          }
+        ]
+      },
+      "reserves": {
+        "HLTY": {
+          "contract_id": "CCMGWWXQUJACYHYPTQIHACU3TALN4II4HKY6EDR5GNDIHOWSQ6FSN4BS",
+          "mechanism": "pool_clawback",
+          "clawback_base_units": "2500000000",
+          "custody_base_units": "7500000000",
+          "b_supply": "7500000000",
+          "b_rate": "1000000000000",
+          "state": "healthy"
+        },
+        "IMPR": {
+          "contract_id": "CATAIYPWVIMWOOJGRKBWLKVZDEW73HIUBD6LVXSVJGOIMNNYGTSGPZA2",
+          "mechanism": "sac_clawback_then_reconcile_loss",
+          "clawback_base_units": "4000000000",
+          "custody_base_units": "6000000000",
+          "b_supply": "10000000000",
+          "b_rate": "600000000000",
+          "state": "impaired"
+        },
+        "EXHT": {
+          "contract_id": "CCOCOGDJOM6BT5H5J7VGLEN635WIUWFBIU5AFYPTUWWW5XSRYAX2DL5B",
+          "mechanism": "sac_clawback_then_reconcile_loss",
+          "clawback_base_units": "10000000000",
+          "custody_base_units": "0",
+          "b_supply": "10000000000",
+          "b_rate": "0",
+          "state": "exhausted"
+        },
+        "USDP": {
+          "contract_id": "CA5FVWSFJUBB2SXMJYC7MVKTP4W3OKUQXYBLZBGK275CKWWCEQDAZMRL",
+          "mechanism": "none",
+          "clawback_base_units": "0",
+          "custody_base_units": "10000000000",
+          "b_supply": "10000000000",
+          "b_rate": "1000000000000",
+          "state": "healthy"
+        }
+      },
+      "replaces": {
+        "pool": "CBDH45TSFVG4EW7BNPYJNRKMHAOIPG5GZSP62FAYUSJTOLN3WI6ZRVPM",
+        "oracle": "CDHOZ6HBH6CB6EE6BS44I6ICWVF3U7NZB6ALPCPZJFJPW7L5M2XFVDQU",
+        "reward_zone_member": false,
+        "backstop_withdrawal_unlock": 1789681497
+      }
+    }
+  },
   "reward_zones": {
     "v2": [
       "CDQ4SNQOGLESNBTWCWDFYU2ZNFRHCCC4F6PCFU53GUKDHJJZWNVPYAZ2",
       "CCS37RWIXRHZJM4C5VLKGLT23KOLKY6AFQ6MRYDGND5UB6BRA3LKJZWT"
     ],
     "v3": [
+      "CBBE7VBN4SPURX4WQPG2WOCNXAXG7IROBUWY45M4U55YPYZ7IRSK6NVN",
       "CCYLGEOVJLFDB6DFJKDBN2DJUPPR2UDKFCYIECZJAC24WULJJ3R6EFIU",
       "CDAS6X7PGBBA2CGYTSWGRKH7EZO5NIXGGLZCC4P4AOVOTSP77L6A5IGI"
     ]

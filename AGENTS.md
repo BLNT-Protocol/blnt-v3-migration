@@ -49,9 +49,10 @@ git submodule update --init --recursive
 - `comet-contracts-v2` is the Protocol-27 Comet v2 weighted-pool source
   submodule. Do not silently substitute it for frozen or incumbent Comet v1
   WASM inputs in migration lanes.
-- `sep-41-token` and `soroban-fixed-point-math` are the Protocol-27 dependency
-  source submodules used to replace Comet v2's temporary compatibility ports
-  only through an explicit Comet v2 dependency update.
+- `soroban-fixed-point-math` is the Protocol-27 dependency source submodule
+  used by Comet v2. V3's SEP-41 wrapper is maintained within
+  `blnt-contracts-v3/compat/sep-41-token` and is not a parent-repository
+  submodule.
 - `blnt-sdk-js` and `blnt-ui` are pinned client-integration source
   submodules.
 - `deployed-artifacts/mainnet` contains exact deployed mainnet WASM compatibility

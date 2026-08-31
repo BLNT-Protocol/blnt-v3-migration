@@ -93,7 +93,7 @@ MODELED_V2_FIXED_SALT="000000000000000000000000000000000000000000000000000000000
 MODELED_V2_CUSTOM_SALT="0000000000000000000000000000000000000000000000000000000000000055"
 MODELED_V3_FIXED_SALT="0000000000000000000000000000000000000000000000000000000000000066"
 MODELED_V3_CUSTOM_SALT="0000000000000000000000000000000000000000000000000000000000000088"
-RESERVE_LOSS_POOL_SALT="00000000000000000000000000000000000000000000000000000000000000ae"
+RESERVE_LOSS_POOL_SALT="${BLEND_RESERVE_LOSS_POOL_SALT:-00000000000000000000000000000000000000000000000000000000000000ae}"
 MODELED_BLND_XLM_LP_BALANCE=$((10 * SCALAR_7))
 MODELED_V3_USDC_BALANCE=$((12500 * SCALAR_7))
 MODELED_CUSTOM_V3_XLM_BALANCE=$((1000 * SCALAR_7))
@@ -2977,7 +2977,12 @@ ensure_reserve_loss_oracle() {
 ensure_reserve_loss_backstop() {
     local pool_hash backstop factory
 
-    pool_hash="$(state_value v3_pool_wasm_hash)"
+    pool_hash="$(state_optional v3_pool_wasm_hash)"
+    if [[ -z "${pool_hash}" && -s "${RUN_DIR}/upload-v3-pool.out" ]]; then
+        pool_hash="$(tr -d '[:space:]' <"${RUN_DIR}/upload-v3-pool.out")"
+    fi
+    [[ "${pool_hash}" =~ ^[0-9a-f]{64}$ ]] ||
+        die "v3 pool WASM hash is unavailable from state or deployment evidence"
     backstop="$(state_value candidate_backstop)"
     factory="$(state_value v3_pool_factory)"
 
@@ -2988,6 +2993,18 @@ ensure_reserve_loss_backstop() {
     invoke_view "probe-reserve-loss-backstop" \
         "${backstop}" reward_zone >/dev/null
     printf '%s\n' "${backstop}"
+}
+
+reserve_loss_backstop_config() {
+    local lp_asset="BlndUsdc"
+
+    if [[ -n "$(state_optional blnt_usdc_token)" ]]; then
+        lp_asset="BlntUsdc"
+    fi
+    jq -c --arg lp_asset "${lp_asset}" '
+        .backstop_config |
+        map(if .asset == "BlndUsdc" then .asset = $lp_asset else . end)
+    ' "${RESERVE_LOSS_FIXTURE}"
 }
 
 reserve_loss_reserve_config() {
@@ -3021,7 +3038,7 @@ ensure_reserve_loss_pool() {
             --min_collateral \
             "$(jq -er '.min_collateral' "${RESERVE_LOSS_FIXTURE}")" \
             --backstop_config \
-            "$(jq -c '.backstop_config' "${RESERVE_LOSS_FIXTURE}")" \
+            "$(reserve_loss_backstop_config)" \
             --access_controller null)"
         pool="$(normalize_scalar "${raw}")"
         require_contract_id "${pool}" "reserve-loss pool"
@@ -3039,9 +3056,9 @@ ensure_reserve_loss_pool() {
             metadata="$(reserve_loss_reserve_config "${index}")"
             invoke_transaction "queue-reserve-loss-${label}" \
                 "${pool}" queue_set_reserve \
-                --asset "${token}" --metadata "${metadata}" >/dev/null
+                --asset "${token}" --metadata "${metadata}" >/dev/null || return
             invoke_transaction "set-reserve-loss-${label}" \
-                "${pool}" set_reserve --asset "${token}" >/dev/null
+                "${pool}" set_reserve --asset "${token}" >/dev/null || return
             reserve_list="$(invoke_view \
                 "query-reserve-loss-reserves-${label}" \
                 "${pool}" get_reserve_list)"
@@ -3070,15 +3087,46 @@ reserve_loss_user_shares() {
 }
 
 ensure_reserve_loss_backstop_funding() {
-    local backstop="$1" pool="$2" current delta
+    local backstop="$1" pool="$2" current delta lp_token available
+    local deficit max_blnt max_usdc blnt_balance
 
     current="$(reserve_loss_user_shares "${backstop}" "${pool}" FirstLoss)"
     (( current <= RESERVE_LOSS_BACKSTOP_LP )) ||
-        die "reserve-loss BLND:USDC shares exceed the fixture target"
+        die "reserve-loss LP shares exceed the fixture target"
     if (( current < RESERVE_LOSS_BACKSTOP_LP )); then
         delta=$((RESERVE_LOSS_BACKSTOP_LP - current))
-        ensure_modeled_blnd_usdc_lp_capacity "${delta}"
-        invoke_transaction_as "deposit-reserve-loss-blnd-usdc" \
+        lp_token="$(state_optional blnt_usdc_token)"
+        if [[ -n "${lp_token}" ]]; then
+            available="$(normalize_scalar "$(invoke_view \
+                "query-reserve-loss-blnt-usdc-lp-available" \
+                "${lp_token}" balance --id "$(state_value depositor)")")"
+            [[ "${available}" =~ ^[0-9]+$ ]] ||
+                die "invalid reserve-loss BLNT:USDC LP balance: ${available}"
+            if (( available < delta )); then
+                deficit=$((delta - available))
+                max_blnt=$((deficit * 11))
+                max_usdc="${deficit}"
+                blnt_balance="$(normalize_scalar "$(invoke_view \
+                    "query-reserve-loss-blnt-available" \
+                    "$(state_value blnt_token)" balance \
+                    --id "$(state_value depositor)")")"
+                [[ "${blnt_balance}" =~ ^[0-9]+$ ]] ||
+                    die "invalid reserve-loss BLNT balance: ${blnt_balance}"
+                (( blnt_balance >= max_blnt )) ||
+                    die "BLNT balance is below the reserve-loss BLNT:USDC LP requirement"
+                ensure_token_balance "$(state_value usdc_token)" \
+                    "${max_usdc}" "reserve-loss-usdc-lp"
+                invoke_transaction_as "join-reserve-loss-blnt-usdc-capacity" \
+                    "${DEPOSITOR_IDENTITY}" "${lp_token}" join_pool \
+                    --pool_amount_out "${deficit}" \
+                    --user "$(state_value depositor)" \
+                    --max_amounts_in \
+                    "[\"${max_blnt}\",\"${max_usdc}\"]" >/dev/null
+            fi
+        else
+            ensure_modeled_blnd_usdc_lp_capacity "${delta}"
+        fi
+        invoke_transaction_as "deposit-reserve-loss-lp" \
             "${DEPOSITOR_IDENTITY}" "${backstop}" deposit \
             --tier FirstLoss \
             --from "$(state_value depositor)" \
@@ -3115,6 +3163,8 @@ ensure_reserve_loss_pool_active() {
             "${pool}" set_status --pool_status 0 >/dev/null
     fi
 
+    invoke_transaction "checkpoint-reserve-loss-reward-zone" \
+        "${backstop}" distribute >/dev/null || return
     reward_zone="$(invoke_view \
         "query-reserve-loss-reward-zone" "${backstop}" reward_zone)"
     if ! printf '%s' "${reward_zone}" | jq -e \
@@ -3138,9 +3188,9 @@ ensure_reserve_loss_supply_positions() {
     local pool="$1" issuer="$2" user="$3" position code token balance deficit
     local requests="[]" index=0
 
-    position="$(reserve_loss_position_supply "${pool}" "${user}" 1)"
-    if (( position == 0 )); then
-        while IFS= read -r code; do
+    while IFS= read -r code; do
+        position="$(reserve_loss_position_supply "${pool}" "${user}" "${index}")"
+        if (( position == 0 )); then
             token="$(reserve_loss_asset_id "${code}")"
             balance="$(normalize_scalar "$(invoke_view_as \
                 "query-reserve-loss-user-${code}-balance" \
@@ -3156,8 +3206,10 @@ ensure_reserve_loss_supply_positions() {
                 --arg token "${token}" \
                 --arg amount "${RESERVE_LOSS_SUPPLY}" \
                 '. + [{address: $token, amount: $amount, request_type: 0}]')"
-            index=$((index + 1))
-        done < <(jq -r '.reserves[].asset' "${RESERVE_LOSS_FIXTURE}")
+        fi
+        index=$((index + 1))
+    done < <(jq -r '.reserves[].asset' "${RESERVE_LOSS_FIXTURE}")
+    if (( $(printf '%s' "${requests}" | jq 'length') > 0 )); then
         invoke_transaction_as "seed-reserve-loss-supplies" \
             "${RESERVE_LOSS_USER_IDENTITY}" "${pool}" submit \
             --from "${user}" --spender "${user}" --to "${user}" \
@@ -3386,13 +3438,25 @@ command_verify_reserve_loss_pool() {
     assert_equal "0" "${balance}" "exhausted reserve custody"
     assert_equal "0" "${backstop_credit}" "exhausted reserve backstop credit"
 
-    for code in HLTY IMPR EXHT; do
+    token="$(reserve_loss_asset_id USDP)"
+    b_rate="$(reserve_loss_reserve_field "${pool}" "${token}" b_rate)"
+    b_supply="$(reserve_loss_reserve_field "${pool}" "${token}" b_supply)"
+    backstop_credit="$(reserve_loss_reserve_field "${pool}" "${token}" backstop_credit)"
+    balance="$(reserve_loss_token_balance "${token}" "${pool}")"
+    supply="$(reserve_loss_position_supply "${pool}" "${user}" 3)"
+    assert_equal "1000000000000" "${b_rate}" "USDP reserve b_rate"
+    assert_equal "${RESERVE_LOSS_SUPPLY}" "${b_supply}" "USDP reserve b_supply"
+    assert_equal "${RESERVE_LOSS_SUPPLY}" "${supply}" "USDP user supply"
+    assert_equal "${RESERVE_LOSS_SUPPLY}" "${balance}" "USDP reserve custody"
+    assert_equal "0" "${backstop_credit}" "USDP reserve backstop credit"
+
+    while IFS= read -r code; do
         token="$(reserve_loss_asset_id "${code}")"
         assert_equal "0" "$(normalize_scalar "$(invoke_view \
             "verify-reserve-loss-${code}-reconciled" \
             "${pool}" reconcile_loss --asset "${token}")")" \
             "reserve-loss ${code} residual deficit"
-    done
+    done < <(jq -r '.reserves[].asset' "${RESERVE_LOSS_FIXTURE}")
 
     state_set "reserve_loss_verified_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     cat <<EOF
@@ -3404,6 +3468,7 @@ ${NETWORK_LABEL} reserve-loss pool verified
   HLTY:      healthy after pool.clawback (b_rate 1.0, 750 supplied)
   IMPR:      recoverably impaired after SAC clawback + reconcile_loss (b_rate 0.6)
   EXHT:      fully exhausted after SAC clawback + reconcile_loss (b_rate 0)
+  USDP:      healthy and fully collateralized (b_rate 1.0, 1,000 supplied)
 EOF
 }
 

@@ -109,11 +109,13 @@ impl MockPoolFactory {
 
 const SCALAR_7: i128 = 10_000_000;
 const SWAP_QUEUE_SECONDS: u64 = 31 * 24 * 60 * 60;
-const INITIAL_DROP: i128 = 50_000_000 * SCALAR_7;
+const INITIAL_DROP: i128 = 150_000_000 * SCALAR_7;
+const SWAP_CAP: i128 = 120_000_000 * SCALAR_7;
 const BACKFILL_CLAIMANTS: u32 = 434;
 const GRANT_CLAIMANTS: u32 = 100;
 const VESTING_DURATION_SECONDS: u64 = 180 * 24 * 60 * 60;
 const GRANT_VESTING_DURATION_SECONDS: u64 = 720 * 24 * 60 * 60;
+const SWAP_DURATION_SECONDS: u64 = 270 * 24 * 60 * 60;
 
 fn create_asset(env: &Env, admin: &Address) -> Address {
     env.register_stellar_asset_contract_v2(admin.clone())
@@ -222,6 +224,10 @@ fn optimized_backfill_handles_all_backfill_and_grant_claimants_partially_vested(
     assert_eq!(
         backfill.get_grant_vesting_end(),
         backfill.get_grant_vesting_start() + GRANT_VESTING_DURATION_SECONDS
+    );
+    assert_eq!(
+        backfill.get_swap_deadline(),
+        backfill.get_vesting_start() + SWAP_DURATION_SECONDS
     );
     env.ledger()
         .set_timestamp(backfill.get_vesting_start() + VESTING_DURATION_SECONDS / 2);
@@ -378,7 +384,7 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     assert_eq!(backfill.get_total_swapped(), 4 * SCALAR_7);
     assert_eq!(
         backfill.get_remaining_swap_capacity(),
-        19_999_996 * SCALAR_7
+        119_999_996 * SCALAR_7
     );
     assert_eq!(backfill.get_legacy_blnd_token(), legacy_blnd);
     assert_eq!(backfill.get_blnt_token(), blnt);
@@ -398,9 +404,12 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     assert_eq!(v3.get_backstop(), future_backstop);
     assert!(v3.get_queued_swap().is_none());
 
-    env.ledger().set_timestamp(u64::MAX);
-    assert_eq!(
-        backfill.swap_blnd_for_blnt(&holder, &recipient, &SCALAR_7),
-        5 * SCALAR_7
-    );
+    env.ledger().set_timestamp(backfill.get_swap_deadline());
+    assert!(backfill
+        .try_swap_blnd_for_blnt(&holder, &recipient, &SCALAR_7)
+        .is_err());
+    assert_eq!(backfill.get_remaining_swap_capacity(), 0);
+    assert_eq!(backfill.burn_expired(), SWAP_CAP - 4 * SCALAR_7);
+    assert_eq!(backfill.get_expired_swap_burned(), SWAP_CAP - 4 * SCALAR_7);
+    assert_eq!(backfill.burn_expired(), 0);
 }

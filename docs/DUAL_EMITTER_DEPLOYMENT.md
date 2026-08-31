@@ -7,8 +7,9 @@ workspace's Comet v2 artifact and does not queue a legacy-emitter replacement.
 The v3 emitter constructor binds the deployment operator as a one-time
 initializer; successful initialization consumes that authority, leaving no
 ongoing emitter administrator. A separate immutable backfill contract receives
-the complete 50-million-BLNT initial drop, manages address claims, and owns the
-perpetual conversion path capped at 20 million BLNT.
+the complete 150-million-BLNT initial drop, manages address claims, and owns a
+270-day conversion path capped at 120 million BLNT. After that window, anyone
+may burn the unused conversion reserve without affecting claim liabilities.
 
 ## Local Quickstart
 
@@ -22,7 +23,7 @@ make dual-emitter-status
 
 `run` verifies and builds artifacts, starts Protocol-27 Quickstart, deploys the
 two independent lanes, activates v3 directly, executes the exact
-50-million-BLNT backfill drop, converts a small test balance from BLND to BLNT,
+150-million-BLNT backfill drop, converts a small test balance from BLND to BLNT,
 deploys and activates the modeled Fixed and Custom V2/V3 pools, adds each pair
 to its respective reward zone, advances each emitter, and verifies all final
 bindings. Stop the isolated network with:
@@ -44,7 +45,7 @@ types and count, unique addresses, positive amounts, and exact aggregate before
 deployment. The runner always constructs the immutable `(address, amount)`
 claim vector from that verified manifest; it cannot be overridden through the
 environment. The selected list cannot be changed after construction, and the
-backfill contract receives the complete 50 million BLNT.
+backfill contract receives the complete 150 million BLNT.
 Every address allocation vests linearly per second for 180 days beginning at
 backfill-contract construction. Each claim transfers only the cumulative
 vested amount not previously claimed, and unclaimed amounts remain available
@@ -101,12 +102,13 @@ record:
 - the immutable 180-day backfill and 720-day grant vesting timestamps and
   allocation totals;
 - both token administrators and emitter recipients;
-- direct v3 activation and exact 50-million-BLNT backfill custody;
+- direct v3 activation and exact 150-million-BLNT backfill custody;
 - exact BLND burn and pre-funded BLNT transfer conversion events;
-- positive independent BLND and BLNT distributions; and
+- positive independent BLND and BLNT distributions;
 - active modeled Fixed and Custom pools in their respective V2 and V3 reward
-  zones, including verified seven-day V2 USDC-supply emission streams;
-- the immutable 20-million-BLNT conversion cap and empty initial v3 queue.
+  zones, including verified seven-day V2 USDC-supply emission streams; and
+- the immutable 120-million-BLNT conversion cap, 270-day deadline, zero initial
+  expired-reserve burn, and empty initial v3 queue.
 
 The runner initializes all three Comet v2 pools at 80:20, verifies positive authorized
 non-clawbackable custody, and then locks their shared classic controller at

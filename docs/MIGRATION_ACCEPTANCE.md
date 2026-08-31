@@ -50,8 +50,11 @@ Native and optimized-WASM backfill-contract tests MUST cover:
 - rejection of zero and negative amounts;
 - rejection when BLND and BLNT bindings are identical or use incompatible
   decimals;
-- perpetual conversion regardless of ledger timestamp;
-- exact success at the 20-million-BLNT aggregate cap and rejection above it;
+- conversion through the ledger immediately before the 270-day deadline,
+  rejection at the deadline, and permissionless burning of the unused reserve;
+- exact success at the 120-million-BLNT aggregate cap and rejection above it;
+- exact expired-reserve burn accounting, idempotent zero-return behavior, and
+  preservation of every outstanding backfill and grant claim after burning;
 - cumulative swapped-total and remaining-capacity conservation;
 - atomic rollback on transfer, balance, burn, payout, cap, overflow, or
   reentrancy mismatch;
@@ -68,16 +71,17 @@ Native and optimized-WASM backfill-contract tests MUST cover:
   contracts), bound to the recorded source hash with deterministic
   largest-remainder rounding;
 - exact aggregate conservation across the 20-million backfill, 10-million
-  grant, and 20-million conversion lanes; and
+  grant, and 120-million conversion lanes; and
 - absence of any BLNT-to-BLND entry point.
 
 ## Initial allocation
 
 The suite MUST prove that the current v3 backstop can execute one initial BLNT
-drop, an exact 50-million-BLNT total is valid, a larger total fails, and neither
+drop, an exact 150-million-BLNT launch total is valid, a larger launch total
+fails, every later migration remains capped at 50 million BLNT, and neither
 repetition nor re-registering the same backstop restores eligibility. The v3
 launch harness MUST use exactly one recipient, verify that it is the immutable
-backfill-contract address, and verify that contract receives exactly 50 million
+backfill-contract address, and verify that contract receives exactly 150 million
 BLNT. V3 launch MUST schedule no migration backfill.
 
 ## Comet v2 canonical LPs

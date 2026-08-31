@@ -52,7 +52,7 @@ or skipped emission window.
 
 The inherited `drop` lifecycle supplies the initial BLNT allocation. It is
 callable by the current backstop once for that backstop address. V3 launch MUST
-use a one-entry immutable recipient list that transfers exactly 50 million
+use a one-entry immutable recipient list that transfers exactly 150 million
 BLNT to the separately deployed BLNT backfill contract. Re-registering the same
 backstop MUST NOT restore drop eligibility.
 
@@ -65,7 +65,7 @@ NOT bind legacy BLND or expose a conversion entry point.
 
 The separately deployed `blnt-backfill-contract` immutably binds distinct
 seven-decimal legacy BLND and BLNT Stellar Asset Contracts and receives the
-complete 50-million-BLNT initial drop without receiving BLNT mint authority.
+complete 150-million-BLNT initial drop without receiving BLNT mint authority.
 Its immutable backfill list MUST contain at most 434 unique claimants, MUST
 contain only positive amounts, and MUST total no more than 20 million BLNT. The
 production list MUST assign exactly 20 million BLNT in proportion to
@@ -84,7 +84,7 @@ at most 100 unique positive allocations totaling at most 10 million BLNT.
 per second for 720 days from the shared construction timestamp. An address MAY
 appear in both lists without either method reading or consuming the other
 allocation. Backfill and grant allocations together MUST NOT exceed 30 million
-BLNT, preserving the separate 20-million-BLNT conversion capacity.
+BLNT, preserving the separate 120-million-BLNT conversion reserve.
 
 The backfill contract owns `swap_blnd_for_blnt(from, to, amount)`, which:
 
@@ -95,15 +95,21 @@ The backfill contract owns `swap_blnd_for_blnt(from, to, amount)`, which:
    to `to`; and
 5. increments the cumulative successful swap total.
 
-The cumulative successful conversion total MUST NOT exceed 20 million BLNT.
-Conversion does not expire. The operation MUST fail atomically on a transfer,
-burn, payout, balance, authorization, cap, overflow, or reentrancy mismatch.
-No BLNT-to-BLND path exists. The contract exposes immutable token bindings,
-backfill and grant vesting timestamps, currently claimable amounts, separate
-and aggregate claim accounting, conversion accounting, and remaining
-conversion capacity as read-only views.
-It exposes no administrator, upgrade, mint, sweep, recovery,
-allocation-mutation, or claim-deadline API.
+The cumulative successful conversion total MUST NOT exceed 120 million BLNT.
+Conversion MUST expire exactly 270 days after backfill-contract construction;
+swaps at or after that timestamp MUST fail. The operation MUST fail atomically
+on a transfer, burn, payout, balance, authorization, cap, deadline, overflow,
+or reentrancy mismatch. No BLNT-to-BLND path exists.
+
+After expiry, permissionless `burn_expired()` MUST destroy exactly the unused
+conversion reserve while preserving every outstanding backfill and grant
+claim. It MUST reject before expiry and return zero after the reserve has
+already been fully converted or burned. The contract exposes immutable token
+bindings, vesting and conversion timestamps, currently claimable amounts,
+separate and aggregate claim accounting, conversion accounting,
+expired-reserve burn accounting, and remaining pre-expiry conversion capacity
+as read-only views. It exposes no administrator, upgrade, mint, sweep,
+recovery, allocation-mutation, or claim-deadline API.
 
 ## 3. Canonical v3 liquidity
 
@@ -168,14 +174,15 @@ A deployment SHOULD use the following deterministic order:
 5. deploy and initialize the canonical Comet v2 BLNT:USDC and BLNT:XLM pools;
 6. determine the v3 backstop address and deploy its factory;
 7. initialize the v3 emitter with BLNT, the v3 backstop, and BLNT:USDC LP;
-8. deploy the v3 backstop with the single 50-million-BLNT backfill-contract
+8. deploy the v3 backstop with the single 150-million-BLNT backfill-contract
    drop recipient;
 9. call v3 backstop `distribute()` once to activate direct accounting; and
 10. call v3 backstop `drop()` and verify exact backfill-contract custody.
 
 Deployment evidence MUST record both emitter bindings, both token
 administrators, the backfill-contract artifact and immutable bindings, exact
-50-million-BLNT custody, the immutable 180-day backfill and 720-day grant
-vesting timestamps and allocations, the 20-million conversion cap, Comet v2
-artifact hash and pool configuration, v3 direct activation, and the absence of
-BLND in every v3 pool, backstop, and emitter binding.
+150-million-BLNT custody, the immutable 180-day backfill and 720-day grant
+vesting timestamps and allocations, the 120-million conversion cap and
+270-day deadline, Comet v2 artifact hash and pool configuration, v3 direct
+activation, and the absence of BLND in every v3 pool, backstop, and emitter
+binding.

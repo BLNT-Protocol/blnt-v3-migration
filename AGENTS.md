@@ -46,10 +46,9 @@ git submodule update --init --recursive
 
 - `blend-contracts-v2` is the authoritative SDK-22 source submodule.
 - `blnt-contracts-v3` is the sole production v3 contract source submodule.
-- `comet-contracts-v1` is the historically named Protocol-27 Comet v2
-  weighted-pool source submodule. Do not silently substitute it for frozen or
-  incumbent Comet v1 WASM
-  inputs in migration lanes.
+- `comet-contracts-v2` is the Protocol-27 Comet v2 weighted-pool source
+  submodule. Do not silently substitute it for frozen or incumbent Comet v1
+  WASM inputs in migration lanes.
 - `sep-41-token` and `soroban-fixed-point-math` are the Protocol-27 dependency
   source submodules used to replace Comet v2's temporary compatibility ports
   only through an explicit Comet v2 dependency update.
@@ -75,7 +74,7 @@ a side effect of work in this repository.
   silently substituted for those files.
 - New v3 code belongs in the `blnt-contracts-v3/` submodule. It MUST target
   Protocol 27 with Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
-- Protocol-27 Comet v2 work belongs in the `comet-contracts-v1/` submodule and
+- Protocol-27 Comet v2 work belongs in the `comet-contracts-v2/` submodule and
   MUST use the same Rust, SDK, protocol, and WASM target lane. Migration
   runners must explicitly opt into rebuilt Comet v2 artifacts.
 - Migration-only tests and fixtures belong in `migration-harness/` and MUST

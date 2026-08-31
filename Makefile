@@ -1,7 +1,7 @@
 V2_DIR := blend-contracts-v2
 V3_DIR := blnt-contracts-v3
 MIGRATION_HARNESS_DIR := migration-harness
-COMET_V2_DIR := comet-contracts-v1
+COMET_V2_DIR := comet-contracts-v2
 BLNT_BACKFILL_DIR := blnt-backfill-contract
 
 default: build

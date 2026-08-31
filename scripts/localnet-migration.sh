@@ -118,7 +118,7 @@ V3_FACTORY_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/po
 V3_BACKSTOP_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
 V3_POOL_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/pool.wasm"
 V3_TEST_SEP40_ORACLE_WASM="${ROOT_DIR}/migration-harness/target/wasm32v1-none/optimized/blend_v3_test_sep40_oracle.wasm"
-COMET_WASM="${BLEND_MIGRATION_COMET_WASM:-${ROOT_DIR}/comet-contracts-v1/target/wasm32v1-none/optimized/comet.wasm}"
+COMET_WASM="${BLEND_MIGRATION_COMET_WASM:-${ROOT_DIR}/comet-contracts-v2/target/wasm32v1-none/optimized/comet.wasm}"
 
 EXPECTED_EMITTER_SHA256="438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89"
 EMITTER_WASM="${ROOT_DIR}/deployed-artifacts/mainnet/emitter.wasm"
@@ -165,7 +165,7 @@ configuration, public state, results, and cost logs live below the
 network-specific ignored work directory.
 
 The canonical v3 LP default is the Comet v2 artifact built from the workspace's
-`comet-contracts-v1` checkout. Set BLEND_MIGRATION_COMET_WASM only to test an
+`comet-contracts-v2` checkout. Set BLEND_MIGRATION_COMET_WASM only to test an
 explicit alternate build.
 EOF
 }

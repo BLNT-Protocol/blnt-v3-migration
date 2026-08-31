@@ -418,7 +418,7 @@ dual_deploy() {
         "$(git -C "${ROOT_DIR}/blnt-backfill-contract" rev-parse HEAD)"
     state_set "comet_v2_wasm_sha256" "$(sha256_file "${COMET_WASM}")"
     state_set "comet_v2_source_commit" \
-        "$(git -C "${ROOT_DIR}/comet-contracts-v1" rev-parse HEAD)"
+        "$(git -C "${ROOT_DIR}/comet-contracts-v2" rev-parse HEAD)"
 
     stellar_cli keys generate "${DEPOSITOR_IDENTITY}" --overwrite >/dev/null
     depositor="$(stellar_cli keys public-key "${DEPOSITOR_IDENTITY}")"

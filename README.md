@@ -21,13 +21,13 @@ The deployed v2 source baseline is Blend Protocol v2 commit
 `ba22b487b2c5057a4ecc28b05b5193c28e4bd117`. The Blend contract submodules are
 `blend-contracts-v2/` and `blnt-contracts-v3/`. The production transition
 contract is pinned in `blnt-backfill-contract/`. Protocol-27 Comet v2
-weighted-pool source is pinned in the historically named
-`comet-contracts-v1/`, with its Protocol-27 dependency sources pinned in
-`sep-41-token/` and `soroban-fixed-point-math/`. The client-integration
-submodules are `blnt-sdk-js/` and `blnt-ui/`.
+weighted-pool source is pinned in `comet-contracts-v2/`, with its Protocol-27
+dependency sources pinned in `sep-41-token/` and
+`soroban-fixed-point-math/`. The client-integration submodules are
+`blnt-sdk-js/` and `blnt-ui/`.
 
 Blend v1/v2 LPs use Comet v1. The fresh BLNT LPs deployed for Blend v3 use
-Comet v2; the `comet-contracts-v1/` directory name is historical.
+Comet v2.
 
 Exact mainnet emitter, v2 backstop, pool-factory, and pool WASMs are checked in
 under `deployed-artifacts/mainnet/` with their contract IDs and SHA-256 digests. These
@@ -82,7 +82,7 @@ with supporting Protocol-27 dependency sources pinned separately:
   1.91.1, Soroban SDK 27.0.3, Protocol 27 tooling, and `wasm32v1-none`.
 - `blnt-backfill-contract/` is the production transition-contract submodule,
   pinned to the same Protocol-27 toolchain.
-- `comet-contracts-v1/` is the Protocol-27 Comet v2 weighted-pool source
+- `comet-contracts-v2/` is the Protocol-27 Comet v2 weighted-pool source
   submodule, pinned to Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
 - `sep-41-token/` and `soroban-fixed-point-math/` are the corresponding
   Protocol-27 dependency source submodules, pinned to the same toolchain.

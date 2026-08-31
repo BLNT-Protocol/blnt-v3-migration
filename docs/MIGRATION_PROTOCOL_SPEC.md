@@ -121,9 +121,7 @@ allocation-mutation, or claim-deadline API.
 ## 3. Canonical v3 liquidity
 
 V3 deploys new canonical 80:20 BLNT:USDC and BLNT:XLM LPs from the Protocol-27
-Comet v2 source pinned in the workspace directory named
-`comet-contracts-v1`. The directory name is historical; its pinned checkout is
-the Comet v2 implementation used by this repository.
+Comet v2 source pinned in the workspace directory `comet-contracts-v2`.
 
 Both pools MUST contain exactly their expected seven-decimal Stellar Asset
 Contracts, use normalized weights 80% BLNT and 20% paired asset, start

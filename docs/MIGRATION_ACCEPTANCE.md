@@ -88,8 +88,8 @@ BLNT. V3 launch MUST schedule no migration backfill.
 
 ## Comet v2 canonical LPs
 
-Build and deployment evidence MUST identify the workspace's historically named
-`comet-contracts-v1` checkout as the Comet v2 source and record its commit and
+Build and deployment evidence MUST identify the workspace's
+`comet-contracts-v2` checkout as the Comet v2 source and record its commit and
 optimized WASM hash. Tests and network verification MUST prove that canonical
 v3 BLNT:USDC and BLNT:XLM pools:
 

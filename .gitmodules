@@ -18,7 +18,7 @@
 	url = git@github.com:levinson/sep-41-token.git
 [submodule "soroban-fixed-point-math"]
 	path = soroban-fixed-point-math
-	url = git@github.com:levinson/soroban-fixed-point-math.git
+	url = git@github.com:blnt-protocol/soroban-fixed-point-math.git
 [submodule "blnt-backfill-contract"]
 	path = blnt-backfill-contract
 	url = git@github.com:blnt-protocol/blnt-backfill-contract.git

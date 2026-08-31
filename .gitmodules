@@ -3,13 +3,13 @@
 	url = git@github.com:blend-capital/blend-contracts-v2.git
 [submodule "blnt-contracts-v3"]
 	path = blnt-contracts-v3
-	url = git@github.com:levinson/blnt-contracts-v3.git
+	url = git@github.com:blnt-protocol/blnt-contracts-v3.git
 [submodule "blnt-ui"]
 	path = blnt-ui
-	url = git@github.com:levinson/blnt-ui.git
+	url = git@github.com:blnt-protocol/blnt-ui.git
 [submodule "blnt-sdk-js"]
 	path = blnt-sdk-js
-	url = git@github.com:levinson/blnt-sdk-js.git
+	url = git@github.com:blnt-protocol/blnt-sdk-js.git
 [submodule "comet-contracts-v1"]
 	path = comet-contracts-v1
 	url = git@github.com:levinson/comet-contracts-v1.git
@@ -21,4 +21,4 @@
 	url = git@github.com:levinson/soroban-fixed-point-math.git
 [submodule "blnt-backfill-contract"]
 	path = blnt-backfill-contract
-	url = git@github.com:levinson/blnt-backfill-contract.git
+	url = git@github.com:blnt-protocol/blnt-backfill-contract.git

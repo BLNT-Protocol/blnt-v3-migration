@@ -117,7 +117,7 @@ non-clawbackable custody, and then locks their shared classic controller at
 
 ## Future upgrade
 
-The initial v3 designated token is canonical BLNT:USDC LP. A future protocol
+The initial v3 designated token is canonical BLNT:XLM LP. A future protocol
 does not use this launch runner to replace v3; it calls the v3 emitter's
 preserved `queue_swap_backstop` and `swap_backstop` entry points after directly
 holding strictly more of that designated token than the incumbent.

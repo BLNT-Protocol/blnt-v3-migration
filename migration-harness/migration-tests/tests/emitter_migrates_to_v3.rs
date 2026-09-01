@@ -287,7 +287,7 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     let pool = Address::generate(&env);
     let factory = env.register(MockPoolFactory, (&candidate_id, &pool));
     let v3 = v3_emitter::Client::new(&env, &v3_emitter_id);
-    v3.initialize(&blnt, &candidate_id, &blnt_usdc);
+    v3.initialize(&blnt, &candidate_id, &blnt_xlm);
     env.register_at(
         &candidate_id,
         v3_backstop::WASM,
@@ -383,9 +383,11 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     assert_eq!(backfill.get_legacy_blnd_token(), legacy_blnd);
     assert_eq!(backfill.get_blnt_token(), blnt);
 
+    // Qualification uses the current BLNT:XLM designation. The queued
+    // replacement independently selects BLNT:USDC as the next designation.
     let future_backstop = Address::generate(&env);
-    MockCometClient::new(&env, &blnt_usdc).mint(&candidate_id, &(100 * SCALAR_7));
-    MockCometClient::new(&env, &blnt_usdc).mint(&future_backstop, &(100 * SCALAR_7 + 1));
+    MockCometClient::new(&env, &blnt_xlm).mint(&candidate_id, &(100 * SCALAR_7));
+    MockCometClient::new(&env, &blnt_xlm).mint(&future_backstop, &(100 * SCALAR_7 + 1));
     let queued_at = env.ledger().timestamp();
     v3.queue_swap_backstop(&future_backstop, &blnt_usdc);
     let queued = v3.get_queued_swap().unwrap();

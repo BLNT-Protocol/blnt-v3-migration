@@ -105,7 +105,7 @@ v3 BLNT:USDC and BLNT:XLM pools:
 The v3 emitter suite MUST preserve the established queue ABI and prove:
 
 - equality in current designated-token balances is insufficient;
-- a candidate with one additional raw BLNT:USDC LP unit can queue;
+- a candidate with one additional raw BLNT:XLM LP unit can queue;
 - unlock is exactly 31 days after queue creation;
 - finalization succeeds at exactly seven days after unlock and fails after
   that inclusive execution boundary;
@@ -138,7 +138,7 @@ No test or deployment may add a privileged replacement route.
 The design may be described as transition-ready only when every prerequisite
 passes, legacy v2 positions remain isolated and operational, v3 direct BLNT
 emissions and the exact initial backfill drop are demonstrated, perpetual
-capped conversion and address claims are fully tested, future BLNT:USDC
+capped conversion and address claims are fully tested, future BLNT:XLM
 replacement remains compatible, and an isolated local plus public-testnet
 deployment records all final invariants.
 

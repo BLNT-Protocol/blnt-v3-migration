@@ -165,7 +165,7 @@ Dual-emitter ${NETWORK_LABEL} deployment:
   4. Deploy BLND:USDC, BLNT:USDC, and BLNT:XLM Comet v2 pools.
   5. Lock the shared Comet v2 controller at 100/100/100 with signer weight zero.
   6. Leave the legacy emitter pointed at the deployed v2 backstop.
-  7. Point the separate v3 emitter at the v3 backstop with BLNT:USDC designated.
+  7. Point the separate v3 emitter at the v3 backstop with BLNT:XLM designated.
   8. Send the exact 150-million-BLNT initial drop to the immutable backfill
      contract, bind the 180-day backfill and 720-day grant schedules, and
      smoke-test its same-user BLND-to-BLNT conversion and partial refund.
@@ -603,7 +603,7 @@ dual_deploy() {
     invoke_transaction "initialize-v3-emitter" "${v3_emitter}" initialize \
         --blnd_token "${blnt}" \
         --backstop "${v3_backstop}" \
-        --backstop_token "${blnt_usdc}" >/dev/null
+        --backstop_token "${blnt_xlm}" >/dev/null
     deployed_v3_backstop="$(deploy_wasm \
         "deploy-v3-backstop" "${V3_BACKSTOP_WASM}" "${CANDIDATE_SALT}" \
         --blnt_usdc_token "${blnt_usdc}" \

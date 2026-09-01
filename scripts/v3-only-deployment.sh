@@ -514,7 +514,7 @@ v3_only_deploy() {
     invoke_transaction "initialize-v3-only-emitter" "${v3_emitter}" initialize \
         --blnd_token "${blnt}" \
         --backstop "${v3_backstop}" \
-        --backstop_token "${blnt_usdc}" >/dev/null
+        --backstop_token "${blnt_xlm}" >/dev/null
     deployed_v3_backstop="$(deploy_wasm "deploy-v3-only-backstop" \
         "${V3_BACKSTOP_WASM}" "${CANDIDATE_SALT}" \
         --blnt_usdc_token "${blnt_usdc}" \

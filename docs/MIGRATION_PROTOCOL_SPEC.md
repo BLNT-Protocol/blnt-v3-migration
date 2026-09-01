@@ -37,7 +37,7 @@ BLNT in v3.
 
 Initialization MUST verify that BLNT is a seven-decimal Stellar Asset Contract
 administered by the emitter, set the v3 backstop as recipient, and set canonical
-BLNT:USDC LP as the designated replacement-comparison token. Once initialized,
+BLNT:XLM LP as the designated replacement-comparison token. Once initialized,
 the emitter mints one BLNT per elapsed second to its current backstop. Only that
 current backstop may invoke the emitter's `distribute`; callers retain
 permissionless checkpoint access through the backstop's own `distribute` entry
@@ -147,7 +147,7 @@ The v3 emitter retains the deployed permissionless replacement mechanism so a
 future protocol version can become the BLNT recipient. A queue candidate MUST
 directly hold strictly more of the emitter's current designated token than the
 incumbent backstop. For the initial v3 binding, that token is canonical
-BLNT:USDC LP; equality is insufficient.
+BLNT:XLM LP; equality is insufficient.
 
 Queue creation records the proposed backstop, proposed next designated token,
 and an unlock exactly 31 days later. The current designated token remains the
@@ -178,7 +178,7 @@ A deployment SHOULD use the following deterministic order:
    immutable backfill and grant lists;
 5. deploy and initialize the canonical Comet v2 BLNT:USDC and BLNT:XLM pools;
 6. determine the v3 backstop address and deploy its factory;
-7. initialize the v3 emitter with BLNT, the v3 backstop, and BLNT:USDC LP;
+7. initialize the v3 emitter with BLNT, the v3 backstop, and BLNT:XLM LP;
 8. deploy the v3 backstop with the single 150-million-BLNT backfill-contract
    drop recipient;
 9. call v3 backstop `distribute()` once to activate direct accounting; and

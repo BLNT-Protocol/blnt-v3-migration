@@ -15,4 +15,5 @@ local.*
 # Isolated runner keys, deployment state, evidence, and cost logs.
 /.localnet*/
 /.testnet-production/
+/.testnet-v3-only/
 /.oracle-validation/

@@ -20,14 +20,15 @@ usage() {
 Usage: scripts/emissions-keeper.sh COMMAND
 
 Commands:
-  plan  Simulate one v2-and-v3 keeper pass without mutation.
-  once  Submit one v2-and-v3 keeper pass and exit.
+  plan  Simulate one configured-protocol keeper pass without mutation.
+  once  Submit one configured-protocol keeper pass and exit.
   run   Run one pass immediately, then repeat on an internal schedule.
   help  Show this message.
 
-Each pass advances the legacy BLND emitter for v2, checkpoints the v2 backstop,
-then advances the independent BLNT emitter through the v3 backstop. It gulps
-each registered reward-zone pool for the corresponding protocol version and
+Each pass services the protocol lanes enabled in the deployment registry. A
+dual-emitter registry advances legacy BLND for v2 and independent BLNT for v3;
+a V3-only registry leaves the external Blend lane untouched. It gulps each
+registered reward-zone pool for the corresponding enabled protocol version and
 reconciles direct reserve-custody deficits
 across every registered v3 pool. On Stellar testnet, it
 refreshes the controlled fixture-oracle histories when they are at least 12
@@ -98,10 +99,12 @@ validate_oracle_refresh_configuration() {
     require_registry_state_match '.assets.USDC' usdc_token "USDC asset"
     require_registry_state_match '.assets.EURC' modeled_asset_eurc "EURC asset"
     require_registry_state_match '.assets.PYUSD' modeled_asset_pyusd "PYUSD asset"
-    require_registry_state_match \
-        '.modeled_pools.fixed.v2.oracle' modeled_v2_fixed_oracle "Fixed v2 oracle"
-    require_registry_state_match \
-        '.modeled_pools.custom.v2.oracle' modeled_v2_custom_oracle "Custom v2 oracle"
+    if [[ "${V2_ENABLED}" == "true" ]]; then
+        require_registry_state_match \
+            '.modeled_pools.fixed.v2.oracle' modeled_v2_fixed_oracle "Fixed v2 oracle"
+        require_registry_state_match \
+            '.modeled_pools.custom.v2.oracle' modeled_v2_custom_oracle "Custom v2 oracle"
+    fi
     require_registry_state_match \
         '.modeled_pools.fixed.v3.oracle' modeled_v3_fixed_oracle "Fixed v3 oracle"
     require_registry_state_match \
@@ -147,6 +150,7 @@ plan_oracle_refresh() {
 
 refresh_oracles_if_due() {
     local remaining
+    local -a refresh_command
 
     if [[ "${NETWORK_PASSPHRASE}" != "${TESTNET_PASSPHRASE}" ]]; then
         note "Fixture-oracle refresh skipped outside Stellar testnet."
@@ -158,14 +162,31 @@ refresh_oracles_if_due() {
         return 0
     fi
 
-    note "Refreshing all modeled v2 and v3 fixture oracles."
-    if BLEND_PRODUCTION_TESTNET_RPC_URL="${RPC_URL}" \
-        BLEND_PRODUCTION_TESTNET_WORK_DIR="${WORK_DIR}" \
-        BLEND_PRODUCTION_TESTNET_CONFIG_DIR="${CONFIG_DIR}" \
-        BLEND_PRODUCTION_TESTNET_STATE_FILE="${STATE_FILE}" \
-        BLEND_PRODUCTION_TESTNET_OPERATOR_IDENTITY="${SOURCE_ACCOUNT}" \
-        BLEND_PRODUCTION_TESTNET_INCLUSION_FEE="${INCLUSION_FEE}" \
-        bash "${ROOT_DIR}/scripts/testnet-production-migration.sh" refresh-oracle; then
+    note "Refreshing configured fixture oracles."
+    if [[ "${V2_ENABLED}" == "true" ]]; then
+        refresh_command=(
+            env
+            "BLEND_PRODUCTION_TESTNET_RPC_URL=${RPC_URL}"
+            "BLEND_PRODUCTION_TESTNET_WORK_DIR=${WORK_DIR}"
+            "BLEND_PRODUCTION_TESTNET_CONFIG_DIR=${CONFIG_DIR}"
+            "BLEND_PRODUCTION_TESTNET_STATE_FILE=${STATE_FILE}"
+            "BLEND_PRODUCTION_TESTNET_OPERATOR_IDENTITY=${SOURCE_ACCOUNT}"
+            "BLEND_PRODUCTION_TESTNET_INCLUSION_FEE=${INCLUSION_FEE}"
+            bash "${ROOT_DIR}/scripts/testnet-production-migration.sh" refresh-oracle
+        )
+    else
+        refresh_command=(
+            env
+            "BLEND_V3_ONLY_TESTNET_RPC_URL=${RPC_URL}"
+            "BLEND_V3_ONLY_TESTNET_WORK_DIR=${WORK_DIR}"
+            "BLEND_V3_ONLY_TESTNET_CONFIG_DIR=${CONFIG_DIR}"
+            "BLEND_V3_ONLY_TESTNET_STATE_FILE=${STATE_FILE}"
+            "BLEND_V3_ONLY_TESTNET_OPERATOR_IDENTITY=${SOURCE_ACCOUNT}"
+            "BLEND_V3_ONLY_TESTNET_INCLUSION_FEE=${INCLUSION_FEE}"
+            bash "${ROOT_DIR}/scripts/testnet-v3-only.sh" refresh-oracle
+        )
+    fi
+    if "${refresh_command[@]}"; then
         note "Fixture-oracle refresh completed successfully."
         return 0
     fi
@@ -191,13 +212,29 @@ invoke() {
 }
 
 capture_invoke() {
-    local send="$1" contract_id="$2" function_name="$3" output status
+    local send="$1" contract_id="$2" function_name="$3" output status attempt
     shift 3
 
-    set +e
-    output="$(invoke "${send}" "${contract_id}" "${function_name}" "$@" 2>&1)"
-    status=$?
-    set -e
+    for attempt in 1 2 3 4 5; do
+        set +e
+        output="$(invoke "${send}" "${contract_id}" "${function_name}" "$@" 2>&1)"
+        status=$?
+        set -e
+        if (( status == 0 )); then
+            printf '%s' "${output}"
+            return 0
+        fi
+        if [[ "${output}" != *"client error (Connect)"* &&
+            "${output}" != *"connection closed"* &&
+            "${output}" != *"timed out"* &&
+            "${output}" != *"dns error"* ]]
+        then
+            break
+        fi
+        if (( attempt < 5 )); then
+            sleep 2
+        fi
+    done
     printf '%s' "${output}"
     return "${status}"
 }
@@ -414,26 +451,39 @@ load_configuration() {
 
     NETWORK_PASSPHRASE="$(jq -er '.network.passphrase' "${REGISTRY}")"
     RPC_URL="${BLEND_KEEPER_RPC_URL:-$(jq -er '.network.rpc_url' "${REGISTRY}")}"
-    V2_EMITTER_ID="$(jq -er '.protocol.legacy_emitter // .protocol.emitter' "${REGISTRY}")"
+    V2_ENABLED="$(jq -er '
+        (if .protocol.v2 | has("enabled") then .protocol.v2.enabled else true end) |
+        tostring
+    ' "${REGISTRY}")"
+    [[ "${V2_ENABLED}" == "true" || "${V2_ENABLED}" == "false" ]] ||
+        die "protocol.v2.enabled must be boolean"
     V3_EMITTER_ID="$(jq -er '.protocol.v3_emitter // .protocol.emitter' "${REGISTRY}")"
-    V2_BACKSTOP_ID="$(jq -er '.protocol.v2.backstop' "${REGISTRY}")"
     V3_BACKSTOP_ID="$(jq -er '.protocol.v3.backstop' "${REGISTRY}")"
-    require_contract_id "${V2_EMITTER_ID}" "v2 emitter contract ID"
     require_contract_id "${V3_EMITTER_ID}" "v3 emitter contract ID"
-    require_contract_id "${V2_BACKSTOP_ID}" "v2 backstop contract ID"
     require_contract_id "${V3_BACKSTOP_ID}" "v3 backstop contract ID"
+
+    V2_EMITTER_ID=""
+    V2_BACKSTOP_ID=""
+    if [[ "${V2_ENABLED}" == "true" ]]; then
+        V2_EMITTER_ID="$(jq -er '.protocol.legacy_emitter // .protocol.emitter' "${REGISTRY}")"
+        V2_BACKSTOP_ID="$(jq -er '.protocol.v2.backstop' "${REGISTRY}")"
+        require_contract_id "${V2_EMITTER_ID}" "v2 emitter contract ID"
+        require_contract_id "${V2_BACKSTOP_ID}" "v2 backstop contract ID"
+    fi
 
     V2_POOL_NAMES=()
     V2_POOLS=()
-    while IFS=$'\t' read -r pool_name pool_id; do
-        require_contract_id "${pool_id}" "modeled v2 pool contract ID"
-        V2_POOL_NAMES+=("${pool_name}")
-        V2_POOLS+=("${pool_id}")
-    done < <(jq -er '
-        .modeled_pools | to_entries[] |
-        select(.value.v2.reward_zone_member == true) |
-        [.key, .value.v2.pool] | @tsv
-    ' "${REGISTRY}")
+    if [[ "${V2_ENABLED}" == "true" ]]; then
+        while IFS=$'\t' read -r pool_name pool_id; do
+            require_contract_id "${pool_id}" "modeled v2 pool contract ID"
+            V2_POOL_NAMES+=("${pool_name}")
+            V2_POOLS+=("${pool_id}")
+        done < <(jq -er '
+            .modeled_pools | to_entries[] |
+            select(.value.v2.reward_zone_member == true) |
+            [.key, .value.v2.pool] | @tsv
+        ' "${REGISTRY}")
+    fi
 
     V3_POOL_NAMES=()
     V3_POOLS=()
@@ -467,7 +517,9 @@ load_configuration() {
         @tsv
     ' "${REGISTRY}")
 
-    (( ${#V2_POOLS[@]} > 0 )) || die "deployment registry contains no modeled v2 pools"
+    if [[ "${V2_ENABLED}" == "true" ]]; then
+        (( ${#V2_POOLS[@]} > 0 )) || die "deployment registry contains no modeled v2 pools"
+    fi
     (( ${#V3_POOLS[@]} > 0 )) || die "deployment registry contains no modeled v3 pools"
     (( ${#V3_ALL_POOLS[@]} > 0 )) || die "deployment registry contains no modeled v3 pools"
     validate_oracle_refresh_configuration
@@ -477,27 +529,31 @@ plan_pass() {
     local index v2_emitter_recipient v3_emitter_recipient
 
     plan_oracle_refresh
-    v2_emitter_recipient="$(read_emitter_recipient "${V2_EMITTER_ID}")" ||
-        die "cannot determine the v2 emitter recipient"
     v3_emitter_recipient="$(read_emitter_recipient "${V3_EMITTER_ID}")" ||
         die "cannot determine the v3 emitter recipient"
 
-    note "Planning v2 emissions pass: ${V2_BACKSTOP_ID}"
-    if [[ "${v2_emitter_recipient}" == "${V2_BACKSTOP_ID}" ]]; then
-        plan_call "advance legacy BLND emitter for v2" "${V2_EMITTER_ID}" distribute
-    elif [[ "${V2_EMITTER_ID}" == "${V3_EMITTER_ID}" &&
-        "${v2_emitter_recipient}" == "${V3_BACKSTOP_ID}" ]]
-    then
-        note "Shared emitter targets v3; the v3 backstop will advance it."
+    if [[ "${V2_ENABLED}" == "true" ]]; then
+        v2_emitter_recipient="$(read_emitter_recipient "${V2_EMITTER_ID}")" ||
+            die "cannot determine the v2 emitter recipient"
+        note "Planning v2 emissions pass: ${V2_BACKSTOP_ID}"
+        if [[ "${v2_emitter_recipient}" == "${V2_BACKSTOP_ID}" ]]; then
+            plan_call "advance legacy BLND emitter for v2" "${V2_EMITTER_ID}" distribute
+        elif [[ "${V2_EMITTER_ID}" == "${V3_EMITTER_ID}" &&
+            "${v2_emitter_recipient}" == "${V3_BACKSTOP_ID}" ]]
+        then
+            note "Shared emitter targets v3; the v3 backstop will advance it."
+        else
+            die "v2 emitter targets unrecognized backstop ${v2_emitter_recipient}"
+        fi
+        plan_call "v2 checkpoint protocol emissions" "${V2_BACKSTOP_ID}" distribute 1000 1010
+        for index in "${!V2_POOLS[@]}"; do
+            plan_call \
+                "v2 gulp ${V2_POOL_NAMES[index]} pool ${V2_POOLS[index]}" \
+                "${V2_POOLS[index]}" gulp_emissions 1000 1200
+        done
     else
-        die "v2 emitter targets unrecognized backstop ${v2_emitter_recipient}"
+        note "V2 is external and disabled in this registry; leaving Blend V1/V2 untouched."
     fi
-    plan_call "v2 checkpoint protocol emissions" "${V2_BACKSTOP_ID}" distribute 1000 1010
-    for index in "${!V2_POOLS[@]}"; do
-        plan_call \
-            "v2 gulp ${V2_POOL_NAMES[index]} pool ${V2_POOLS[index]}" \
-            "${V2_POOLS[index]}" gulp_emissions 1000 1200
-    done
 
     note "Planning v3 emissions pass: ${V3_BACKSTOP_ID}"
     [[ "${v3_emitter_recipient}" == "${V3_BACKSTOP_ID}" ]] ||
@@ -516,32 +572,36 @@ run_pass() {
     local index v2_emitter_recipient v3_emitter_recipient failed=0
 
     refresh_oracles_if_due || failed=1
-    if ! v2_emitter_recipient="$(read_emitter_recipient "${V2_EMITTER_ID}")"; then
-        failed=1
-        v2_emitter_recipient=""
-    fi
     if ! v3_emitter_recipient="$(read_emitter_recipient "${V3_EMITTER_ID}")"; then
         failed=1
         v3_emitter_recipient=""
     fi
 
-    note "Starting v2 emissions pass: ${V2_BACKSTOP_ID}"
-    if [[ "${v2_emitter_recipient}" == "${V2_BACKSTOP_ID}" ]]; then
-        run_call "advance legacy BLND emitter for v2" "${V2_EMITTER_ID}" distribute || failed=1
-    elif [[ "${V2_EMITTER_ID}" == "${V3_EMITTER_ID}" &&
-        "${v2_emitter_recipient}" == "${V3_BACKSTOP_ID}" ]]
-    then
-        note "Shared emitter targets v3; the v3 backstop will advance it."
-    elif [[ -n "${v2_emitter_recipient}" ]]; then
-        note "V2 emitter targets unrecognized backstop ${v2_emitter_recipient}; refusing to advance it."
-        failed=1
+    if [[ "${V2_ENABLED}" == "true" ]]; then
+        if ! v2_emitter_recipient="$(read_emitter_recipient "${V2_EMITTER_ID}")"; then
+            failed=1
+            v2_emitter_recipient=""
+        fi
+        note "Starting v2 emissions pass: ${V2_BACKSTOP_ID}"
+        if [[ "${v2_emitter_recipient}" == "${V2_BACKSTOP_ID}" ]]; then
+            run_call "advance legacy BLND emitter for v2" "${V2_EMITTER_ID}" distribute || failed=1
+        elif [[ "${V2_EMITTER_ID}" == "${V3_EMITTER_ID}" &&
+            "${v2_emitter_recipient}" == "${V3_BACKSTOP_ID}" ]]
+        then
+            note "Shared emitter targets v3; the v3 backstop will advance it."
+        elif [[ -n "${v2_emitter_recipient}" ]]; then
+            note "V2 emitter targets unrecognized backstop ${v2_emitter_recipient}; refusing to advance it."
+            failed=1
+        fi
+        run_call "v2 checkpoint protocol emissions" "${V2_BACKSTOP_ID}" distribute 1000 1010 || failed=1
+        for index in "${!V2_POOLS[@]}"; do
+            run_call \
+                "v2 gulp ${V2_POOL_NAMES[index]} pool ${V2_POOLS[index]}" \
+                "${V2_POOLS[index]}" gulp_emissions 1000 1200 || failed=1
+        done
+    else
+        note "V2 is external and disabled in this registry; leaving Blend V1/V2 untouched."
     fi
-    run_call "v2 checkpoint protocol emissions" "${V2_BACKSTOP_ID}" distribute 1000 1010 || failed=1
-    for index in "${!V2_POOLS[@]}"; do
-        run_call \
-            "v2 gulp ${V2_POOL_NAMES[index]} pool ${V2_POOLS[index]}" \
-            "${V2_POOLS[index]}" gulp_emissions 1000 1200 || failed=1
-    done
 
     note "Starting v3 emissions pass: ${V3_BACKSTOP_ID}"
     if [[ -n "${v3_emitter_recipient}" &&

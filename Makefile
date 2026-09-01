@@ -60,6 +60,57 @@ testnet-dual-emitter-run:
 testnet-dual-emitter-status:
 	BLEND_MIGRATION_NETWORK=testnet bash scripts/dual-emitter-deployment.sh status
 
+testnet-v3-only-plan:
+	bash scripts/testnet-v3-only.sh plan
+
+testnet-v3-only-validate:
+	bash scripts/testnet-v3-only.sh validate
+
+testnet-v3-only-run:
+	bash scripts/testnet-v3-only.sh run
+
+testnet-v3-only-deploy-modeled-pools:
+	bash scripts/testnet-v3-only.sh deploy-modeled-pools
+
+testnet-v3-only-deploy-reserve-loss-pool:
+	bash scripts/testnet-v3-only.sh deploy-reserve-loss-pool
+
+testnet-v3-only-verify-reserve-loss-pool:
+	bash scripts/testnet-v3-only.sh verify-reserve-loss-pool
+
+testnet-v3-only-status:
+	bash scripts/testnet-v3-only.sh status
+
+testnet-v3-only-write-registry:
+	bash scripts/testnet-v3-only.sh write-registry
+
+testnet-v3-only-refresh-oracle:
+	bash scripts/testnet-v3-only.sh refresh-oracle
+
+testnet-v3-only-keeper-plan:
+	BLEND_KEEPER_REGISTRY=deployments/testnet-v3-only.json \
+	BLEND_KEEPER_WORK_DIR=.testnet-v3-only \
+	BLEND_KEEPER_CONFIG_DIR=.testnet-v3-only/stellar-config \
+	BLEND_KEEPER_STATE_FILE=.testnet-v3-only/state.json \
+	BLEND_KEEPER_SOURCE_ACCOUNT=blnt-v3-only-testnet-operator \
+	bash scripts/emissions-keeper.sh plan
+
+testnet-v3-only-keeper-once:
+	BLEND_KEEPER_REGISTRY=deployments/testnet-v3-only.json \
+	BLEND_KEEPER_WORK_DIR=.testnet-v3-only \
+	BLEND_KEEPER_CONFIG_DIR=.testnet-v3-only/stellar-config \
+	BLEND_KEEPER_STATE_FILE=.testnet-v3-only/state.json \
+	BLEND_KEEPER_SOURCE_ACCOUNT=blnt-v3-only-testnet-operator \
+	bash scripts/emissions-keeper.sh once
+
+testnet-v3-only-keeper:
+	BLEND_KEEPER_REGISTRY=deployments/testnet-v3-only.json \
+	BLEND_KEEPER_WORK_DIR=.testnet-v3-only \
+	BLEND_KEEPER_CONFIG_DIR=.testnet-v3-only/stellar-config \
+	BLEND_KEEPER_STATE_FILE=.testnet-v3-only/state.json \
+	BLEND_KEEPER_SOURCE_ACCOUNT=blnt-v3-only-testnet-operator \
+	bash scripts/emissions-keeper.sh run
+
 localnet-plan:
 	bash scripts/localnet-migration.sh plan
 

@@ -1,0 +1,129 @@
+{
+  "schema_version": 4,
+  "topology": "v3-only-external-blend",
+  "generated_at": "2026-09-01T02:29:01Z",
+  "network": {
+    "name": "Public testnet",
+    "passphrase": "Test SDF Network ; September 2015",
+    "rpc_url": "https://soroban-testnet.stellar.org",
+    "protocol": 28,
+    "xlm_asset_mode": "native"
+  },
+  "source": {
+    "migration_repository_commit": "4f7f7efc7883cf963603e1653ed9c2b2cb88fee5",
+    "dirty": true,
+    "patch_sha256": "327244d49e29fa2b5663bfbbecaeaae6e9c1705cc801805e964b1e293b620f4c"
+  },
+  "accounts": {
+    "operator": "GCSORIRYAF7QDKVBQUCUK5PUBKYF2VBFBYZJJAZUNHQUGJIYWXJ6YQIN",
+    "depositor": "GC3F2LM427DYXW4GVRNLJRW7GB5ULGEKEYCVGZGCKJOXSAHS7I6BU2LP",
+    "configured_user": "GDPAIYJ2FISB5H7JNWDNRERAIMGZSP4HVQKYMKO42KRB23GANJXNG2ZI"
+  },
+  "external_blend": {
+    "managed": false,
+    "backstop": "CBDVWXT433PRVTUNM56C3JREF3HIZHRBA64NB2C3B2UNCKIS65ZYCLZA",
+    "blnd_token": "CB22KRA3YZVCNCQI64JQ5WE7UY2VAV7WFLK6A2JN3HEX56T2EDAFO7QF",
+    "blnd_usdc_token": "CA5UTUUPHYL5K22UBRUVC37EARZUGYOSGK3IKIXG2JLCC5ZZLI4BDWDM",
+    "reward_zone": [
+      "CAPBMXIQTICKWFPWFDJWMAKBXBPJZUKLNONQH3MLPLLBKQ643CYN5PRW",
+      "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF"
+    ]
+  },
+  "assets": {
+    "BLND": "CB22KRA3YZVCNCQI64JQ5WE7UY2VAV7WFLK6A2JN3HEX56T2EDAFO7QF",
+    "BLNT": "CCDOGLKSHUCJLGAOXNMKEZ6JMIZXFQLLTMYHMKTCSVP7TI7YGLZCYVAZ",
+    "USDC": "CAMOWNOQSUVEJZTCJI4JGQ7Z3MDEB6ABKGSVOA4UTQZPWUTLHYS6MAQK",
+    "XLM": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "EURC": "CDSVHHJVHHILSYB6WHIS36JRDOZCPKK4EVOLRMKH3ZHINEJO4EVRA2RG",
+    "PYUSD": "CCHJY3UNK5WFEECMX7WFNBOZWOGIXGWYS63YIPKQSP4BLK7A5FAGD27A"
+  },
+  "comet_pools": {
+    "BLNT_USDC": {
+      "contract_id": "CCTNTVMZQBG6G5CNKLREVHJBZHMHQTSXZDUEJ6ZNZT3YUJAXXNYDXJCN"
+    },
+    "BLNT_XLM": {
+      "contract_id": "CAHTLMM4MWZ7SJYORIUBIWH2SPMITBMYMX3WU3DF2EAVG62ZXB6UXOIC"
+    }
+  },
+  "protocol": {
+    "v3_emitter": "CBRAKRLGRYRCNGH6WJQJRCEP4DFJ2ZUSQGVGFU2ZUJ5RPQHVGMUR2NFM",
+    "v2": {
+      "enabled": false,
+      "external": true,
+      "backstop": "CBDVWXT433PRVTUNM56C3JREF3HIZHRBA64NB2C3B2UNCKIS65ZYCLZA"
+    },
+    "v3": {
+      "enabled": true,
+      "backstop": "CAC5JWEOVZKAFWQZFK43RIISHV6IPDRB5I6T6PZFQIJWQJEGXXKNPEFH",
+      "pool_factory": "CBDTE65N5JASXPF2VT2T2BX2VZ42EMVVSG2OVQON3MIXJTWYOREIILZQ"
+    }
+  },
+  "backfill": {
+    "contract": "CAOBQABLIJ36XBYU3J2HTSPW4NNMORWKTVLSPTL4LZZ4DKLOMSBLWNSV",
+    "legacy_blnd_token": "CB22KRA3YZVCNCQI64JQ5WE7UY2VAV7WFLK6A2JN3HEX56T2EDAFO7QF",
+    "blnt_token": "CCDOGLKSHUCJLGAOXNMKEZ6JMIZXFQLLTMYHMKTCSVP7TI7YGLZCYVAZ",
+    "swap_cap": "1200000000000000",
+    "swap_deadline": "1811552772"
+  },
+  "modeled_pools": {
+    "fixed": {
+      "v3": {
+        "pool": "CANPQQRITYKFKO7FJEGQD765LISFMEM6SDJNLSZBOVLALXXYXM6UDLFL",
+        "oracle": "CBHVGBFZ4EZDMRWVFCPJJZHAUBTCRFVM3RFHUEEKBTHW4O34HECNLP4X",
+        "reward_zone_member": true,
+        "pool_emission_position": "EURC borrow"
+      }
+    },
+    "custom": {
+      "v3": {
+        "pool": "CBGVIUZVCMLZ22C5FKQ6TLDMPDRERMSMO4OLAZPCVNI4OQDPPGKZ3LZI",
+        "oracle": "CB3NNUYQUPGWQUWPQOYMNRXC2S472QWIXIFAHEHEKF7WWNQZI6QNDJGV",
+        "reward_zone_member": true,
+        "pool_emission_position": null
+      }
+    }
+  },
+  "reward_zones": {
+    "external_blend": [
+      "CAPBMXIQTICKWFPWFDJWMAKBXBPJZUKLNONQH3MLPLLBKQ643CYN5PRW",
+      "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF"
+    ],
+    "v3": [
+      "CD4FZ7FWGQJBTAFMV2ZFJVDPNHY7EJCEUT7RMJCQXYBDKWKKLZCJDQKK",
+      "CBGVIUZVCMLZ22C5FKQ6TLDMPDRERMSMO4OLAZPCVNI4OQDPPGKZ3LZI",
+      "CANPQQRITYKFKO7FJEGQD765LISFMEM6SDJNLSZBOVLALXXYXM6UDLFL"
+    ]
+  },
+  "test_scenarios": {
+    "reserve_loss": {
+      "purpose": "V3 reserve-loss and reserve-authorization UI scenario",
+      "deployed_at": "2026-09-01T01:42:52Z",
+      "verified_at": "2026-09-01T01:43:46Z",
+      "contracts": {
+        "pool_factory": "CBDTE65N5JASXPF2VT2T2BX2VZ42EMVVSG2OVQON3MIXJTWYOREIILZQ",
+        "backstop": "CAC5JWEOVZKAFWQZFK43RIISHV6IPDRB5I6T6PZFQIJWQJEGXXKNPEFH",
+        "pool": "CD4FZ7FWGQJBTAFMV2ZFJVDPNHY7EJCEUT7RMJCQXYBDKWKKLZCJDQKK",
+        "oracle": "CC4ZF66XZRTPZNSDSW3EZSMWOWMK7SFM5MTU75IGZGUB4VCI5V5322HR",
+        "pool_wasm_sha256": "26a90ccc9ae45e406966a192d94cd15fe98a951f728cacf0281a455248cebf67"
+      },
+      "backstop": {
+        "reward_zone_member": true
+      },
+      "reserves": {
+        "HLTY": {
+          "contract_id": "CBZ7HJHI2ZGXSCBILJ55XDM72HXND3OWJVN3LXXTEUMGKKPRPCSL5XIW"
+        },
+        "IMPR": {
+          "contract_id": "CCQFH3LGC6E7BSJBIY3MYGZZQ6TXK2LM2WWCTWUSA7Z77JXXZYXCRE2N"
+        },
+        "EXHT": {
+          "contract_id": "CAUQPXAEVJHUA33352VZVVOK64TBXVR5UGGTTPFFJ3GHQZR3K3RIRXZU"
+        },
+        "USDP": {
+          "contract_id": "CA6DBBBA5RP227WACGF2GYNCZ53VGNLFGHR2XLBCZDRLIUJ7KNDLUK3V",
+          "authorized_to_pool": false
+        }
+      }
+    }
+  }
+}

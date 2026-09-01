@@ -895,4 +895,6 @@ main_dual() {
     esac
 }
 
-main_dual "$@"
+if [[ "${BLEND_DUAL_EMITTER_LIBRARY_ONLY:-false}" != "true" ]]; then
+    main_dual "$@"
+fi

@@ -110,7 +110,7 @@ impl MockPoolFactory {
 const SCALAR_7: i128 = 10_000_000;
 const SWAP_QUEUE_SECONDS: u64 = 31 * 24 * 60 * 60;
 const INITIAL_DROP: i128 = 150_000_000 * SCALAR_7;
-const SWAP_CAP: i128 = 120_000_000 * SCALAR_7;
+const SWAP_CAP: i128 = 51_000_000 * SCALAR_7;
 const BACKFILL_CLAIMANTS: u32 = 434;
 const GRANT_CLAIMANTS: u32 = 100;
 const VESTING_DURATION_SECONDS: u64 = 180 * 24 * 60 * 60;
@@ -362,23 +362,20 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
         backfill.swap_blnd_for_blnt(&holder, &(4 * SCALAR_7)),
         4 * SCALAR_7
     );
-    assert_eq!(backfill.refund_blnt_for_blnd(&holder, &SCALAR_7), SCALAR_7);
     assert_eq!(
         TokenClient::new(&env, &legacy_blnd).balance(&holder),
-        7 * SCALAR_7
+        2 * SCALAR_7
     );
     assert_eq!(
         TokenClient::new(&env, &legacy_blnd).balance(&backfill_id),
-        3 * SCALAR_7
+        0
     );
-    assert_eq!(TokenClient::new(&env, &blnt).balance(&holder), 3 * SCALAR_7);
+    assert_eq!(TokenClient::new(&env, &blnt).balance(&holder), 4 * SCALAR_7);
     assert_eq!(backfill.get_total_swapped(), 4 * SCALAR_7);
-    assert_eq!(backfill.get_total_refunded(), SCALAR_7);
-    assert_eq!(backfill.get_net_swapped(), 3 * SCALAR_7);
-    assert_eq!(backfill.get_refundable(&holder), 3 * SCALAR_7);
+    assert_eq!(backfill.get_total_blnd_burned(), 8 * SCALAR_7);
     assert_eq!(
         backfill.get_remaining_swap_capacity(),
-        119_999_997 * SCALAR_7
+        50_999_996 * SCALAR_7
     );
     assert_eq!(backfill.get_legacy_blnd_token(), legacy_blnd);
     assert_eq!(backfill.get_blnt_token(), blnt);
@@ -402,24 +399,10 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
 
     env.ledger().set_timestamp(backfill.get_swap_deadline());
     assert!(backfill.try_swap_blnd_for_blnt(&holder, &SCALAR_7).is_err());
-    assert!(backfill
-        .try_refund_blnt_for_blnd(&holder, &SCALAR_7)
-        .is_err());
-    assert_eq!(backfill.get_refundable(&holder), 0);
     assert_eq!(backfill.get_remaining_swap_capacity(), 0);
-    assert_eq!(
-        backfill.burn_expired(),
-        blnt_backfill::ExpiredBurn {
-            blnd: 3 * SCALAR_7,
-            blnt: SWAP_CAP - 3 * SCALAR_7,
-        }
-    );
-    assert_eq!(backfill.get_expired_blnd_burned(), 3 * SCALAR_7);
-    assert_eq!(backfill.get_expired_blnt_burned(), SWAP_CAP - 3 * SCALAR_7);
-    assert_eq!(
-        backfill.burn_expired(),
-        blnt_backfill::ExpiredBurn { blnd: 0, blnt: 0 }
-    );
+    assert_eq!(backfill.burn_expired(), SWAP_CAP - 4 * SCALAR_7);
+    assert_eq!(backfill.get_expired_blnt_burned(), SWAP_CAP - 4 * SCALAR_7);
+    assert_eq!(backfill.burn_expired(), 0);
     assert_eq!(
         TokenClient::new(&env, &legacy_blnd).balance(&backfill_id),
         0

@@ -67,8 +67,8 @@ The separately deployed `blnt-backfill-contract` immutably binds distinct
 seven-decimal legacy BLND and BLNT Stellar Asset Contracts and receives the
 complete 150-million-BLNT initial drop without receiving BLNT mint authority.
 Its immutable backfill list MUST contain at most 434 unique claimants, MUST
-contain only positive amounts, and MUST total no more than 20 million BLNT. The
-production list MUST assign exactly 20 million BLNT in proportion to
+contain only positive amounts, and MUST total no more than 74 million BLNT. The
+production list MUST assign exactly 74 million BLNT in proportion to
 each of the 423 account and 11 contract addresses with a positive
 `flattened_total_cpal_raw` value in the committed pre-incident ownership
 snapshot, using deterministic largest-remainder rounding. A
@@ -79,43 +79,38 @@ MAY be called repeatedly as vesting advances.
 Claims do not expire after vesting completes.
 
 Construction MUST also accept an independent immutable grant list containing
-at most 100 unique positive allocations totaling at most 10 million BLNT.
+at most 100 unique positive allocations totaling at most 25 million BLNT.
 `claim_grant(user)` MUST transfer vested BLNT back to that same authorized
 address, use separate progress, and linearly vest grants per second for 720 days
 from the shared construction timestamp. An address MAY appear in both lists
 without either method reading or consuming the other allocation. Backfill and
-grant allocations together MUST NOT exceed 30 million BLNT, preserving the
-separate 120-million-BLNT conversion reserve.
+grant allocations together MUST NOT exceed 99 million BLNT, preserving the
+separate 51-million-BLNT conversion reserve.
 
-The backfill contract owns `swap_blnd_for_blnt(user, amount)`, which:
+The backfill contract owns `swap_blnd_for_blnt(user, blnt_amount)`, which:
 
-1. requires `user` authorization and a positive amount;
-2. transfers exactly `amount` legacy BLND from `user` to refundable escrow;
-3. verifies the exact receipt;
-4. transfers exactly the same raw seven-decimal amount of its pre-funded BLNT
-   back to `user`;
-5. credits only that user with the same refundable amount; and
-6. increments the cumulative gross successful swap total.
+1. requires `user` authorization and a positive `blnt_amount`;
+2. transfers exactly `2 * blnt_amount` legacy BLND from `user` to the contract;
+3. verifies the exact receipt and immediately burns that BLND;
+4. transfers exactly `blnt_amount` of its pre-funded BLNT back to `user`; and
+5. increments cumulative successful BLNT output by `blnt_amount`.
 
-Before the same deadline, `refund_blnt_for_blnd(user, amount)` MUST let that
-authorized user return BLNT for an equal amount of escrowed legacy BLND, up to
-their own unrefunded swaps. Refunds MUST restore conversion capacity and MUST
-NOT be redirected to another address. Net outstanding conversions, defined as
-gross swaps less refunds, MUST NOT exceed 120 million BLNT. Conversion and
-refunds MUST expire exactly 270 days after backfill-contract construction;
-either operation at or after that timestamp MUST fail. Each operation MUST fail
-atomically on a transfer, payout, balance, authorization, cap, credit, deadline,
-overflow, or reentrancy mismatch.
+The conversion MUST NOT expose a refund path or retain successfully converted
+BLND in escrow. Cumulative BLNT output MUST NOT exceed 51 million BLNT.
+Conversion MUST expire exactly 270 days after backfill-contract construction;
+swaps at or after that timestamp MUST fail. Each operation MUST fail atomically
+on a transfer, burn, payout, balance, authorization, cap, deadline, overflow,
+or reentrancy mismatch.
 
-After expiry, permissionless `burn_expired()` MUST destroy exactly the
-unrefunded legacy BLND escrow and unused BLNT conversion reserve while
+After expiry, permissionless `burn_expired()` MUST destroy exactly the unused
+BLNT conversion reserve while
 preserving every outstanding backfill and grant claim. It MUST reject before
-expiry and return zero amounts after both assets have already been finalized.
+expiry and return zero after the reserve has already been finalized.
 The contract exposes immutable token bindings, vesting and conversion
 timestamps, currently claimable amounts, separate and aggregate claim
-accounting, gross/refund/net conversion accounting, per-user refundable credit,
-expiry burn accounting, and remaining pre-expiry conversion capacity as
-read-only views. It exposes no administrator, upgrade, mint, sweep, recovery,
+accounting, cumulative BLNT output and BLND burn accounting, expiry burn
+accounting, and remaining pre-expiry conversion capacity as read-only views. It
+exposes no administrator, upgrade, mint, sweep, recovery, refund,
 allocation-mutation, or claim-deadline API.
 
 ## 3. Canonical v3 liquidity
@@ -187,7 +182,8 @@ A deployment SHOULD use the following deterministic order:
 Deployment evidence MUST record both emitter bindings, both token
 administrators, the backfill-contract artifact and immutable bindings, exact
 150-million-BLNT custody, the immutable 180-day backfill and 720-day grant
-vesting timestamps and allocations, the 120-million conversion cap and
-270-day deadline, Comet v2 artifact hash and pool configuration, v3 direct
+vesting timestamps and allocations, the 51-million-BLNT output cap,
+102-million-BLND input capacity, and 270-day deadline, Comet v2 artifact hash
+and pool configuration, v3 direct
 activation, and the absence of BLND in every v3 pool, backstop, and emitter
 binding.

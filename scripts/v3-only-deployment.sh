@@ -60,11 +60,12 @@ V3-only ${NETWORK_LABEL} deployment:
      and BLND token. No transaction is submitted to the legacy lane.
   2. Build and deploy BLNT, a V3 USDC fixture asset, the V3 emitter, backfill
      contract, V3 factory/backstop, and BLNT:USDC / BLNT:XLM Comet v2 LPs.
-  3. Send the 150-million-BLNT initial drop to the backfill contract, with the
-     existing BLND token bound as the only legacy conversion input.
+  3. Send the 150-million-BLNT initial drop to the backfill contract: 74
+     million for pre-incident LP holders, 25 million for grants, and 51 million
+     for the 2-BLND-to-1-BLNT conversion using the existing BLND token.
   4. Deploy and activate the Fixed, Custom, and Reserve Loss V3 pools, add
      them to the V3 reward zone, seed their positions, and start BLNT emissions.
-  5. Preserve the configured 10-million-BLNT grant for ${V3_USER_WALLET}.
+  5. Preserve the configured 25-million-BLNT grant for ${V3_USER_WALLET}.
 
 No V1/V2 contracts or BLND assets are deployed or mutated.
 EOF
@@ -150,7 +151,11 @@ v3_only_write_registry() {
             contract: .blnt_backfill,
             legacy_blnd_token: .external_blnd_token,
             blnt_token: .blnt_token,
-            swap_cap: .blnt_swap_cap,
+            backfill_allocation: .blnt_backfill_claim_total,
+            grant_allocation: .blnt_grant_total,
+            swap_blnt_cap: .blnt_swap_cap,
+            swap_blnd_input_cap: .blnd_swap_input_cap,
+            blnd_per_blnt: 2,
             swap_deadline: .blnt_swap_deadline
           },
           modeled_pools: {
@@ -358,12 +363,11 @@ v3_only_deploy() {
     local v3_emitter backfill blnt_usdc blnt_xlm
     local v3_pool_hash v3_backstop v3_factory deployed_v3_backstop
     local backfill_balance recipient admin emitted reward_zone
-    local total_swapped total_refunded net_swapped capacity
+    local total_swapped total_blnd_burned capacity
     local vesting_start vesting_end grant_start grant_end swap_deadline
 
     validate_tools
     validate_backfill_manifest
-    load_claim_lists
     require_network
     [[ ! -e "${STATE_FILE}" ]] ||
         die "v3-only state already exists at ${STATE_FILE}; refusing to overwrite it"
@@ -379,6 +383,10 @@ v3_only_deploy() {
     operator="$(stellar_cli keys public-key "${OPERATOR_IDENTITY}")"
     fund_and_wait_for_account "${operator}"
     issuer="${operator}"
+    if [[ "${BLNT_GRANT_LIST}" == "[]" ]]; then
+        BLNT_GRANT_LIST="[[\"${V3_USER_WALLET}\",\"${BLNT_GRANT_CAP}\"]]"
+    fi
+    load_claim_lists
     initialize_state "${operator}"
     state_set "topology" "v3-only-external-blend"
     state_set "blnt_token_name" "${BLNT_TOKEN_NAME}"
@@ -534,15 +542,12 @@ v3_only_deploy() {
     assert_equal "${BLNT_BACKFILL_DROP}" "${backfill_balance}" "backfill BLNT custody"
     total_swapped="$(normalize_scalar "$(invoke_view \
         "query-v3-only-total-swapped" "${backfill}" get_total_swapped)")"
-    total_refunded="$(normalize_scalar "$(invoke_view \
-        "query-v3-only-total-refunded" "${backfill}" get_total_refunded)")"
-    net_swapped="$(normalize_scalar "$(invoke_view \
-        "query-v3-only-net-swapped" "${backfill}" get_net_swapped)")"
+    total_blnd_burned="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-total-blnd-burned" "${backfill}" get_total_blnd_burned)")"
     capacity="$(normalize_scalar "$(invoke_view \
         "query-v3-only-swap-capacity" "${backfill}" get_remaining_swap_capacity)")"
-    assert_equal "0" "${total_swapped}" "initial gross swapped BLND"
-    assert_equal "0" "${total_refunded}" "initial refunded BLND"
-    assert_equal "0" "${net_swapped}" "initial net swapped BLND"
+    assert_equal "0" "${total_swapped}" "initial converted BLNT output"
+    assert_equal "0" "${total_blnd_burned}" "initial converted BLND burned"
     assert_equal "${BLNT_SWAP_CAP}" "${capacity}" "initial swap capacity"
     assert_equal "${EXTERNAL_BLND_TOKEN}" "$(normalize_scalar "$(invoke_view \
         "query-v3-only-backfill-blnd" "${backfill}" get_legacy_blnd_token)")" \
@@ -571,6 +576,7 @@ v3_only_deploy() {
     state_set "blnt_grant_vesting_end" "${grant_end}"
     state_set "blnt_swap_deadline" "${swap_deadline}"
     state_set "blnt_swap_cap" "${BLNT_SWAP_CAP}"
+    state_set "blnd_swap_input_cap" "${BLND_SWAP_INPUT_CAP}"
     state_set "blnt_backfill_initial_balance" "${BLNT_BACKFILL_DROP}"
     state_set "phase" "core-deployed"
 

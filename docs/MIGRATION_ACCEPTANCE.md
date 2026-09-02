@@ -42,39 +42,36 @@ remain unchanged and usable after the independent v3 lane is created.
 
 Native and optimized-WASM backfill-contract tests MUST cover:
 
-- successful authorized 1:1 conversion in raw seven-decimal units;
-- exact BLND receipt into refundable escrow and exact pre-funded BLNT transfer
-  back to the same authorized address, with no BLNT mint;
-- full and partial same-user refunds, rejection above per-user credit, and
-  restored conversion capacity;
+- successful authorized 2-BLND-to-1-BLNT conversion in raw seven-decimal units;
+- exact BLND receipt and immediate burn plus exact pre-funded BLNT transfer
+  back to the same authorized address, with no BLNT mint or escrow;
 - rejection of zero and negative amounts;
 - rejection when BLND and BLNT bindings are identical or use incompatible
   decimals;
-- conversion and refund through the ledger immediately before the 270-day
-  deadline, rejection at the deadline, and permissionless finalization;
-- exact success at the 120-million-BLNT net cap and rejection above it;
-- exact expired BLND-escrow and BLNT-reserve burn accounting, idempotent
+- conversion through the ledger immediately before the 270-day deadline,
+  rejection at the deadline, and permissionless finalization;
+- exact success at the 51-million-BLNT output cap and rejection above it;
+- exact immediate BLND and expired BLNT-reserve burn accounting, idempotent
   zero-return behavior, and
   preservation of every outstanding backfill and grant claim after burning;
-- gross-swap, refund, net-swap, per-user credit, and remaining-capacity
-  conservation;
-- atomic rollback on transfer, balance, burn, payout, credit, cap, overflow, or
+- BLNT-output, BLND-burn, and remaining-capacity conservation;
+- atomic rollback on transfer, balance, burn, payout, cap, overflow, or
   reentrancy mismatch;
-- authorized immutable address allocations totaling no more than 30 million
+- authorized immutable address allocations totaling no more than 99 million
   BLNT, including duplicate, non-positive, count, and total bounds;
 - per-second linear vesting from zero through the exact full allocation over
   180 days, repeated partial claims, zero-currently-claimable rejection, and
   indefinite post-vesting claims;
-- independent grant allocations for at most 100 recipients and 10 million
+- independent grant allocations for at most 100 recipients and 25 million
   BLNT, linearly vested over 720 days through `claim_grant`, including an
   address present in both lists without cross-lane consumption or acceleration;
-- exact conservation of the 20-million-BLNT production allocation across the
+- exact conservation of the 74-million-BLNT production allocation across the
   434 positive `flattened_total_cpal_raw` snapshot rows (423 accounts and 11
   contracts), bound to the recorded source hash with deterministic
   largest-remainder rounding;
-- exact aggregate conservation across the 20-million backfill, 10-million
-  grant, and 120-million conversion lanes; and
-- absence of any refund path not bounded by the caller's own unrefunded swaps.
+- exact aggregate conservation across the 74-million backfill, 25-million
+  grant, and 51-million conversion lanes; and
+- absence of any conversion refund path.
 
 ## Initial allocation
 

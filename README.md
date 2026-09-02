@@ -44,13 +44,13 @@ V3 no longer replaces or depends on the deployed BLND emitter. The legacy
 emitter remains with v1/v2, while v3 deploys a separate emitter that creates
 BLNT for the v3 backstop from launch. The v3 emitter sends its complete
 150-million-BLNT initial drop to the immutable backfill contract. That contract
-owns same-address claims and a 270-day refundable BLND-to-BLNT conversion with
-net outstanding conversions capped at 120 million BLNT. At expiry it
-permissionlessly burns unrefunded BLND escrow and the unused BLNT conversion
-reserve. The production claim manifest allocates 20 million BLNT across
+owns same-address claims and a 270-day, 2-BLND-to-1-BLNT conversion capped at
+51 million BLNT output. Converted BLND is burned immediately; at expiry it
+permissionlessly burns the unused BLNT conversion reserve. The production
+claim manifest allocates 74 million BLNT across
 the 434 positive pre-incident `flattened_total_cpal_raw` ownership rows (423
 accounts and 11 contracts), vesting linearly for 180 days from construction.
-An independent constructor-supplied grant list may allocate the remaining 10
+An independent constructor-supplied grant list allocates the remaining 25
 million BLNT to at most 100 grantees with 720-day linear vesting. The emitter
 retains the established 31-day backstop-swap API for
 a future BLNT-based protocol upgrade. Existing v2 positions and claims remain

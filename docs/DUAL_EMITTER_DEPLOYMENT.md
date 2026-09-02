@@ -8,9 +8,9 @@ The v3 emitter constructor binds the deployment operator as a one-time
 initializer; successful initialization consumes that authority, leaving no
 ongoing emitter administrator. A separate immutable backfill contract receives
 the complete 150-million-BLNT initial drop, manages address claims, and owns a
-270-day refundable conversion path capped at 120 million BLNT net. After that
-window, anyone may burn the unrefunded BLND escrow and unused BLNT conversion
-reserve without affecting claim liabilities.
+270-day, 2-BLND-to-1-BLNT conversion path capped at 51 million BLNT output.
+Each conversion burns BLND immediately. After that window, anyone may burn the
+unused BLNT conversion reserve without affecting claim liabilities.
 
 ## Local Quickstart
 
@@ -24,7 +24,7 @@ make dual-emitter-status
 
 `run` verifies and builds artifacts, starts Protocol-27 Quickstart, deploys the
 two independent lanes, activates v3 directly, executes the exact
-150-million-BLNT backfill drop, converts and partially refunds a small test
+150-million-BLNT backfill drop, converts and burns a small test
 balance, deploys and activates the modeled Fixed and Custom V2/V3 pools, adds
 each pair to its respective reward zone, advances each emitter, and verifies
 all final bindings. Stop the isolated network with:
@@ -37,7 +37,7 @@ To reuse an already-running network, run `make dual-emitter-deploy` after
 `make dual-emitter-validate`.
 
 `run` and `deploy` use the committed snapshot manifest. It assigns
-exactly 20 million BLNT proportionally across the 434 positive
+exactly 74 million BLNT proportionally across the 434 positive
 `flattened_total_cpal_raw` rows (423 accounts and 11 contracts) in
 `comet_cpal_flattened_ownership_before_41c898a1.csv`, with deterministic
 largest-remainder rounding. The runner regenerates the manifest from the CSV
@@ -53,8 +53,10 @@ vested amount not previously claimed, and unclaimed amounts remain available
 after vesting completes.
 
 Set `BLEND_BLNT_GRANT_LIST` to the Stellar CLI JSON encoding of the immutable
-`(address, amount)` grant vector. It defaults to `[]`, accepts at most 100
-unique positive entries, and may total no more than 10 million BLNT. Grants
+`(address, amount)` grant vector. It must contain at most 100 unique positive
+entries totaling exactly 25 million BLNT. If omitted, the dual-emitter runner
+assigns the complete grant to its deployment operator; the V3-only testnet
+wrapper assigns it to `BLEND_V3_USER_WALLET`. Grants
 vest linearly per second for 720 days from the same construction timestamp and
 are claimed independently through `claim_grant`.
 
@@ -104,12 +106,12 @@ record:
   allocation totals;
 - both token administrators and emitter recipients;
 - direct v3 activation and exact 150-million-BLNT backfill custody;
-- exact same-user BLND escrow, pre-funded BLNT transfer, and partial refund events;
+- exact same-user 2:1 BLND burn and pre-funded BLNT transfer events;
 - positive independent BLND and BLNT distributions;
 - active modeled Fixed and Custom pools in their respective V2 and V3 reward
   zones, including verified seven-day V2 USDC-supply emission streams; and
-- the immutable 120-million-BLNT net conversion cap, 270-day deadline, zero
-  initial BLND/BLNT expiry burns, and empty initial v3 queue.
+- the immutable 51-million-BLNT output cap, 102-million-BLND input capacity,
+  270-day deadline, zero initial BLNT expiry burns, and empty initial v3 queue.
 
 The runner initializes all three Comet v2 pools at 80:20, verifies positive authorized
 non-clawbackable custody, and then locks their shared classic controller at

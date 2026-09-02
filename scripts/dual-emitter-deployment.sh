@@ -16,12 +16,12 @@ BLNT_BACKFILL_WASM="${ROOT_DIR}/blnt-backfill-contract/target/wasm32v1-none/opti
 BLNT_MINT=$((2000 * SCALAR_7))
 USDC_MINT=$((2 * COMET_INITIAL_PAIR_TOKEN))
 CONVERSION_TEST_AMOUNT=$((10 * SCALAR_7))
-REFUND_TEST_AMOUNT=$((2 * SCALAR_7))
 BLNT_BACKFILL_DROP=$((150000000 * SCALAR_7))
-BLNT_SWAP_CAP=$((120000000 * SCALAR_7))
-BLNT_BACKFILL_ALLOCATION=$((20000000 * SCALAR_7))
+BLNT_SWAP_CAP=$((51000000 * SCALAR_7))
+BLND_SWAP_INPUT_CAP=$((2 * BLNT_SWAP_CAP))
+BLNT_BACKFILL_ALLOCATION=$((74000000 * SCALAR_7))
 BLNT_BACKFILL_VESTING_SECONDS=$((180 * 24 * 60 * 60))
-BLNT_GRANT_CAP=$((10000000 * SCALAR_7))
+BLNT_GRANT_CAP=$((25000000 * SCALAR_7))
 BLNT_GRANT_VESTING_SECONDS=$((720 * 24 * 60 * 60))
 BLNT_SWAP_DURATION_SECONDS=$((270 * 24 * 60 * 60))
 BLNT_MAX_GRANTEES=100
@@ -130,10 +130,10 @@ load_claim_lists() {
         '[.[][1] | tonumber] | add // 0 | tostring' \
         <<<"${BLNT_GRANT_LIST}")" ||
         die "invalid BLEND_BLNT_GRANT_LIST encoding"
-    ((BLNT_BACKFILL_CLAIM_TOTAL <= BLNT_BACKFILL_ALLOCATION)) ||
-        die "backfill claim list exceeds the 20-million-BLNT cap"
-    ((BLNT_GRANT_TOTAL <= BLNT_GRANT_CAP)) ||
-        die "grant list exceeds the 10-million-BLNT cap"
+    assert_equal "${BLNT_BACKFILL_ALLOCATION}" "${BLNT_BACKFILL_CLAIM_TOTAL}" \
+        "74-million-BLNT backfill allocation"
+    assert_equal "${BLNT_GRANT_CAP}" "${BLNT_GRANT_TOTAL}" \
+        "25-million-BLNT grant allocation"
     BLNT_CLAIM_TOTAL=$((BLNT_BACKFILL_CLAIM_TOTAL + BLNT_GRANT_TOTAL))
 }
 
@@ -168,10 +168,10 @@ Dual-emitter ${NETWORK_LABEL} deployment:
   7. Point the separate v3 emitter at the v3 backstop with BLNT:XLM designated.
   8. Send the exact 150-million-BLNT initial drop to the immutable backfill
      contract, bind the 180-day backfill and 720-day grant schedules, and
-     smoke-test its same-user BLND-to-BLNT conversion and partial refund.
+     smoke-test its same-user 2-BLND-to-1-BLNT conversion and immediate burn.
   9. Verify separate administrators, recipients, emissions, Comet v2 pools,
-     backfill custody, and the immutable 120-million-BLNT net conversion cap
-     and 270-day expiration.
+     backfill custody, and the immutable 51-million-BLNT conversion cap and
+     270-day expiration.
 
 BLNT Stellar TOML metadata name: ${BLNT_TOKEN_NAME}
 
@@ -369,11 +369,11 @@ dual_deploy() {
     local legacy_blnd_usdc blnt_usdc blnt_xlm xlm_balance
     local v2_pool_hash v2_backstop v2_factory deployed_v2_backstop
     local v3_pool_hash v3_backstop v3_factory deployed_v3_backstop
-    local legacy_emitted legacy_distributed v3_emitted swapped refunded net_swapped
-    local refundable remaining_capacity
+    local legacy_emitted legacy_distributed v3_emitted swapped blnd_burned
+    local remaining_capacity
     local backfill_balance allocated pool pool_gulped stream now
     local vesting_start vesting_end grant_vesting_start grant_vesting_end
-    local swap_deadline expired_blnd_burned expired_blnt_burned
+    local swap_deadline expired_blnt_burned
     local backfill_allocated grant_allocated
     local total_claimed backfill_claimed grant_claimed
     local post_backfill_balance holder_blnd_balance holder_blnt_balance backfill_blnd_balance
@@ -382,7 +382,6 @@ dual_deploy() {
     validate_tools
     validate_source_provenance
     validate_backfill_manifest
-    load_claim_lists
     require_network
     [[ ! -e "${STATE_FILE}" ]] ||
         die "dual-emitter state already exists at ${STATE_FILE}; refusing to overwrite it"
@@ -396,6 +395,10 @@ dual_deploy() {
     operator="$(stellar_cli keys public-key "${OPERATOR_IDENTITY}")"
     fund_and_wait_for_account "${operator}"
     issuer="${operator}"
+    if [[ "${BLNT_GRANT_LIST}" == "[]" ]]; then
+        BLNT_GRANT_LIST="[[\"${operator}\",\"${BLNT_GRANT_CAP}\"]]"
+    fi
+    load_claim_lists
     initialize_state "${operator}"
     state_set "topology" "dual-emitter-blnd-blnt"
     state_set "blnt_token_name" "${BLNT_TOKEN_NAME}"
@@ -489,7 +492,7 @@ dual_deploy() {
         --to "${controller}" --amount "${COMET_INITIAL_BLND}" >/dev/null
     invoke_transaction "mint-depositor-blnd" "${legacy_blnd}" mint \
         --to "${depositor}" \
-        --amount "$((DUAL_MODELED_BLND_MINT + CONVERSION_TEST_AMOUNT))" >/dev/null
+        --amount "$((DUAL_MODELED_BLND_MINT + 2 * CONVERSION_TEST_AMOUNT))" >/dev/null
     invoke_transaction "mint-depositor-blnt" "${blnt}" mint \
         --to "${depositor}" --amount "${DUAL_MODELED_BLNT_MINT}" >/dev/null
     invoke_transaction "mint-depositor-usdc" "${usdc}" mint \
@@ -627,27 +630,17 @@ dual_deploy() {
     invoke_transaction_as "convert-test-blnd-to-blnt" \
         "${DEPOSITOR_IDENTITY}" "${blnt_backfill}" swap_blnd_for_blnt \
         --user "${depositor}" \
-        --amount "${CONVERSION_TEST_AMOUNT}" >/dev/null
-    invoke_transaction_as "refund-test-blnt-to-blnd" \
-        "${DEPOSITOR_IDENTITY}" "${blnt_backfill}" refund_blnt_for_blnd \
-        --user "${depositor}" --amount "${REFUND_TEST_AMOUNT}" >/dev/null
+        --blnt_amount "${CONVERSION_TEST_AMOUNT}" >/dev/null
     swapped="$(normalize_scalar "$(invoke_view \
         "query-total-converted" "${blnt_backfill}" get_total_swapped)")"
-    assert_equal "${CONVERSION_TEST_AMOUNT}" "${swapped}" "conversion total"
-    refunded="$(normalize_scalar "$(invoke_view \
-        "query-total-refunded" "${blnt_backfill}" get_total_refunded)")"
-    assert_equal "${REFUND_TEST_AMOUNT}" "${refunded}" "refund total"
-    net_swapped="$(normalize_scalar "$(invoke_view \
-        "query-net-converted" "${blnt_backfill}" get_net_swapped)")"
-    assert_equal "$((CONVERSION_TEST_AMOUNT - REFUND_TEST_AMOUNT))" \
-        "${net_swapped}" "net conversion total"
-    refundable="$(normalize_scalar "$(invoke_view \
-        "query-user-refundable" "${blnt_backfill}" get_refundable \
-        --user "${depositor}")")"
-    assert_equal "${net_swapped}" "${refundable}" "depositor refund credit"
+    assert_equal "${CONVERSION_TEST_AMOUNT}" "${swapped}" "BLNT conversion total"
+    blnd_burned="$(normalize_scalar "$(invoke_view \
+        "query-total-blnd-burned" "${blnt_backfill}" get_total_blnd_burned)")"
+    assert_equal "$((2 * CONVERSION_TEST_AMOUNT))" \
+        "${blnd_burned}" "converted BLND burned"
     remaining_capacity="$(normalize_scalar "$(invoke_view \
         "query-conversion-capacity" "${blnt_backfill}" get_remaining_swap_capacity)")"
-    assert_equal "$((BLNT_SWAP_CAP - net_swapped))" \
+    assert_equal "$((BLNT_SWAP_CAP - swapped))" \
         "${remaining_capacity}" "remaining conversion capacity"
     assert_equal "${legacy_blnd}" "$(normalize_scalar "$(invoke_view \
         "query-backfill-blnd-binding" "${blnt_backfill}" get_legacy_blnd_token)")" \
@@ -689,14 +682,10 @@ dual_deploy() {
         "query-swap-deadline" "${blnt_backfill}" get_swap_deadline)")"
     assert_equal "${BLNT_SWAP_DURATION_SECONDS}" \
         "$((swap_deadline - vesting_start))" "conversion duration"
-    expired_blnd_burned="$(normalize_scalar "$(invoke_view \
-        "query-expired-blnd-burned" "${blnt_backfill}" get_expired_blnd_burned)")"
     expired_blnt_burned="$(normalize_scalar "$(invoke_view \
         "query-expired-blnt-burned" "${blnt_backfill}" get_expired_blnt_burned)")"
-    assert_equal "0" "${expired_blnd_burned}" "initial expired BLND burn"
     assert_equal "0" "${expired_blnt_burned}" "initial expired BLNT burn"
     state_set "blnt_swap_deadline" "${swap_deadline}"
-    state_set "blnt_expired_blnd_burned" "${expired_blnd_burned}"
     state_set "blnt_expired_blnt_burned" "${expired_blnt_burned}"
     total_claimed="$(normalize_scalar "$(invoke_view \
         "query-total-claimed" "${blnt_backfill}" get_total_claimed)")"
@@ -716,13 +705,13 @@ dual_deploy() {
     post_backfill_balance="$(normalize_scalar "$(invoke_view \
         "query-post-conversion-backfill-blnt" "${blnt}" balance \
         --id "${blnt_backfill}")")"
-    assert_equal "${REFUND_TEST_AMOUNT}" "${holder_blnd_balance}" \
-        "converted holder BLND balance after refund"
-    assert_equal "${net_swapped}" "${holder_blnt_balance}" \
+    assert_equal "0" "${holder_blnd_balance}" \
+        "converted holder BLND balance after burn"
+    assert_equal "${swapped}" "${holder_blnt_balance}" \
         "converted holder BLNT balance"
-    assert_equal "${net_swapped}" "${backfill_blnd_balance}" \
-        "backfill escrowed BLND balance"
-    assert_equal "$((BLNT_BACKFILL_DROP - net_swapped))" \
+    assert_equal "0" "${backfill_blnd_balance}" \
+        "backfill BLND balance after immediate burn"
+    assert_equal "$((BLNT_BACKFILL_DROP - swapped))" \
         "${post_backfill_balance}" "backfill BLNT balance after conversion"
 
     dual_deploy_modeled_pools
@@ -775,6 +764,7 @@ dual_deploy() {
     assert_equal "${v3_backstop}" "${v3_recipient}" "v3 emitter recipient"
 
     state_set "blnt_swap_cap" "${BLNT_SWAP_CAP}"
+    state_set "blnd_swap_input_cap" "${BLND_SWAP_INPUT_CAP}"
     state_set "blnt_backfill_initial_balance" "${BLNT_BACKFILL_DROP}"
     state_set "legacy_emitted" "${legacy_emitted}"
     state_set "legacy_backstop_distributed" "${legacy_distributed}"
@@ -793,8 +783,8 @@ dual_deploy() {
 
 dual_status() {
     local legacy_emitter v3_emitter blnt_backfill legacy_recipient v3_recipient queued
-    local swapped refunded net_swapped remaining_capacity backfill_balance vesting_start vesting_end
-    local grant_vesting_start grant_vesting_end swap_deadline expired_blnd_burned
+    local swapped blnd_burned remaining_capacity backfill_balance vesting_start vesting_end
+    local grant_vesting_start grant_vesting_end swap_deadline
     local expired_blnt_burned
     local backfill_allocated grant_allocated backfill_claimed grant_claimed
 
@@ -810,10 +800,8 @@ dual_status() {
         "status-v3-recipient" "${v3_emitter}" get_backstop)")"
     swapped="$(normalize_scalar "$(invoke_view \
         "status-total-swapped" "${blnt_backfill}" get_total_swapped)")"
-    refunded="$(normalize_scalar "$(invoke_view \
-        "status-total-refunded" "${blnt_backfill}" get_total_refunded)")"
-    net_swapped="$(normalize_scalar "$(invoke_view \
-        "status-net-swapped" "${blnt_backfill}" get_net_swapped)")"
+    blnd_burned="$(normalize_scalar "$(invoke_view \
+        "status-total-blnd-burned" "${blnt_backfill}" get_total_blnd_burned)")"
     remaining_capacity="$(normalize_scalar "$(invoke_view \
         "status-swap-capacity" "${blnt_backfill}" get_remaining_swap_capacity)")"
     backfill_balance="$(normalize_scalar "$(invoke_view \
@@ -829,8 +817,6 @@ dual_status() {
         "status-grant-vesting-end" "${blnt_backfill}" get_grant_vesting_end)")"
     swap_deadline="$(normalize_scalar "$(invoke_view \
         "status-swap-deadline" "${blnt_backfill}" get_swap_deadline)")"
-    expired_blnd_burned="$(normalize_scalar "$(invoke_view \
-        "status-expired-blnd-burned" "${blnt_backfill}" get_expired_blnd_burned)")"
     expired_blnt_burned="$(normalize_scalar "$(invoke_view \
         "status-expired-blnt-burned" "${blnt_backfill}" get_expired_blnt_burned)")"
     backfill_allocated="$(normalize_scalar "$(invoke_view \
@@ -862,12 +848,10 @@ Dual-emitter ${NETWORK_LABEL} status
   grant vesting end: ${grant_vesting_end}
   grant allocated: ${grant_allocated}
   grant claimed: ${grant_claimed}
-  gross converted BLND: ${swapped}
-  refunded BLND: ${refunded}
-  net converted BLND: ${net_swapped}
-  remaining conversion capacity: ${remaining_capacity}
+  converted BLNT output: ${swapped}
+  converted BLND burned: ${blnd_burned}
+  remaining BLNT conversion capacity: ${remaining_capacity}
   conversion deadline: ${swap_deadline}
-  expired escrowed BLND burned: ${expired_blnd_burned}
   expired conversion-reserve BLNT burned: ${expired_blnt_burned}
   Comet v2 commit: $(state_value comet_v2_source_commit)
   Comet v2 WASM: $(state_value comet_v2_wasm_sha256)

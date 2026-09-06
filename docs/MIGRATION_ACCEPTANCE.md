@@ -59,8 +59,8 @@ Native and optimized-WASM backfill-contract tests MUST cover:
   reentrancy mismatch;
 - authorized immutable address allocations totaling no more than 99 million
   BLNT, including duplicate, non-positive, count, and total bounds;
-- an exact 20% backfill unlock at construction followed by per-second linear
-  vesting of the remaining 80% through the exact full allocation over 180 days,
+- zero backfill claimability at construction followed by per-second linear
+  vesting through the exact full allocation over 180 days,
   repeated partial claims, zero-currently-claimable rejection, and indefinite
   post-vesting claims;
 - independent grant allocations for at most 100 recipients and 25 million

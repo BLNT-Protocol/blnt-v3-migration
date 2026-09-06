@@ -47,9 +47,9 @@ deployment. The runner always constructs the immutable `(address, amount)`
 claim vector from that verified manifest; it cannot be overridden through the
 environment. The selected list cannot be changed after construction, and the
 backfill contract receives the complete 150 million BLNT.
-Twenty percent of every address allocation is available at backfill-contract
-construction. The remaining 80% vests linearly per second for 180 days. Each
-claim transfers only the cumulative vested amount not previously claimed, and
+Every address allocation vests linearly per second for 180 days from
+backfill-contract construction. Each claim transfers only the cumulative
+vested amount not previously claimed, and
 unclaimed amounts remain available after vesting completes.
 
 Set `BLEND_BLNT_GRANT_LIST` to the Stellar CLI JSON encoding of the immutable
@@ -102,8 +102,8 @@ record:
 - BLND:USDC, BLNT:USDC, and BLNT:XLM Comet v2 IDs;
 - separate emitter and backstop IDs;
 - the backfill-contract artifact hash, address, and immutable token bindings;
-- the immutable 20%-immediate/180-day-remainder backfill and 360-day grant
-  vesting timestamps and allocation totals;
+- the immutable 180-day backfill and 360-day grant vesting timestamps and
+  allocation totals;
 - both token administrators and emitter recipients;
 - direct v3 activation and exact 150-million-BLNT backfill custody;
 - exact same-user 2:1 BLND burn and pre-funded BLNT transfer events;

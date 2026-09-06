@@ -231,12 +231,12 @@ fn optimized_backfill_handles_all_backfill_and_grant_claimants_partially_vested(
     );
     assert_eq!(
         backfill.get_backfill_claimable(&claimants.first().unwrap()),
-        2
+        0
     );
     env.ledger()
         .set_timestamp(backfill.get_vesting_start() + VESTING_DURATION_SECONDS / 2);
     for claimant in claimants.iter() {
-        assert_eq!(backfill.claim_backfill(&claimant), 6);
+        assert_eq!(backfill.claim_backfill(&claimant), 5);
     }
     for grantee in grantees.iter() {
         assert_eq!(backfill.claim_grant(&grantee), 2);
@@ -244,7 +244,7 @@ fn optimized_backfill_handles_all_backfill_and_grant_claimants_partially_vested(
 
     let first = claimants.first().unwrap();
     env.ledger().set_timestamp(backfill.get_vesting_end());
-    assert_eq!(backfill.claim_backfill(&first), 4);
+    assert_eq!(backfill.claim_backfill(&first), 5);
     assert_eq!(backfill.get_backfill_claimable(&first), 0);
 
     let first_grantee = grantees.first().unwrap();
@@ -326,18 +326,14 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     );
 
     let backfill = blnt_backfill::Client::new(&env, &backfill_id);
-    let initial_unlock = SCALAR_7 / 5;
-    assert_eq!(backfill.get_backfill_claimable(&claimant), initial_unlock);
-    assert_eq!(backfill.claim_backfill(&claimant), initial_unlock);
+    assert_eq!(backfill.get_backfill_claimable(&claimant), 0);
+    assert!(backfill.try_claim_backfill(&claimant).is_err());
 
     env.ledger().set_timestamp(1_005);
-    let vested = (SCALAR_7 - initial_unlock) * 5 / i128::from(VESTING_DURATION_SECONDS);
+    let vested = SCALAR_7 * 5 / i128::from(VESTING_DURATION_SECONDS);
     assert_eq!(backfill.claim_backfill(&claimant), vested);
     assert_eq!(backfill.get_backfill_claimable(&claimant), 0);
-    assert_eq!(
-        TokenClient::new(&env, &blnt).balance(&claimant),
-        initial_unlock + vested
-    );
+    assert_eq!(TokenClient::new(&env, &blnt).balance(&claimant), vested);
 
     assert_eq!(legacy.distribute(), 5 * SCALAR_7);
     assert_eq!(v3.distribute(), 5 * SCALAR_7);

@@ -71,9 +71,8 @@ contain only positive amounts, and MUST total no more than 74 million BLNT. The
 production list MUST assign exactly 74 million BLNT in proportion to
 each of the 423 account and 11 contract addresses with a positive
 `flattened_total_cpal_raw` value in the committed pre-incident ownership
-snapshot, using deterministic largest-remainder rounding. A
-claimant MUST be able to claim 20% of its allocation at contract construction.
-The remaining 80% MUST vest linearly per second over the following 180 days. A
+snapshot, using deterministic largest-remainder rounding. Each claimant's
+allocation MUST vest linearly per second over 180 days from construction. A
 claimant-authorized `claim_backfill(user)` transfers all cumulative vested BLNT
 not previously claimed back to that same address and MAY be called repeatedly
 as vesting advances.
@@ -182,8 +181,8 @@ A deployment SHOULD use the following deterministic order:
 
 Deployment evidence MUST record both emitter bindings, both token
 administrators, the backfill-contract artifact and immutable bindings, exact
-150-million-BLNT custody, the immutable 20%-immediate/180-day-remainder
-backfill and 360-day grant vesting timestamps and allocations, the
+150-million-BLNT custody, the immutable 180-day backfill and 360-day grant
+vesting timestamps and allocations, the
 51-million-BLNT output cap,
 102-million-BLND input capacity, and 270-day deadline, Comet v2 artifact hash
 and pool configuration, v3 direct

@@ -167,9 +167,8 @@ Dual-emitter ${NETWORK_LABEL} deployment:
   6. Leave the legacy emitter pointed at the deployed v2 backstop.
   7. Point the separate v3 emitter at the v3 backstop with BLNT:XLM designated.
   8. Send the exact 150-million-BLNT initial drop to the immutable backfill
-     contract, bind the 20%-immediate/180-day-remainder backfill and 360-day
-     grant schedules, and smoke-test its same-user 2-BLND-to-1-BLNT conversion
-     and immediate burn.
+     contract, bind the 180-day backfill and 360-day grant schedules, and
+     smoke-test its same-user 2-BLND-to-1-BLNT conversion and immediate burn.
   9. Verify separate administrators, recipients, emissions, Comet v2 pools,
      backfill custody, and the immutable 51-million-BLNT conversion cap and
      270-day expiration.

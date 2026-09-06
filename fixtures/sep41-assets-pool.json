@@ -1,0 +1,56 @@
+{
+  "name": "SEP-41 Assets",
+  "backstop_take_rate": 2000000,
+  "max_positions": 6,
+  "min_collateral": 50000000,
+  "backstop_config": [
+    {
+      "asset": "Usdc",
+      "take_rate_weight": 1
+    }
+  ],
+  "backstop": {
+    "tier": "FirstLoss",
+    "amount": "250000000000"
+  },
+  "reserves": [
+    {
+      "asset": "wBTC",
+      "name": "Wrapped Bitcoin",
+      "price": 1000000000000,
+      "supplied": "5000000000",
+      "borrowed": "2000000000",
+      "config": {
+        "c_factor": 7500000,
+        "l_factor": 7500000,
+        "max_util": 8000000,
+        "r_base": 100000,
+        "r_one": 300000,
+        "r_three": 50000000,
+        "r_two": 3000000,
+        "reactivity": 50,
+        "supply_cap": "10000000000000",
+        "util": 7000000
+      }
+    },
+    {
+      "asset": "wETH",
+      "name": "Wrapped Ether",
+      "price": 40000000000,
+      "supplied": "100000000000",
+      "borrowed": "50000000000",
+      "config": {
+        "c_factor": 7500000,
+        "l_factor": 7500000,
+        "max_util": 8000000,
+        "r_base": 100000,
+        "r_one": 300000,
+        "r_three": 50000000,
+        "r_two": 3000000,
+        "reactivity": 50,
+        "supply_cap": "100000000000000",
+        "util": 7000000
+      }
+    }
+  ]
+}

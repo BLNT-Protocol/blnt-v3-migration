@@ -4,6 +4,7 @@ members = [
     "compat-probe",
     "migration-tests",
     "test-access-controller",
+    "test-sep41-token",
     "test-sep40-oracle",
 ]
 

@@ -22,6 +22,8 @@ V3_BLNT_USDC_LP_TOTAL=$((2 * DUAL_MODELED_V3_LP_BALANCE))
 
 # shellcheck source=permissioned-pool.sh
 source "${SCRIPT_DIR}/permissioned-pool.sh"
+# shellcheck source=sep41-assets-pool.sh
+source "${SCRIPT_DIR}/sep41-assets-pool.sh"
 
 usage_v3_only() {
     cat <<'EOF'
@@ -42,6 +44,10 @@ Commands:
             Deploy and verify the V3 Permissioned scenario pool.
   verify-permissioned-pool
             Reverify the deployed V3 Permissioned scenario pool.
+  deploy-sep41-pool
+            Deploy and verify the V3 SEP-41 Assets scenario pool.
+  verify-sep41-pool
+            Reverify the deployed V3 SEP-41 Assets scenario pool.
   run       Validate, start, and deploy.
   status    Query the recorded V3 and external legacy bindings.
   write-registry
@@ -70,9 +76,9 @@ V3-only ${NETWORK_LABEL} deployment:
   3. Send the 150-million-BLNT initial drop to the backfill contract: 74
      million for pre-incident LP holders, 25 million for grants, and 51 million
      for the 2-BLND-to-1-BLNT conversion using the existing BLND token.
-  4. Deploy and activate the Fixed, Custom, Reserve Loss, and Permissioned V3
-     pools, add them to the V3 reward zone, seed their positions, and start
-     BLNT emissions.
+  4. Deploy and activate the Fixed, Custom, Reserve Loss, Permissioned, and
+     SEP-41 Assets V3 pools, add them to the V3 reward zone, seed their
+     positions, and start BLNT emissions.
   5. Preserve the configured 25-million-BLNT grant for ${V3_USER_WALLET}.
 
 No V1/V2 contracts or BLND assets are deployed or mutated.
@@ -254,6 +260,40 @@ v3_only_write_registry() {
                 }
               }
             } else {} end)
+            +
+            (if ((.sep41_pool // "") | length) > 0 then {
+              sep41_assets: {
+                purpose: "V3 custom SEP-41 reserve UI scenario",
+                deployed_at: .sep41_pool_deployed_at,
+                verified_at: .sep41_pool_verified_at,
+                contracts: {
+                  pool_factory: .v3_factory,
+                  backstop: .v3_backstop,
+                  pool: .sep41_pool,
+                  oracle: .sep41_pool_oracle,
+                  token_wasm_sha256: .sep41_token_wasm_sha256
+                },
+                setup_user: .sep41_setup_user,
+                backstop: {
+                  tier: "FirstLoss",
+                  asset: "USDC",
+                  deposited: (.sep41_backstop_deposit | tonumber),
+                  reward_zone_member: true
+                },
+                reserves: {
+                  wBTC: {
+                    contract_id: .sep41_asset_wbtc,
+                    supplied: (.sep41_wBTC_supplied | tonumber),
+                    borrowed: (.sep41_wBTC_borrowed | tonumber)
+                  },
+                  wETH: {
+                    contract_id: .sep41_asset_weth,
+                    supplied: (.sep41_wETH_supplied | tonumber),
+                    borrowed: (.sep41_wETH_borrowed | tonumber)
+                  }
+                }
+              }
+            } else {} end)
           )
         }
     ' "${STATE_FILE}" >"${registry_tmp}"
@@ -262,7 +302,7 @@ v3_only_write_registry() {
 }
 
 v3_only_refresh_oracles() {
-    local model oracle reserve_loss_oracle
+    local model oracle reserve_loss_oracle sep41_oracle
 
     validate_tools
     require_network
@@ -277,6 +317,11 @@ v3_only_refresh_oracles() {
         require_reserve_loss_support
         seed_reserve_loss_oracle "${reserve_loss_oracle}"
     fi
+    sep41_oracle="$(state_optional sep41_pool_oracle)"
+    if [[ -n "${sep41_oracle}" ]]; then
+        require_sep41_pool_support
+        seed_sep41_oracle "${sep41_oracle}"
+    fi
     state_set "modeled_oracles_refreshed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     note "Refreshed the V3-only fixture-oracle histories."
 }
@@ -290,6 +335,7 @@ v3_only_validate_artifacts() {
         "${V3_EMITTER_WASM}" \
         "${V3_POOL_WASM}" \
         "${V3_TEST_SEP40_ORACLE_WASM}" \
+        "${SEP41_TOKEN_WASM}" \
         "${PERMISSIONED_ACCESS_CONTROLLER_WASM}" \
         "${BLNT_BACKFILL_WASM}" \
         "${COMET_WASM}"
@@ -740,6 +786,26 @@ v3_only_permissioned() {
     v3_only_write_registry
 }
 
+v3_only_sep41() {
+    local handler="$1" skip_build="${2:-false}"
+
+    validate_tools
+    require_network
+    load_state
+    if [[ "${handler}" == "command_deploy_sep41_pool" ]]; then
+        if [[ "${skip_build}" == "true" ]]; then
+            v3_only_validate_artifacts
+        else
+            v3_only_validate
+        fi
+    else
+        require_sep41_pool_support
+    fi
+    "${handler}"
+    v3_only_update_reward_zone
+    v3_only_write_registry
+}
+
 v3_only_status() {
     local backfill emitter backstop recipient blnd_binding reward_zone
 
@@ -768,6 +834,7 @@ V3-only ${NETWORK_LABEL} status
   V3 reward zone: ${reward_zone}
   BLNT backfill: ${backfill}
   Permissioned pool: $(state_optional permissioned_pool)
+  SEP-41 Assets pool: $(state_optional sep41_pool)
   configured grant user: $(state_value configured_user)
   grant amount: $(state_value blnt_grant_total)
   state: ${STATE_FILE}
@@ -780,6 +847,7 @@ v3_only_run() {
     v3_only_deploy true
     v3_only_reserve_loss command_deploy_reserve_loss_pool
     v3_only_permissioned command_deploy_permissioned_pool true
+    v3_only_sep41 command_deploy_sep41_pool true
 }
 
 main_v3_only() {
@@ -793,6 +861,8 @@ main_v3_only() {
         verify-reserve-loss-pool) v3_only_reserve_loss command_verify_reserve_loss_pool ;;
         deploy-permissioned-pool) v3_only_permissioned command_deploy_permissioned_pool ;;
         verify-permissioned-pool) v3_only_permissioned command_verify_permissioned_pool ;;
+        deploy-sep41-pool) v3_only_sep41 command_deploy_sep41_pool ;;
+        verify-sep41-pool) v3_only_sep41 command_verify_sep41_pool ;;
         run) v3_only_run ;;
         status) v3_only_status ;;
         write-registry)

@@ -1,7 +1,7 @@
 {
   "schema_version": 4,
   "topology": "v3-only-external-blend",
-  "generated_at": "2026-09-06T05:59:33Z",
+  "generated_at": "2026-09-06T19:34:01Z",
   "network": {
     "name": "Public testnet",
     "passphrase": "Test SDF Network ; September 2015",
@@ -93,6 +93,7 @@
       "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF"
     ],
     "v3": [
+      "CDPI32QWIUFQOOI7KM7HKGNIH6ZLLN36YE2QVIG7GZVCGHP35C6XRLQ4",
       "CBK4XFZ7EUUYT5L7IUANV5XTSARYAU2DVNYMDWMOW5RXTZJOL27VQNCC",
       "CD4FZ7FWGQJBTAFMV2ZFJVDPNHY7EJCEUT7RMJCQXYBDKWKKLZCJDQKK",
       "CBGVIUZVCMLZ22C5FKQ6TLDMPDRERMSMO4OLAZPCVNI4OQDPPGKZ3LZI",
@@ -163,6 +164,37 @@
           "contract_id": "CDSVHHJVHHILSYB6WHIS36JRDOZCPKK4EVOLRMKH3ZHINEJO4EVRA2RG",
           "supplied": 1000000000000,
           "borrowed": 500000000000
+        }
+      }
+    },
+    "sep41_assets": {
+      "purpose": "V3 custom SEP-41 reserve UI scenario",
+      "deployed_at": "2026-09-06T19:28:03Z",
+      "verified_at": "2026-09-06T19:34:00Z",
+      "contracts": {
+        "pool_factory": "CBDTE65N5JASXPF2VT2T2BX2VZ42EMVVSG2OVQON3MIXJTWYOREIILZQ",
+        "backstop": "CAC5JWEOVZKAFWQZFK43RIISHV6IPDRB5I6T6PZFQIJWQJEGXXKNPEFH",
+        "pool": "CDPI32QWIUFQOOI7KM7HKGNIH6ZLLN36YE2QVIG7GZVCGHP35C6XRLQ4",
+        "oracle": "CDZ2JUE4R337CZXDCER3CACZY3EWBBCM7GKU3MG3UYEEWP3WD77BA3ZL",
+        "token_wasm_sha256": "f209ba75f704e68005f9b8a005e44a60bfa6e75c353b1607f8f9c08b82c6c250"
+      },
+      "setup_user": "GCN5CNFTLCEHIPQCAGSZMW32X4HFZYQHSQQL546NWNELR7OI34UTVMR2",
+      "backstop": {
+        "tier": "FirstLoss",
+        "asset": "USDC",
+        "deposited": 250000000000,
+        "reward_zone_member": true
+      },
+      "reserves": {
+        "wBTC": {
+          "contract_id": "CAOD5DQA56CA2EDISPK3UQJ4EN4GZ6IMQEUKCFMXM3KNSKTMWH2LSODR",
+          "supplied": 5000000000,
+          "borrowed": 2000000000
+        },
+        "wETH": {
+          "contract_id": "CA6674T6LX73G53DLVJVMQK3BWWKBGZA43E6QR5YKBNF36L6DM662CAN",
+          "supplied": 100000000000,
+          "borrowed": 50000000000
         }
       }
     }

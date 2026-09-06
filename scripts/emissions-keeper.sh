@@ -114,6 +114,11 @@ validate_oracle_refresh_configuration() {
             '.test_scenarios.reserve_loss.contracts.oracle' \
             reserve_loss_oracle "reserve-loss oracle"
     fi
+    if jq -e '.test_scenarios.sep41_assets' "${REGISTRY}" >/dev/null; then
+        require_registry_state_match \
+            '.test_scenarios.sep41_assets.contracts.oracle' \
+            sep41_pool_oracle "SEP-41 Assets oracle"
+    fi
 }
 
 oracle_refresh_remaining_seconds() {
@@ -501,6 +506,11 @@ load_configuration() {
             .test_scenarios.reserve_loss? |
             select(.backstop.reward_zone_member == true) |
             ["reserve_loss", .contracts.pool]
+        ),
+        (
+            .test_scenarios.sep41_assets? |
+            select(.backstop.reward_zone_member == true) |
+            ["sep41_assets", .contracts.pool]
         ) | @tsv
     ' "${REGISTRY}")
 
@@ -513,7 +523,9 @@ load_configuration() {
     done < <(jq -er '
         (.modeled_pools | to_entries[] | [.key, .value.v3.pool]),
         (.test_scenarios.reserve_loss? |
-            select(type == "object") | ["reserve_loss", .contracts.pool]) |
+            select(type == "object") | ["reserve_loss", .contracts.pool]),
+        (.test_scenarios.sep41_assets? |
+            select(type == "object") | ["sep41_assets", .contracts.pool]) |
         @tsv
     ' "${REGISTRY}")
 

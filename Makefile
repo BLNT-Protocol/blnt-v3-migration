@@ -84,6 +84,12 @@ testnet-v3-only-deploy-permissioned-pool:
 testnet-v3-only-verify-permissioned-pool:
 	bash scripts/testnet-v3-only.sh verify-permissioned-pool
 
+testnet-v3-only-deploy-sep41-pool:
+	bash scripts/testnet-v3-only.sh deploy-sep41-pool
+
+testnet-v3-only-verify-sep41-pool:
+	bash scripts/testnet-v3-only.sh verify-sep41-pool
+
 testnet-v3-only-status:
 	bash scripts/testnet-v3-only.sh status
 
@@ -230,6 +236,7 @@ build-v3:
 	$(MAKE) -C $(COMET_V2_DIR) build
 	$(MAKE) -C $(BLNT_BACKFILL_DIR) build
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked
+	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blnt-test-sep41-token --target wasm32v1-none --release --locked
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-test-sep40-oracle --target wasm32v1-none --release --locked
 	mkdir -p $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized
 	cd $(MIGRATION_HARNESS_DIR) && \
@@ -238,6 +245,9 @@ build-v3:
 	stellar contract optimize \
 		--wasm $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/release/blend_v3_compat_probe.wasm \
 		--wasm-out $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized/blend_v3_compat_probe.wasm
+	stellar contract optimize \
+		--wasm $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/release/blnt_test_sep41_token.wasm \
+		--wasm-out $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized/blnt_test_sep41_token.wasm
 	stellar contract optimize \
 		--wasm $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/release/blend_v3_test_sep40_oracle.wasm \
 		--wasm-out $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized/blend_v3_test_sep40_oracle.wasm

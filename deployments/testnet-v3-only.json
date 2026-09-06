@@ -1,7 +1,7 @@
 {
   "schema_version": 4,
   "topology": "v3-only-external-blend",
-  "generated_at": "2026-09-01T02:29:01Z",
+  "generated_at": "2026-09-06T05:59:33Z",
   "network": {
     "name": "Public testnet",
     "passphrase": "Test SDF Network ; September 2015",
@@ -62,7 +62,11 @@
     "contract": "CAOBQABLIJ36XBYU3J2HTSPW4NNMORWKTVLSPTL4LZZ4DKLOMSBLWNSV",
     "legacy_blnd_token": "CB22KRA3YZVCNCQI64JQ5WE7UY2VAV7WFLK6A2JN3HEX56T2EDAFO7QF",
     "blnt_token": "CCDOGLKSHUCJLGAOXNMKEZ6JMIZXFQLLTMYHMKTCSVP7TI7YGLZCYVAZ",
-    "swap_cap": "1200000000000000",
+    "backfill_allocation": "200000000000000",
+    "grant_allocation": "100000000000000",
+    "swap_blnt_cap": "1200000000000000",
+    "swap_blnd_input_cap": null,
+    "blnd_per_blnt": 2,
     "swap_deadline": "1811552772"
   },
   "modeled_pools": {
@@ -89,6 +93,7 @@
       "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF"
     ],
     "v3": [
+      "CBK4XFZ7EUUYT5L7IUANV5XTSARYAU2DVNYMDWMOW5RXTZJOL27VQNCC",
       "CD4FZ7FWGQJBTAFMV2ZFJVDPNHY7EJCEUT7RMJCQXYBDKWKKLZCJDQKK",
       "CBGVIUZVCMLZ22C5FKQ6TLDMPDRERMSMO4OLAZPCVNI4OQDPPGKZ3LZI",
       "CANPQQRITYKFKO7FJEGQD765LISFMEM6SDJNLSZBOVLALXXYXM6UDLFL"
@@ -122,6 +127,42 @@
         "USDP": {
           "contract_id": "CA6DBBBA5RP227WACGF2GYNCZ53VGNLFGHR2XLBCZDRLIUJ7KNDLUK3V",
           "authorized_to_pool": false
+        }
+      }
+    },
+    "permissioned": {
+      "purpose": "V3 permissioned-pool UI scenario",
+      "deployed_at": "2026-09-06T05:42:52Z",
+      "verified_at": "2026-09-06T05:59:31Z",
+      "contracts": {
+        "pool_factory": "CBDTE65N5JASXPF2VT2T2BX2VZ42EMVVSG2OVQON3MIXJTWYOREIILZQ",
+        "backstop": "CAC5JWEOVZKAFWQZFK43RIISHV6IPDRB5I6T6PZFQIJWQJEGXXKNPEFH",
+        "pool": "CBK4XFZ7EUUYT5L7IUANV5XTSARYAU2DVNYMDWMOW5RXTZJOL27VQNCC",
+        "oracle": "CBHVGBFZ4EZDMRWVFCPJJZHAUBTCRFVM3RFHUEEKBTHW4O34HECNLP4X",
+        "access_controller": "CB6F4SPL3N554ABP5P3PWVEBF2MTQFZEJI2ZYVUAD7ADLHOIRSXENGCX",
+        "access_controller_wasm_sha256": "8439134b86f0943ad5f5202a3d5376225e0b6d74c795a3fd87ff9325291cf350"
+      },
+      "setup_user": "GA4PH6RHADBSYKELKQAYMEKP7J6LHRHEL5XX7DODTPHSEPSMW2U6KW2Z",
+      "permissions": {
+        "setup_user": 7,
+        "all_other_users": 0
+      },
+      "backstop": {
+        "tier": "FirstLoss",
+        "asset": "USDC",
+        "deposited": 250000000000,
+        "reward_zone_member": true
+      },
+      "reserves": {
+        "XLM": {
+          "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+          "supplied": 1000000000000,
+          "borrowed": 500000000000
+        },
+        "EURC": {
+          "contract_id": "CDSVHHJVHHILSYB6WHIS36JRDOZCPKK4EVOLRMKH3ZHINEJO4EVRA2RG",
+          "supplied": 1000000000000,
+          "borrowed": 500000000000
         }
       }
     }

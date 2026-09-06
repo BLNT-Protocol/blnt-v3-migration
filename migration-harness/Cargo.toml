@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "compat-probe",
     "migration-tests",
+    "test-access-controller",
     "test-sep40-oracle",
 ]
 

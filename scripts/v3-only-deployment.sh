@@ -20,6 +20,9 @@ V3_BLNT_MINT=$((1000 * SCALAR_7))
 V3_USDC_MINT=$((100000 * SCALAR_7))
 V3_BLNT_USDC_LP_TOTAL=$((2 * DUAL_MODELED_V3_LP_BALANCE))
 
+# shellcheck source=permissioned-pool.sh
+source "${SCRIPT_DIR}/permissioned-pool.sh"
+
 usage_v3_only() {
     cat <<'EOF'
 Usage: scripts/v3-only-deployment.sh COMMAND
@@ -35,6 +38,10 @@ Commands:
             Deploy and verify the V3 Reserve Loss scenario pool.
   verify-reserve-loss-pool
             Reverify the deployed V3 Reserve Loss scenario pool.
+  deploy-permissioned-pool
+            Deploy and verify the V3 Permissioned scenario pool.
+  verify-permissioned-pool
+            Reverify the deployed V3 Permissioned scenario pool.
   run       Validate, start, and deploy.
   status    Query the recorded V3 and external legacy bindings.
   write-registry
@@ -63,8 +70,9 @@ V3-only ${NETWORK_LABEL} deployment:
   3. Send the 150-million-BLNT initial drop to the backfill contract: 74
      million for pre-incident LP holders, 25 million for grants, and 51 million
      for the 2-BLND-to-1-BLNT conversion using the existing BLND token.
-  4. Deploy and activate the Fixed, Custom, and Reserve Loss V3 pools, add
-     them to the V3 reward zone, seed their positions, and start BLNT emissions.
+  4. Deploy and activate the Fixed, Custom, Reserve Loss, and Permissioned V3
+     pools, add them to the V3 reward zone, seed their positions, and start
+     BLNT emissions.
   5. Preserve the configured 25-million-BLNT grant for ${V3_USER_WALLET}.
 
 No V1/V2 contracts or BLND assets are deployed or mutated.
@@ -181,8 +189,9 @@ v3_only_write_registry() {
             v3: (.v3_reward_zone | fromjson)
           }
         }
-        + if ((.reserve_loss_pool // "") | length) > 0 then {
-          test_scenarios: {
+        + {
+          test_scenarios: (
+            (if ((.reserve_loss_pool // "") | length) > 0 then {
             reserve_loss: {
               purpose: "V3 reserve-loss and reserve-authorization UI scenario",
               deployed_at: .reserve_loss_deployed_at,
@@ -205,8 +214,48 @@ v3_only_write_registry() {
                 }
               }
             }
-          }
-        } else {test_scenarios: {}} end
+            } else {} end)
+            +
+            (if ((.permissioned_pool // "") | length) > 0 then {
+              permissioned: {
+                purpose: "V3 permissioned-pool UI scenario",
+                deployed_at: .permissioned_pool_deployed_at,
+                verified_at: .permissioned_pool_verified_at,
+                contracts: {
+                  pool_factory: .v3_factory,
+                  backstop: .v3_backstop,
+                  pool: .permissioned_pool,
+                  oracle: .permissioned_pool_oracle,
+                  access_controller: .permissioned_access_controller,
+                  access_controller_wasm_sha256: .permissioned_access_controller_wasm_sha256
+                },
+                setup_user: .permissioned_setup_user,
+                permissions: {
+                  setup_user: 7,
+                  all_other_users: 0
+                },
+                backstop: {
+                  tier: "FirstLoss",
+                  asset: "USDC",
+                  deposited: (.permissioned_backstop_deposit | tonumber),
+                  reward_zone_member: true
+                },
+                reserves: {
+                  XLM: {
+                    contract_id: .xlm_token,
+                    supplied: (.permissioned_supply_amount | tonumber),
+                    borrowed: (.permissioned_borrow_amount | tonumber)
+                  },
+                  EURC: {
+                    contract_id: .modeled_asset_eurc,
+                    supplied: (.permissioned_supply_amount | tonumber),
+                    borrowed: (.permissioned_borrow_amount | tonumber)
+                  }
+                }
+              }
+            } else {} end)
+          )
+        }
     ' "${STATE_FILE}" >"${registry_tmp}"
     mv "${registry_tmp}" "${REGISTRY_FILE}"
     note "Wrote V3-only deployment registry: ${REGISTRY_FILE}"
@@ -241,6 +290,7 @@ v3_only_validate_artifacts() {
         "${V3_EMITTER_WASM}" \
         "${V3_POOL_WASM}" \
         "${V3_TEST_SEP40_ORACLE_WASM}" \
+        "${PERMISSIONED_ACCESS_CONTROLLER_WASM}" \
         "${BLNT_BACKFILL_WASM}" \
         "${COMET_WASM}"
     do
@@ -635,7 +685,7 @@ v3_only_resume_modeled_pools() {
 }
 
 v3_only_reserve_loss() {
-    local command="$1" pool_hash authorized
+    local handler="$1" pool_hash authorized
 
     validate_tools
     require_network
@@ -647,8 +697,8 @@ v3_only_reserve_loss() {
             die "invalid V3 pool WASM hash: ${pool_hash}"
         state_set "v3_pool_wasm_hash" "${pool_hash}"
     fi
-    "${command}"
-    if [[ "${command}" == "command_deploy_reserve_loss_pool" ]]; then
+    "${handler}"
+    if [[ "${handler}" == "command_deploy_reserve_loss_pool" ]]; then
         authorized="$(normalize_scalar "$(invoke_view \
             "query-reserve-loss-usdp-authorization" \
             "$(state_value reserve_loss_asset_usdp)" authorized \
@@ -666,6 +716,26 @@ v3_only_reserve_loss() {
         assert_equal "false" "${authorized}" "Reserve Loss USDP pool authorization"
         state_set "reserve_loss_usdp_authorized" "false"
     fi
+    v3_only_update_reward_zone
+    v3_only_write_registry
+}
+
+v3_only_permissioned() {
+    local handler="$1" skip_build="${2:-false}"
+
+    validate_tools
+    require_network
+    load_state
+    if [[ "${handler}" == "command_deploy_permissioned_pool" ]]; then
+        if [[ "${skip_build}" == "true" ]]; then
+            v3_only_validate_artifacts
+        else
+            v3_only_validate
+        fi
+    else
+        require_permissioned_pool_support
+    fi
+    "${handler}"
     v3_only_update_reward_zone
     v3_only_write_registry
 }
@@ -697,6 +767,7 @@ V3-only ${NETWORK_LABEL} status
   V3 backstop: ${backstop}
   V3 reward zone: ${reward_zone}
   BLNT backfill: ${backfill}
+  Permissioned pool: $(state_optional permissioned_pool)
   configured grant user: $(state_value configured_user)
   grant amount: $(state_value blnt_grant_total)
   state: ${STATE_FILE}
@@ -708,6 +779,7 @@ v3_only_run() {
     command_start
     v3_only_deploy true
     v3_only_reserve_loss command_deploy_reserve_loss_pool
+    v3_only_permissioned command_deploy_permissioned_pool true
 }
 
 main_v3_only() {
@@ -719,6 +791,8 @@ main_v3_only() {
         deploy-modeled-pools) v3_only_resume_modeled_pools ;;
         deploy-reserve-loss-pool) v3_only_reserve_loss command_deploy_reserve_loss_pool ;;
         verify-reserve-loss-pool) v3_only_reserve_loss command_verify_reserve_loss_pool ;;
+        deploy-permissioned-pool) v3_only_permissioned command_deploy_permissioned_pool ;;
+        verify-permissioned-pool) v3_only_permissioned command_verify_permissioned_pool ;;
         run) v3_only_run ;;
         status) v3_only_status ;;
         write-registry)

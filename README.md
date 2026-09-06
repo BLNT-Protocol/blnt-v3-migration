@@ -49,9 +49,10 @@ owns same-address claims and a 270-day, 2-BLND-to-1-BLNT conversion capped at
 permissionlessly burns the unused BLNT conversion reserve. The production
 claim manifest allocates 74 million BLNT across
 the 434 positive pre-incident `flattened_total_cpal_raw` ownership rows (423
-accounts and 11 contracts), vesting linearly for 180 days from construction.
+accounts and 11 contracts), with 20% available at construction and the
+remaining 80% vesting linearly over 180 days.
 An independent constructor-supplied grant list allocates the remaining 25
-million BLNT to at most 100 grantees with 720-day linear vesting. The emitter
+million BLNT to at most 100 grantees with 360-day linear vesting. The emitter
 retains the established 31-day backstop-swap API for
 a future BLNT-based protocol upgrade. Existing v2 positions and claims remain
 entirely governed by the legacy contracts.

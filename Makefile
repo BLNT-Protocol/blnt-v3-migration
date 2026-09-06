@@ -78,6 +78,12 @@ testnet-v3-only-deploy-reserve-loss-pool:
 testnet-v3-only-verify-reserve-loss-pool:
 	bash scripts/testnet-v3-only.sh verify-reserve-loss-pool
 
+testnet-v3-only-deploy-permissioned-pool:
+	bash scripts/testnet-v3-only.sh deploy-permissioned-pool
+
+testnet-v3-only-verify-permissioned-pool:
+	bash scripts/testnet-v3-only.sh verify-permissioned-pool
+
 testnet-v3-only-status:
 	bash scripts/testnet-v3-only.sh status
 
@@ -226,6 +232,9 @@ build-v3:
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-test-sep40-oracle --target wasm32v1-none --release --locked
 	mkdir -p $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized
+	cd $(MIGRATION_HARNESS_DIR) && \
+		stellar contract build --package blnt-test-access-controller --locked \
+			--out-dir target/wasm32v1-none/optimized
 	stellar contract optimize \
 		--wasm $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/release/blend_v3_compat_probe.wasm \
 		--wasm-out $(MIGRATION_HARNESS_DIR)/target/wasm32v1-none/optimized/blend_v3_compat_probe.wasm

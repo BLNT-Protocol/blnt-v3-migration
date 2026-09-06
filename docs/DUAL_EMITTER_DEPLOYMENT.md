@@ -47,17 +47,17 @@ deployment. The runner always constructs the immutable `(address, amount)`
 claim vector from that verified manifest; it cannot be overridden through the
 environment. The selected list cannot be changed after construction, and the
 backfill contract receives the complete 150 million BLNT.
-Every address allocation vests linearly per second for 180 days beginning at
-backfill-contract construction. Each claim transfers only the cumulative
-vested amount not previously claimed, and unclaimed amounts remain available
-after vesting completes.
+Twenty percent of every address allocation is available at backfill-contract
+construction. The remaining 80% vests linearly per second for 180 days. Each
+claim transfers only the cumulative vested amount not previously claimed, and
+unclaimed amounts remain available after vesting completes.
 
 Set `BLEND_BLNT_GRANT_LIST` to the Stellar CLI JSON encoding of the immutable
 `(address, amount)` grant vector. It must contain at most 100 unique positive
 entries totaling exactly 25 million BLNT. If omitted, the dual-emitter runner
 assigns the complete grant to its deployment operator; the V3-only testnet
 wrapper assigns it to `BLEND_V3_USER_WALLET`. Grants
-vest linearly per second for 720 days from the same construction timestamp and
+vest linearly per second for 360 days from the same construction timestamp and
 are claimed independently through `claim_grant`.
 
 ## Public testnet
@@ -102,8 +102,8 @@ record:
 - BLND:USDC, BLNT:USDC, and BLNT:XLM Comet v2 IDs;
 - separate emitter and backstop IDs;
 - the backfill-contract artifact hash, address, and immutable token bindings;
-- the immutable 180-day backfill and 720-day grant vesting timestamps and
-  allocation totals;
+- the immutable 20%-immediate/180-day-remainder backfill and 360-day grant
+  vesting timestamps and allocation totals;
 - both token administrators and emitter recipients;
 - direct v3 activation and exact 150-million-BLNT backfill custody;
 - exact same-user 2:1 BLND burn and pre-funded BLNT transfer events;

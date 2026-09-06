@@ -72,16 +72,17 @@ production list MUST assign exactly 74 million BLNT in proportion to
 each of the 423 account and 11 contract addresses with a positive
 `flattened_total_cpal_raw` value in the committed pre-incident ownership
 snapshot, using deterministic largest-remainder rounding. A
-claimant's allocation MUST vest linearly per second for 180 days beginning at
-contract construction. A claimant-authorized `claim_backfill(user)` transfers
-all cumulative vested BLNT not previously claimed back to that same address and
-MAY be called repeatedly as vesting advances.
+claimant MUST be able to claim 20% of its allocation at contract construction.
+The remaining 80% MUST vest linearly per second over the following 180 days. A
+claimant-authorized `claim_backfill(user)` transfers all cumulative vested BLNT
+not previously claimed back to that same address and MAY be called repeatedly
+as vesting advances.
 Claims do not expire after vesting completes.
 
 Construction MUST also accept an independent immutable grant list containing
 at most 100 unique positive allocations totaling at most 25 million BLNT.
 `claim_grant(user)` MUST transfer vested BLNT back to that same authorized
-address, use separate progress, and linearly vest grants per second for 720 days
+address, use separate progress, and linearly vest grants per second for 360 days
 from the shared construction timestamp. An address MAY appear in both lists
 without either method reading or consuming the other allocation. Backfill and
 grant allocations together MUST NOT exceed 99 million BLNT, preserving the
@@ -181,8 +182,9 @@ A deployment SHOULD use the following deterministic order:
 
 Deployment evidence MUST record both emitter bindings, both token
 administrators, the backfill-contract artifact and immutable bindings, exact
-150-million-BLNT custody, the immutable 180-day backfill and 720-day grant
-vesting timestamps and allocations, the 51-million-BLNT output cap,
+150-million-BLNT custody, the immutable 20%-immediate/180-day-remainder
+backfill and 360-day grant vesting timestamps and allocations, the
+51-million-BLNT output cap,
 102-million-BLND input capacity, and 270-day deadline, Comet v2 artifact hash
 and pool configuration, v3 direct
 activation, and the absence of BLND in every v3 pool, backstop, and emitter

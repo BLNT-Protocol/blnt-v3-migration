@@ -128,7 +128,7 @@ No test or deployment may add a privileged replacement route.
 | Native Soroban `Env` | Conversion cap, address claims, direct activation, queue compatibility, conservation, and rollback |
 | Optimized WASM | Public ABI, constructor encoding, serialization, cross-contract behavior, and resource limits |
 | Protocol-27 compatibility harness | Exact deployed v2 and legacy emitter alongside independent optimized v3 emitter/backstop WASM |
-| Local Quickstart | Reproducible dual-emitter deployment, Comet v2 bindings, initial activation, and recorded costs |
+| Local Quickstart | Reproducible dual-emitter deployment, Comet v2 bindings, initial activation, recorded costs, and deployed-WASM start/fill coverage for auction types 0 through 3 |
 | Public testnet | Production transaction assembly, signer separation, artifact hashes, backfill custody and caps, and final bindings |
 
 ## Transition-ready gate

@@ -45,6 +45,19 @@ DUAL_MODELED_BLNT_MINT=$((200 * SCALAR_7))
 DUAL_MODELED_USDC_MINT=$((50000 * SCALAR_7))
 DUAL_MODELED_V2_EMISSION_CONFIG='[{"res_index":1,"res_type":1,"share":1}]'
 DUAL_MODELED_V2_EMISSION_START_DELAY_SECONDS=15
+AUCTION_BORROWER_IDENTITY="${BLEND_AUCTION_BORROWER_IDENTITY:-blend-v3-local-auction-borrower}"
+AUCTION_FILLER_IDENTITY="${BLEND_AUCTION_FILLER_IDENTITY:-blend-v3-local-auction-filler}"
+AUCTION_POOL_SALT="${BLEND_AUCTION_POOL_SALT:-00000000000000000000000000000000000000000000000000000000000000c7}"
+AUCTION_BACKSTOP_DEPOSIT=$((20000 * SCALAR_7))
+AUCTION_DEBT_SUPPLY=$((1010000000 * SCALAR_7))
+AUCTION_DEBT_BORROW=$((1000000000 * SCALAR_7))
+AUCTION_BORROWER_COLLATERAL=$((1200000000 * SCALAR_7))
+AUCTION_FILLER_COLLATERAL=$((1500000000 * SCALAR_7))
+AUCTION_HEALTHY_PRICE=${SCALAR_7}
+AUCTION_CRASHED_PRICE=$((SCALAR_7 / 10))
+AUCTION_BLNT_BID_RESERVE=$((10000 * SCALAR_7))
+AUCTION_PROTOCOL_CREDIT_WAIT_SECONDS=90
+AUCTION_LIQUIDATION_DISCOUNT_LEDGER=201
 
 validate_backfill_manifest() {
     local expected_source_hash actual_source_hash generated_manifest
@@ -146,6 +159,7 @@ Commands:
   validate  Verify legacy artifacts and build v3 plus Comet v2 artifacts.
   start     Start local Protocol-27 Quickstart or verify public testnet RPC.
   deploy    Deploy and verify the independent legacy and v3 lanes.
+  auctions  On local Quickstart, start and fill V3 auction types 0 through 3.
   run       Validate, start, and deploy.
   status    Query the recorded token, emitter, backstop, and backfill bindings.
   stop      Stop the local Quickstart container.
@@ -172,6 +186,8 @@ Dual-emitter ${NETWORK_LABEL} deployment:
   9. Verify separate administrators, recipients, emissions, Comet v2 pools,
      backfill custody, and the immutable 51-million-BLNT conversion cap and
      270-day expiration.
+ 10. On local Quickstart, use a dedicated V3 pool to start and fill user
+     liquidation, bad-debt, interest, and protocol-fee auctions.
 
 BLNT Stellar TOML metadata name: ${BLNT_TOKEN_NAME}
 
@@ -364,7 +380,7 @@ dual_deploy_modeled_pools() {
 
 dual_deploy() {
     local skip_build="${1:-false}"
-    local operator depositor controller issuer
+    local operator depositor controller issuer auction_filler
     local legacy_emitter v3_emitter blnt_backfill legacy_blnd blnt usdc xlm
     local legacy_blnd_usdc blnt_usdc blnt_xlm xlm_balance
     local v2_pool_hash v2_backstop v2_factory deployed_v2_backstop
@@ -509,6 +525,19 @@ dual_deploy() {
     if [[ "${XLM_ASSET_MODE}" == "issued" ]]; then
         invoke_transaction "mint-controller-xlm" "${xlm}" mint \
             --to "${controller}" --amount "${xlm_balance}" >/dev/null
+    fi
+    if [[ "${NETWORK_MODE}" == "local" ]]; then
+        # Reserve the type-3 bid on its isolated signer before the emitter
+        # becomes BLNT administrator. Keeping it off the depositor preserves
+        # the exact same-user conversion balance invariant below.
+        auction_filler="$(auction_create_identity \
+            "${AUCTION_FILLER_IDENTITY}" auction_coverage_filler)"
+        create_trustline "trust-auction-filler-blnt" \
+            "${AUCTION_FILLER_IDENTITY}" "BLNT:${issuer}"
+        invoke_transaction "mint-auction-filler-blnt-reserve" "${blnt}" mint \
+            --to "${auction_filler}" --amount "${AUCTION_BLNT_BID_RESERVE}" >/dev/null
+        state_set "auction_coverage_filler_blnt_funded" \
+            "${AUCTION_BLNT_BID_RESERVE}"
     fi
 
     initialize_comet "comet-blnd-usdc" "${legacy_blnd_usdc}" "${controller}" \
@@ -781,6 +810,559 @@ dual_deploy() {
     note "Dual-emitter deployment verified. State: ${STATE_FILE}"
 }
 
+auction_latest_ledger() {
+    stellar_cli ledger latest \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" \
+        --output json-formatted | jq -er '.sequence | tostring'
+}
+
+auction_wait_for_ledger() {
+    local label="$1" target="$2" current waited=0
+
+    [[ "${target}" =~ ^[0-9]+$ ]] || die "invalid ${label} target ledger: ${target}"
+    while (( waited <= 360 )); do
+        current="$(auction_latest_ledger)"
+        [[ "${current}" =~ ^[0-9]+$ ]] || die "invalid latest ledger: ${current}"
+        if (( current >= target )); then
+            return
+        fi
+        if (( waited % 30 == 0 )); then
+            note "Waiting for ${label}: ledger ${current}, target ${target}."
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    die "timed out waiting for ${label} at ledger ${target}"
+}
+
+auction_seed_oracle_price() {
+    local oracle="$1" asset="$2" price="$3" label="$4" prices
+
+    prices="$(fixture_price_series "${price}")"
+    invoke_transaction "seed-auction-oracle-${label}" \
+        "${oracle}" set_prices \
+        --asset "{\"Stellar\":\"${asset}\"}" \
+        --prices "${prices}" >/dev/null
+}
+
+auction_reserve_config() {
+    local index="$1" profile="$2"
+    local r_base=300000 r_one=400000 r_two=1200000 r_three=50000000
+    local util=8000000 max_util=9000000
+
+    if [[ "${profile}" == "fast-debt" ]]; then
+        # A bounded high-rate fixture lets the deployed pool accrue the real
+        # inclusive $200 protocol-credit minimum in seconds instead of months.
+        # It stays below both the u32 ceiling and the configured 99.5% maximum
+        # utilization, and changes no production parameter or contract state.
+        r_base=9999999
+        r_one=10000000
+        r_two=30000000
+        r_three=4000000000
+        util=9000000
+        max_util=9950000
+    fi
+    jq -cn \
+        --argjson index "${index}" \
+        --argjson r_base "${r_base}" \
+        --argjson r_one "${r_one}" \
+        --argjson r_two "${r_two}" \
+        --argjson r_three "${r_three}" \
+        --argjson util "${util}" \
+        --argjson max_util "${max_util}" \
+        '{
+            c_factor: 9500000,
+            decimals: 7,
+            enabled: true,
+            index: $index,
+            l_factor: 9500000,
+            max_util: $max_util,
+            r_base: $r_base,
+            r_one: $r_one,
+            r_three: $r_three,
+            r_two: $r_two,
+            reactivity: 0,
+            supply_cap: "5000000000000000000",
+            util: $util
+        }'
+}
+
+auction_add_reserve() {
+    local pool="$1" asset="$2" index="$3" profile="$4" label="$5" metadata
+
+    metadata="$(auction_reserve_config "${index}" "${profile}")"
+    invoke_transaction "queue-auction-reserve-${label}" \
+        "${pool}" queue_set_reserve \
+        --asset "${asset}" --metadata "${metadata}" >/dev/null
+    assert_equal "${index}" "$(normalize_scalar "$(invoke_transaction \
+        "set-auction-reserve-${label}" "${pool}" set_reserve \
+        --asset "${asset}")")" "auction reserve ${label} index"
+}
+
+auction_create_identity() {
+    local identity="$1" state_key="$2" account saved
+
+    saved="$(state_optional "${state_key}")"
+    if [[ -n "${saved}" ]]; then
+        account="$(stellar_cli keys public-key "${identity}")"
+        assert_equal "${saved}" "${account}" "saved ${identity} identity"
+        printf '%s\n' "${account}"
+        return
+    fi
+    stellar_cli keys generate "${identity}" --overwrite >/dev/null
+    account="$(stellar_cli keys public-key "${identity}")"
+    fund_and_wait_for_account "${account}"
+    state_set "${state_key}" "${account}"
+    printf '%s\n' "${account}"
+}
+
+auction_create_trustlines() {
+    local identity="$1" issuer="$2"
+
+    if [[ "${identity}" != "${AUCTION_FILLER_IDENTITY}" ||
+        -z "$(state_optional auction_coverage_filler_blnt_funded)" ]]
+    then
+        create_trustline "trust-${identity}-blnt" "${identity}" "BLNT:${issuer}"
+    fi
+    create_trustline "trust-${identity}-usdc" "${identity}" "USDC:${issuer}"
+    create_trustline "trust-${identity}-eurc" "${identity}" "EURC:${issuer}"
+    create_trustline "trust-${identity}-pyusd" "${identity}" "PYUSD:${issuer}"
+}
+
+auction_position_total() {
+    local pool="$1" user="$2" field="$3" label="$4"
+
+    invoke_view "query-auction-${label}-${field}" \
+        "${pool}" get_positions --address "${user}" |
+        jq -er --arg field "${field}" \
+            '[.[$field][]? | tonumber] | add // 0 | tostring'
+}
+
+auction_pool_tier_tokens() {
+    local backstop="$1" pool="$2" label="$3"
+
+    invoke_view "query-auction-${label}-tier-tokens" \
+        "${backstop}" pool_data --pool "${pool}" |
+        jq -er '.tiers[0].tokens | tostring'
+}
+
+auction_token_balance() {
+    local token="$1" user="$2" label="$3"
+
+    normalize_scalar "$(invoke_view "query-auction-${label}-balance" \
+        "${token}" balance --id "${user}")"
+}
+
+auction_assert_absent() {
+    local pool="$1" auction_type="$2" user="$3" label="$4"
+    local status output
+
+    if output="$(stellar_cli contract invoke \
+            --id "${pool}" \
+            --source-account "${OPERATOR_IDENTITY}" \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" \
+            --send no \
+            -- get_auction \
+            --auction_type "${auction_type}" \
+            --user "${user}" 2>&1)"
+    then
+        die "${label} remained active after its full fill"
+    else
+        status=$?
+    fi
+
+    [[ "${output}" == *"HostError: Error(Contract, #1200)"* ]] || {
+        printf '%s\n' "${output}" >&2
+        die "${label} absence check failed unexpectedly with status ${status}"
+    }
+}
+
+auction_verify_completed_coverage() {
+    local operator pool backstop borrower completed_ledger latest_ledger live_admin auction_type
+
+    operator="$(state_value operator)"
+    pool="$(state_value auction_coverage_pool)"
+    backstop="$(state_value v3_backstop)"
+    borrower="$(state_value auction_coverage_borrower)"
+    require_contract_id "${pool}" "recorded auction coverage pool"
+    assert_equal '[0,1,2,3]' "$(state_value auction_coverage_started_types)" \
+        "recorded auction coverage started types"
+    assert_equal '[0,1,2,3]' "$(state_value auction_coverage_filled_types)" \
+        "recorded auction coverage filled types"
+
+    # The work directory intentionally survives `stop`, while the local ledger
+    # does not. Prove the recorded pool is still deployed before accepting a
+    # completion marker from retained evidence.
+    live_admin="$(normalize_scalar "$(invoke_view \
+        "verify-completed-auction-pool" "${pool}" get_admin)")"
+    assert_equal "${operator}" "${live_admin}" \
+        "recorded auction coverage pool administrator"
+
+    completed_ledger="$(state_optional auction_coverage_completed_ledger)"
+    if [[ -n "${completed_ledger}" ]]; then
+        [[ "${completed_ledger}" =~ ^[0-9]+$ ]] ||
+            die "invalid recorded auction completion ledger: ${completed_ledger}"
+        latest_ledger="$(auction_latest_ledger)"
+        (( latest_ledger >= completed_ledger )) ||
+            die "current ledger ${latest_ledger} predates recorded auction completion ledger ${completed_ledger}"
+    fi
+
+    auction_assert_absent "${pool}" 0 "${borrower}" \
+        "completed type-0 user liquidation auction"
+    for auction_type in 1 2 3; do
+        auction_assert_absent "${pool}" "${auction_type}" "${backstop}" \
+            "completed type-${auction_type} backstop auction"
+    done
+}
+
+auction_wait_for_protocol_credit() {
+    local pool="$1" backstop="$2" reserve="$3" waited=0
+
+    while (( waited <= AUCTION_PROTOCOL_CREDIT_WAIT_SECONDS )); do
+        if stellar_cli contract invoke \
+            --id "${pool}" \
+            --source-account "${OPERATOR_IDENTITY}" \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" \
+            --send no \
+            -- new_auction \
+            --auction_type 3 \
+            --user "${backstop}" \
+            --bid '[]' \
+            --lot "[\"${reserve}\"]" \
+            --percent 100 >/dev/null 2>&1
+        then
+            return
+        fi
+        if (( waited % 15 == 0 )); then
+            note "Waiting for the real 0.2% borrower-interest fee to reach the 200-USDC auction minimum (${waited}s)."
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    die "protocol credit did not reach the 200-USDC auction minimum within ${AUCTION_PROTOCOL_CREDIT_WAIT_SECONDS}s"
+}
+
+dual_auction_coverage() {
+    local phase topology operator depositor issuer borrower filler
+    local factory backstop blnt usdc eurc pyusd oracle pool raw
+    local interest_auction protocol_auction liquidation_auction bad_debt_auction
+    local interest_bid protocol_bid interest_block protocol_block target_block
+    local tier_before tier_after usdc_before usdc_after interest_lot_received
+    local blnt_before blnt_after pool_blnt_before pool_blnt_after protocol_lot_received
+    local liquidation_block borrower_liabilities borrower_collateral
+    local backstop_liabilities filler_liabilities_before filler_liabilities_after
+    local bad_debt_block bad_debt_tier_before bad_debt_tier_after
+    local filler_usdc_before filler_usdc_after bad_debt_lot_received
+
+    validate_tools
+    require_local_mode
+    require_network
+    load_state
+    phase="$(state_value phase)"
+    topology="$(state_value topology)"
+    assert_equal "verified" "${phase}" "dual-emitter phase before auction coverage"
+    assert_equal "dual-emitter-blnd-blnt" "${topology}" "auction coverage topology"
+    if [[ -n "$(state_optional auction_coverage_completed_at)" ]]; then
+        auction_verify_completed_coverage
+        note "Reverified that all four V3 auction types were started and filled on this local ledger."
+        return
+    fi
+    [[ -z "$(state_optional auction_coverage_started_at)" ]] ||
+        die "auction coverage is partially recorded; restart the ephemeral local lane for a clean retry"
+
+    operator="$(state_value operator)"
+    depositor="$(state_value depositor)"
+    issuer="${operator}"
+    factory="$(state_value v3_factory)"
+    backstop="$(state_value v3_backstop)"
+    blnt="$(state_value blnt_token)"
+    usdc="$(state_value usdc_token)"
+    eurc="$(state_value modeled_asset_eurc)"
+    pyusd="$(state_value modeled_asset_pyusd)"
+    state_set "auction_coverage_started_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    note "Creating isolated borrower and filler identities for local auction coverage."
+    borrower="$(auction_create_identity \
+        "${AUCTION_BORROWER_IDENTITY}" auction_coverage_borrower)"
+    filler="$(auction_create_identity \
+        "${AUCTION_FILLER_IDENTITY}" auction_coverage_filler)"
+    auction_create_trustlines "${AUCTION_BORROWER_IDENTITY}" "${issuer}"
+    auction_create_trustlines "${AUCTION_FILLER_IDENTITY}" "${issuer}"
+
+    raw="$(deploy_wasm "deploy-auction-oracle" \
+        "${V3_TEST_SEP40_ORACLE_WASM}" "" \
+        --admin "${operator}" \
+        --base '{"Other":"USD"}' \
+        --assets \
+        "[{\"Stellar\":\"${eurc}\"},{\"Stellar\":\"${usdc}\"},{\"Stellar\":\"${pyusd}\"}]" \
+        --decimals 7 \
+        --resolution "${FIXTURE_ORACLE_RESOLUTION}")"
+    oracle="${raw}"
+    state_set "auction_coverage_oracle" "${oracle}"
+    auction_seed_oracle_price "${oracle}" "${eurc}" \
+        "${AUCTION_HEALTHY_PRICE}" eurc
+    auction_seed_oracle_price "${oracle}" "${usdc}" \
+        "${AUCTION_HEALTHY_PRICE}" usdc
+    auction_seed_oracle_price "${oracle}" "${pyusd}" \
+        "${AUCTION_HEALTHY_PRICE}" pyusd
+
+    raw="$(invoke_transaction "deploy-auction-pool" "${factory}" deploy \
+        --admin "${operator}" \
+        --name "Auction Coverage" \
+        --salt "${AUCTION_POOL_SALT}" \
+        --oracle "${oracle}" \
+        --backstop_take_rate 2000000 \
+        --max_positions 6 \
+        --min_collateral 50000000 \
+        --backstop_config '[{"asset":"Usdc","take_rate_weight":1}]' \
+        --access_controller null)"
+    pool="$(normalize_scalar "${raw}")"
+    require_contract_id "${pool}" "auction coverage pool"
+    state_set "auction_coverage_pool" "${pool}"
+    auction_add_reserve "${pool}" "${eurc}" 0 standard eurc
+    auction_add_reserve "${pool}" "${usdc}" 1 fast-debt usdc
+    auction_add_reserve "${pool}" "${pyusd}" 2 standard pyusd
+
+    ensure_token_balance "${usdc}" \
+        "$((AUCTION_BACKSTOP_DEPOSIT + AUCTION_DEBT_SUPPLY))" \
+        "auction-depositor-usdc"
+    invoke_transaction_as "deposit-auction-backstop-usdc" \
+        "${DEPOSITOR_IDENTITY}" "${backstop}" deposit \
+        --tier FirstLoss \
+        --from "${depositor}" \
+        --pool-address "${pool}" \
+        --amount "${AUCTION_BACKSTOP_DEPOSIT}" >/dev/null
+    invoke_transaction "activate-auction-pool" \
+        "${pool}" set_status --pool_status 0 >/dev/null
+    invoke_transaction_as "supply-auction-usdc-liquidity" \
+        "${DEPOSITOR_IDENTITY}" "${pool}" submit \
+        --from "${depositor}" --spender "${depositor}" --to "${depositor}" \
+        --requests \
+        "[{\"address\":\"${usdc}\",\"amount\":\"${AUCTION_DEBT_SUPPLY}\",\"request_type\":0}]" \
+        >/dev/null
+
+    invoke_transaction "mint-auction-borrower-eurc" "${eurc}" mint \
+        --to "${borrower}" --amount "${AUCTION_BORROWER_COLLATERAL}" >/dev/null
+    invoke_transaction "mint-auction-filler-pyusd" "${pyusd}" mint \
+        --to "${filler}" --amount "${AUCTION_FILLER_COLLATERAL}" >/dev/null
+    invoke_transaction_as "seed-auction-borrower-position" \
+        "${AUCTION_BORROWER_IDENTITY}" "${pool}" submit \
+        --from "${borrower}" --spender "${borrower}" --to "${borrower}" \
+        --requests \
+        "[{\"address\":\"${eurc}\",\"amount\":\"${AUCTION_BORROWER_COLLATERAL}\",\"request_type\":2},{\"address\":\"${usdc}\",\"amount\":\"${AUCTION_DEBT_BORROW}\",\"request_type\":4}]" \
+        >/dev/null
+    invoke_transaction_as "seed-auction-filler-collateral" \
+        "${AUCTION_FILLER_IDENTITY}" "${pool}" submit \
+        --from "${filler}" --spender "${filler}" --to "${filler}" \
+        --requests \
+        "[{\"address\":\"${pyusd}\",\"amount\":\"${AUCTION_FILLER_COLLATERAL}\",\"request_type\":2}]" \
+        >/dev/null
+
+    auction_wait_for_protocol_credit "${pool}" "${backstop}" "${usdc}"
+    interest_auction="$(invoke_transaction "start-type-2-interest-auction" \
+        "${pool}" new_auction \
+        --auction_type 2 --user "${backstop}" --bid '[]' \
+        --lot "[\"${usdc}\"]" --percent 100)"
+    protocol_auction="$(invoke_transaction "start-type-3-protocol-fee-auction" \
+        "${pool}" new_auction \
+        --auction_type 3 --user "${backstop}" --bid '[]' \
+        --lot "[\"${usdc}\"]" --percent 100)"
+    interest_auction="$(printf '%s' "${interest_auction}" | jq -c .)"
+    protocol_auction="$(printf '%s' "${protocol_auction}" | jq -c .)"
+    printf '%s' "${interest_auction}" | jq -e \
+        --arg usdc "${usdc}" \
+        '(.bid[$usdc] | tonumber) > 0 and (.lot[$usdc] | tonumber) >= 2000000000' \
+        >/dev/null || die "type-2 auction did not contain positive USDC bid and minimum lot"
+    printf '%s' "${protocol_auction}" | jq -e \
+        --arg blnt "${blnt}" --arg usdc "${usdc}" \
+        '(.bid[$blnt] | tonumber) > 0 and (.lot[$usdc] | tonumber) >= 2000000000' \
+        >/dev/null || die "type-3 auction did not contain canonical BLNT bid and minimum lot"
+    assert_json_equal "${interest_auction}" "$(invoke_view \
+        "verify-concurrent-type-2-auction" "${pool}" get_auction \
+        --auction_type 2 --user "${backstop}")" "concurrent type-2 auction"
+    assert_json_equal "${protocol_auction}" "$(invoke_view \
+        "verify-concurrent-type-3-auction" "${pool}" get_auction \
+        --auction_type 3 --user "${backstop}")" "concurrent type-3 auction"
+    state_set "auction_coverage_type_2_started" "${interest_auction}"
+    state_set "auction_coverage_type_3_started" "${protocol_auction}"
+
+    interest_bid="$(printf '%s' "${interest_auction}" | jq -er \
+        --arg usdc "${usdc}" '.bid[$usdc] | tostring')"
+    protocol_bid="$(printf '%s' "${protocol_auction}" | jq -er \
+        --arg blnt "${blnt}" '.bid[$blnt] | tostring')"
+    interest_block="$(printf '%s' "${interest_auction}" | jq -er '.block | tostring')"
+    protocol_block="$(printf '%s' "${protocol_auction}" | jq -er '.block | tostring')"
+    invoke_transaction "mint-auction-filler-interest-bid" "${usdc}" mint \
+        --to "${filler}" --amount "${interest_bid}" >/dev/null
+    target_block="$(auction_latest_ledger)"
+    invoke_transaction_as "approve-auction-interest-donation" \
+        "${AUCTION_FILLER_IDENTITY}" "${usdc}" approve \
+        --from "${filler}" --spender "${backstop}" \
+        --amount "${interest_bid}" --expiration_ledger "$((target_block + 1000))" \
+        >/dev/null
+    assert_equal "${interest_bid}" "$(normalize_scalar "$(invoke_view \
+        "verify-auction-interest-donation-allowance" "${usdc}" allowance \
+        --from "${filler}" --spender "${backstop}")")" \
+        "type-2 donation allowance"
+    blnt_before="$(auction_token_balance \
+        "${blnt}" "${filler}" filler-blnt-before-auctions)"
+    (( blnt_before >= protocol_bid )) ||
+        die "auction filler BLNT ${blnt_before} is below protocol-fee bid ${protocol_bid}"
+    if (( interest_block > protocol_block )); then
+        target_block=$((interest_block + 1))
+    else
+        target_block=$((protocol_block + 1))
+    fi
+    auction_wait_for_ledger "positive type-2/type-3 lot phase" "${target_block}"
+
+    tier_before="$(auction_pool_tier_tokens \
+        "${backstop}" "${pool}" before-interest-fill)"
+    usdc_before="$(auction_token_balance \
+        "${usdc}" "${filler}" filler-usdc-before-interest-fill)"
+    invoke_transaction_as "fill-type-2-interest-auction" \
+        "${AUCTION_FILLER_IDENTITY}" "${pool}" submit \
+        --from "${filler}" --spender "${filler}" --to "${filler}" \
+        --requests \
+        "[{\"address\":\"${backstop}\",\"amount\":\"100\",\"request_type\":8}]" \
+        >/dev/null
+    tier_after="$(auction_pool_tier_tokens \
+        "${backstop}" "${pool}" after-interest-fill)"
+    usdc_after="$(auction_token_balance \
+        "${usdc}" "${filler}" filler-usdc-after-interest-fill)"
+    assert_equal "${interest_bid}" "$((tier_after - tier_before))" \
+        "type-2 full bid donation"
+    assert_equal "0" "$(normalize_scalar "$(invoke_view \
+        "verify-consumed-auction-interest-donation-allowance" \
+        "${usdc}" allowance --from "${filler}" --spender "${backstop}")")" \
+        "type-2 consumed donation allowance"
+    interest_lot_received=$((usdc_after - usdc_before + interest_bid))
+    (( interest_lot_received > 0 )) || die "type-2 fill transferred no reserve lot"
+    auction_assert_absent "${pool}" 2 "${backstop}" "type-2 interest auction"
+    state_set "auction_coverage_type_2_fill_bid" "${interest_bid}"
+    state_set "auction_coverage_type_2_fill_lot" "${interest_lot_received}"
+
+    blnt_before="$(auction_token_balance \
+        "${blnt}" "${filler}" filler-blnt-before-protocol-fill)"
+    usdc_before="$(auction_token_balance \
+        "${usdc}" "${filler}" filler-usdc-before-protocol-fill)"
+    pool_blnt_before="$(auction_token_balance \
+        "${blnt}" "${pool}" pool-blnt-before-protocol-fill)"
+    invoke_transaction_as "fill-type-3-protocol-fee-auction" \
+        "${AUCTION_FILLER_IDENTITY}" "${pool}" submit \
+        --from "${filler}" --spender "${filler}" --to "${filler}" \
+        --requests \
+        "[{\"address\":\"${backstop}\",\"amount\":\"100\",\"request_type\":10}]" \
+        >/dev/null
+    blnt_after="$(auction_token_balance \
+        "${blnt}" "${filler}" filler-blnt-after-protocol-fill)"
+    usdc_after="$(auction_token_balance \
+        "${usdc}" "${filler}" filler-usdc-after-protocol-fill)"
+    pool_blnt_after="$(auction_token_balance \
+        "${blnt}" "${pool}" pool-blnt-after-protocol-fill)"
+    assert_equal "${protocol_bid}" "$((blnt_before - blnt_after))" \
+        "type-3 exact BLNT bid debit"
+    assert_equal "${pool_blnt_before}" "${pool_blnt_after}" \
+        "type-3 pool BLNT balance after atomic burn"
+    protocol_lot_received=$((usdc_after - usdc_before))
+    (( protocol_lot_received > 0 )) || die "type-3 fill transferred no reserve lot"
+    auction_assert_absent "${pool}" 3 "${backstop}" "type-3 protocol-fee auction"
+    state_set "auction_coverage_type_3_fill_bid_burned" "${protocol_bid}"
+    state_set "auction_coverage_type_3_fill_lot" "${protocol_lot_received}"
+
+    note "Crashing only the controlled EURC oracle price to create a real unhealthy borrower."
+    auction_seed_oracle_price "${oracle}" "${eurc}" \
+        "${AUCTION_CRASHED_PRICE}" eurc-crashed
+    liquidation_auction="$(invoke_transaction "start-type-0-user-liquidation" \
+        "${pool}" new_auction \
+        --auction_type 0 --user "${borrower}" \
+        --bid "[\"${usdc}\"]" --lot "[\"${eurc}\"]" --percent 100)"
+    liquidation_auction="$(printf '%s' "${liquidation_auction}" | jq -c .)"
+    printf '%s' "${liquidation_auction}" | jq -e \
+        --arg usdc "${usdc}" --arg eurc "${eurc}" \
+        '(.bid[$usdc] | tonumber) > 0 and (.lot[$eurc] | tonumber) > 0' \
+        >/dev/null || die "type-0 auction did not contain the borrower debt and collateral"
+    liquidation_block="$(printf '%s' "${liquidation_auction}" | jq -er \
+        '.block | tostring')"
+    state_set "auction_coverage_type_0_started" "${liquidation_auction}"
+    target_block=$((liquidation_block + AUCTION_LIQUIDATION_DISCOUNT_LEDGER))
+    auction_wait_for_ledger "type-0 discounted-bid phase" "${target_block}"
+
+    invoke_transaction_as "fill-type-0-user-liquidation" \
+        "${AUCTION_FILLER_IDENTITY}" "${pool}" submit \
+        --from "${filler}" --spender "${filler}" --to "${filler}" \
+        --requests \
+        "[{\"address\":\"${borrower}\",\"amount\":\"100\",\"request_type\":6}]" \
+        >/dev/null
+    borrower_liabilities="$(auction_position_total \
+        "${pool}" "${borrower}" liabilities borrower-after-liquidation)"
+    borrower_collateral="$(auction_position_total \
+        "${pool}" "${borrower}" collateral borrower-after-liquidation)"
+    backstop_liabilities="$(auction_position_total \
+        "${pool}" "${backstop}" liabilities backstop-after-liquidation)"
+    assert_equal "0" "${borrower_liabilities}" \
+        "type-0 liquidated borrower liabilities"
+    assert_equal "0" "${borrower_collateral}" \
+        "type-0 liquidated borrower collateral"
+    (( backstop_liabilities > 0 )) ||
+        die "discounted type-0 fill did not create residual backstop debt"
+    auction_assert_absent "${pool}" 0 "${borrower}" "type-0 user liquidation"
+    state_set "auction_coverage_type_0_residual_bad_debt" "${backstop_liabilities}"
+
+    bad_debt_auction="$(invoke_transaction "start-type-1-bad-debt-auction" \
+        "${pool}" new_auction \
+        --auction_type 1 --user "${backstop}" --bid '[]' --lot '[]' --percent 100)"
+    bad_debt_auction="$(printf '%s' "${bad_debt_auction}" | jq -c .)"
+    printf '%s' "${bad_debt_auction}" | jq -e \
+        --arg usdc "${usdc}" \
+        '(.bid[$usdc] | tonumber) > 0 and (.lot[$usdc] | tonumber) > 0' \
+        >/dev/null || die "type-1 auction did not select USDC debt and first-loss USDC"
+    bad_debt_block="$(printf '%s' "${bad_debt_auction}" | jq -er '.block | tostring')"
+    state_set "auction_coverage_type_1_started" "${bad_debt_auction}"
+    auction_wait_for_ledger "positive type-1 lot phase" "$((bad_debt_block + 1))"
+    bad_debt_tier_before="$(auction_pool_tier_tokens \
+        "${backstop}" "${pool}" before-bad-debt-fill)"
+    filler_usdc_before="$(auction_token_balance \
+        "${usdc}" "${filler}" filler-usdc-before-bad-debt-fill)"
+    filler_liabilities_before="$(auction_position_total \
+        "${pool}" "${filler}" liabilities filler-before-bad-debt-fill)"
+    invoke_transaction_as "fill-type-1-bad-debt-auction" \
+        "${AUCTION_FILLER_IDENTITY}" "${pool}" submit \
+        --from "${filler}" --spender "${filler}" --to "${filler}" \
+        --requests \
+        "[{\"address\":\"${backstop}\",\"amount\":\"100\",\"request_type\":7}]" \
+        >/dev/null
+    backstop_liabilities="$(auction_position_total \
+        "${pool}" "${backstop}" liabilities backstop-after-bad-debt-fill)"
+    filler_liabilities_after="$(auction_position_total \
+        "${pool}" "${filler}" liabilities filler-after-bad-debt-fill)"
+    bad_debt_tier_after="$(auction_pool_tier_tokens \
+        "${backstop}" "${pool}" after-bad-debt-fill)"
+    filler_usdc_after="$(auction_token_balance \
+        "${usdc}" "${filler}" filler-usdc-after-bad-debt-fill)"
+    assert_equal "0" "${backstop_liabilities}" \
+        "type-1 cleared backstop liabilities"
+    (( filler_liabilities_after > filler_liabilities_before )) ||
+        die "type-1 filler assumed no backstop liabilities"
+    bad_debt_lot_received=$((filler_usdc_after - filler_usdc_before))
+    (( bad_debt_lot_received > 0 )) || die "type-1 fill transferred no tier tokens"
+    assert_equal "${bad_debt_lot_received}" \
+        "$((bad_debt_tier_before - bad_debt_tier_after))" \
+        "type-1 tier impairment and transfer delta"
+    auction_assert_absent "${pool}" 1 "${backstop}" "type-1 bad-debt auction"
+    state_set "auction_coverage_type_1_fill_lot" "${bad_debt_lot_received}"
+
+    auction_seed_oracle_price "${oracle}" "${eurc}" \
+        "${AUCTION_HEALTHY_PRICE}" eurc-restored
+    state_set "auction_coverage_started_types" '[0,1,2,3]'
+    state_set "auction_coverage_filled_types" '[0,1,2,3]'
+    state_set "auction_coverage_completed_ledger" "$(auction_latest_ledger)"
+    state_set "auction_coverage_completed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    note "Local V3 auction coverage passed: types 0, 1, 2, and 3 all started and filled through submit."
+}
+
 dual_status() {
     local legacy_emitter v3_emitter blnt_backfill legacy_recipient v3_recipient queued
     local swapped blnd_burned remaining_capacity backfill_balance vesting_start vesting_end
@@ -853,6 +1435,7 @@ Dual-emitter ${NETWORK_LABEL} status
   remaining BLNT conversion capacity: ${remaining_capacity}
   conversion deadline: ${swap_deadline}
   expired conversion-reserve BLNT burned: ${expired_blnt_burned}
+  local auction coverage completed: $(state_optional auction_coverage_completed_at)
   Comet v2 commit: $(state_value comet_v2_source_commit)
   Comet v2 WASM: $(state_value comet_v2_wasm_sha256)
   state: ${STATE_FILE}
@@ -863,6 +1446,9 @@ dual_run() {
     dual_validate
     command_start
     dual_deploy true
+    if [[ "${NETWORK_MODE}" == "local" ]]; then
+        dual_auction_coverage
+    fi
 }
 
 main_dual() {
@@ -871,6 +1457,7 @@ main_dual() {
         validate) dual_validate ;;
         start) command_start ;;
         deploy) dual_deploy ;;
+        auctions) dual_auction_coverage ;;
         run) dual_run ;;
         status) dual_status ;;
         stop) command_stop ;;

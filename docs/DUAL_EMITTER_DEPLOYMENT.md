@@ -27,14 +27,36 @@ two independent lanes, activates v3 directly, executes the exact
 150-million-BLNT backfill drop, converts and burns a small test
 balance, deploys and activates the modeled Fixed and Custom V2/V3 pools, adds
 each pair to its respective reward zone, advances each emitter, and verifies
-all final bindings. Stop the isolated network with:
+all final bindings. On local Quickstart it then deploys an isolated V3 auction
+pool and starts and fills all four public auction types. Stop the isolated
+network with:
 
 ```bash
 make dual-emitter-stop
 ```
 
 To reuse an already-running network, run `make dual-emitter-deploy` after
-`make dual-emitter-validate`.
+`make dual-emitter-validate`, then run the auction coverage separately:
+
+```bash
+make dual-emitter-auctions
+```
+
+Re-running the command after a successful pass revalidates the recorded pool
+against the live ledger and confirms that all four completed auctions remain
+absent. Retained evidence from a stopped ephemeral ledger is never accepted as
+a live success.
+
+The auction pass uses real deployed-WASM transactions and two isolated signer
+accounts. A deliberately high but valid interest-rate configuration reaches
+the inclusive 200-USDC protocol-credit minimum without altering production
+contracts. It proves type 2 (interest) and type 3 (protocol fee) can coexist,
+then fills both through submit discriminants 8 and 10. It next crashes only the
+test oracle's collateral price, starts type 0 (user liquidation), and waits for
+ledger 201 of the inherited curve before filling. The discounted debt leaves a
+real residual backstop liability, which is then started and filled as type 1
+(bad debt) through submit discriminant 7. Expect that curve wait to take about
+three and a half minutes on the one-ledger-per-second local network.
 
 `run` and `deploy` use the committed snapshot manifest. It assigns
 exactly 74 million BLNT proportionally across the 434 positive
@@ -110,6 +132,9 @@ record:
 - positive independent BLND and BLNT distributions;
 - active modeled Fixed and Custom pools in their respective V2 and V3 reward
   zones, including verified seven-day V2 USDC-supply emission streams; and
+- a dedicated local V3 pool where auction types 0, 1, 2, and 3 were each
+  started, filled, removed, and checked for their corresponding position,
+  custody, donation, tier-impairment, or BLNT-burn balance deltas; and
 - the immutable 51-million-BLNT output cap, 102-million-BLND input capacity,
   270-day deadline, zero initial BLNT expiry burns, and empty initial v3 queue.
 

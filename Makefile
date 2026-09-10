@@ -39,6 +39,9 @@ dual-emitter-start:
 dual-emitter-deploy:
 	bash scripts/dual-emitter-deployment.sh deploy
 
+dual-emitter-auctions:
+	bash scripts/dual-emitter-deployment.sh auctions
+
 dual-emitter-run:
 	bash scripts/dual-emitter-deployment.sh run
 

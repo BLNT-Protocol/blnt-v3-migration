@@ -16,9 +16,15 @@ EXTERNAL_BLEND_BACKSTOP="${BLEND_EXTERNAL_BLEND_BACKSTOP:-CBDVWXT433PRVTUNM56C3J
 EXTERNAL_BLND_TOKEN="${BLEND_EXTERNAL_BLND_TOKEN:-CB22KRA3YZVCNCQI64JQ5WE7UY2VAV7WFLK6A2JN3HEX56T2EDAFO7QF}"
 EXPECTED_EXTERNAL_BLND_USDC="${BLEND_EXTERNAL_BLND_USDC:-CA5UTUUPHYL5K22UBRUVC37EARZUGYOSGK3IKIXG2JLCC5ZZLI4BDWDM}"
 V3_USER_WALLET="${BLEND_V3_USER_WALLET:-GDPAIYJ2FISB5H7JNWDNRERAIMGZSP4HVQKYMKO42KRB23GANJXNG2ZI}"
+V3_USER_IDENTITY="${BLEND_V3_USER_IDENTITY:-blnt-v3-only-${NETWORK_MODE}-user}"
 V3_BLNT_MINT=$((1000 * SCALAR_7))
 V3_USDC_MINT=$((100000 * SCALAR_7))
 V3_BLNT_USDC_LP_TOTAL=$((2 * DUAL_MODELED_V3_LP_BALANCE))
+V3_USER_ASSET_FUNDING=$((1000000 * SCALAR_7))
+V3_USER_XLM_FULL_DONORS=100
+V3_USER_XLM_FULL_DONOR_PAYMENT=$((9998 * SCALAR_7))
+V3_USER_XLM_FINAL_PAYMENT=$((200 * SCALAR_7))
+V3_USER_XLM_BATCH_SIZE=4
 
 # shellcheck source=permissioned-pool.sh
 source "${SCRIPT_DIR}/permissioned-pool.sh"
@@ -34,6 +40,8 @@ Commands:
   validate  Build and validate only V3, backfill, oracle, and Comet v2 artifacts.
   start     Verify the public testnet RPC (or start local Quickstart).
   deploy    Deploy and verify a fresh V3 stack without deploying or mutating V1/V2.
+  resume-core
+            Resume a core deployment after its prerequisites were recorded.
   deploy-modeled-pools
             Resume the V3 modeled-pool and emissions phase after core deployment.
   deploy-reserve-loss-pool
@@ -54,6 +62,8 @@ Commands:
             Write the V3-only deployment registry from verified state.
   refresh-oracle
             Refresh the controlled V3 fixture-oracle histories.
+  fund-user Fund the configured user with one million of every V3 reserve
+            asset except BLND. LP-share tokens are not included.
   stop      Stop the local Quickstart container.
 
 The external Blend backstop and BLND token are read-only inputs. The runner
@@ -80,9 +90,285 @@ V3-only ${NETWORK_LABEL} deployment:
      SEP-41 Assets V3 pools, add them to the V3 reward zone, seed their
      positions, and start BLNT emissions.
   5. Preserve the configured 25-million-BLNT grant for ${V3_USER_WALLET}.
+  6. Send that wallet 1 million each of BLNT, USDC, native XLM, EURC,
+     PYUSD, HLTY, IMPR, EXHT, USDP, wBTC, and wETH. Do not send BLND or
+     LP-share tokens.
 
 No V1/V2 contracts or BLND assets are deployed or mutated.
 EOF
+}
+
+v3_only_require_user_access() {
+    local configured_user
+
+    configured_user="$(stellar_cli keys public-key "${V3_USER_IDENTITY}")" ||
+        die "configured V3 user identity is unavailable: ${V3_USER_IDENTITY}"
+    assert_equal "${V3_USER_WALLET}" "${configured_user}" \
+        "configured V3 user identity"
+    read_horizon_account "${V3_USER_WALLET}" >/dev/null
+}
+
+v3_only_ensure_user_trustline() {
+    local label="$1" code="$2" issuer="$3" account
+
+    account="$(read_horizon_account "${V3_USER_WALLET}")"
+    if printf '%s' "${account}" | jq -e \
+        --arg code "${code}" --arg issuer "${issuer}" '
+          any(.balances[];
+            .asset_type != "native" and
+            .asset_code == $code and
+            .asset_issuer == $issuer)
+        ' >/dev/null
+    then
+        return
+    fi
+    capture "trust-v3-user-${label}" \
+        stellar_cli tx new change-trust \
+        --source-account "${V3_USER_IDENTITY}" \
+        --line "${code}:${issuer}" \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+}
+
+v3_only_ensure_user_token_funding() {
+    local label="$1" token="$2" source="$3"
+    local state_key recorded balance
+
+    state_key="wallet_${label}_funded"
+    recorded="$(state_optional "${state_key}")"
+    if [[ -n "${recorded}" ]]; then
+        assert_equal "${V3_USER_ASSET_FUNDING}" "${recorded}" \
+            "recorded wallet ${label} funding"
+        return
+    fi
+    balance="$(normalize_scalar "$(invoke_view \
+        "query-wallet-${label}-before-funding" "${token}" balance \
+        --id "${V3_USER_WALLET}")")"
+    if (( balance == 0 )); then
+        invoke_transaction_as "fund-wallet-${label}" "${source}" \
+            "${token}" mint --to "${V3_USER_WALLET}" \
+            --amount "${V3_USER_ASSET_FUNDING}" >/dev/null
+    else
+        assert_equal "${V3_USER_ASSET_FUNDING}" "${balance}" \
+            "unrecorded wallet ${label} balance"
+    fi
+    balance="$(normalize_scalar "$(invoke_view \
+        "verify-wallet-${label}-funding" "${token}" balance \
+        --id "${V3_USER_WALLET}")")"
+    assert_equal "${V3_USER_ASSET_FUNDING}" "${balance}" \
+        "wallet ${label} funding"
+    state_set "${state_key}" "${V3_USER_ASSET_FUNDING}"
+}
+
+v3_only_fund_user_classic_asset() {
+    local label="$1" code="$2" token="$3" issuer="$4" source="$5"
+
+    v3_only_ensure_user_trustline "${label}" "${code}" "${issuer}"
+    v3_only_ensure_user_token_funding "${label}" "${token}" "${source}"
+}
+
+v3_only_fund_user_core_assets() {
+    local blnt="$1" usdc="$2" issuer="$3"
+
+    v3_only_require_user_access
+    v3_only_fund_user_classic_asset \
+        blnt BLNT "${blnt}" "${issuer}" "${OPERATOR_IDENTITY}"
+    v3_only_fund_user_classic_asset \
+        usdc USDC "${usdc}" "${issuer}" "${OPERATOR_IDENTITY}"
+    state_set "funding_wallet" "${V3_USER_WALLET}"
+    state_set "wallet_asset_funding" "${V3_USER_ASSET_FUNDING}"
+}
+
+v3_only_fund_and_wait_for_donor() {
+    local account="$1"
+
+    for _ in {1..120}; do
+        if curl --fail --silent --show-error --max-time 5 \
+            "${HORIZON_URL}/accounts/${account}" >/dev/null 2>&1 &&
+            stellar_cli ledger entry fetch account \
+                --account "${account}" \
+                --rpc-url "${RPC_URL}" \
+                --network-passphrase "${NETWORK_PASSPHRASE}" \
+                --output json 2>/dev/null |
+                jq -e '.entries | length == 1' >/dev/null 2>&1
+        then
+            return
+        fi
+        curl --fail --silent --show-error --max-time 10 \
+            --get --data-urlencode "addr=${account}" \
+            "${FRIENDBOT_URL}" >/dev/null 2>&1 || true
+        sleep 1
+    done
+    die "funded donor did not become visible through Horizon and RPC: ${account}"
+}
+
+v3_only_wallet_xlm_payment_exists() {
+    local donor="$1" amount="$2" payments match_count
+
+    if ! payments="$(curl --fail --silent --show-error --max-time 10 \
+        "${HORIZON_URL}/accounts/${donor}/payments?limit=20&order=desc" 2>/dev/null)"
+    then
+        return 2
+    fi
+    if ! match_count="$(printf '%s' "${payments}" | jq -er \
+        --arg donor "${donor}" --arg wallet "${V3_USER_WALLET}" \
+        --arg expected "${amount}" '
+          def raw:
+            split(".") as $parts |
+            ((($parts[0] | tonumber) * 10000000) +
+             (((($parts[1] // "") + "0000000")[0:7]) | tonumber) | tostring);
+          [._embedded.records[] | select(
+            .type == "payment" and .from == $donor and .to == $wallet and
+            .asset_type == "native" and (.amount | raw) == $expected
+          )] | length
+        ' 2>/dev/null)"
+    then
+        return 2
+    fi
+    case "${match_count}" in
+        0) return 1 ;;
+        1) return 0 ;;
+        *) return 3 ;;
+    esac
+}
+
+v3_only_fund_user_xlm_donor() {
+    local index="$1" amount="$2" identity donor lookup_status
+
+    identity="blnt-v3-only-${NETWORK_MODE}-wallet-xlm-donor-${index}"
+    donor="$(stellar_cli keys public-key "${identity}")"
+    v3_only_fund_and_wait_for_donor "${donor}"
+    lookup_status=2
+    for _ in {1..30}; do
+        if v3_only_wallet_xlm_payment_exists "${donor}" "${amount}"; then
+            lookup_status=0
+        else
+            lookup_status=$?
+        fi
+        case "${lookup_status}" in
+            0|1) break ;;
+            2) sleep 1 ;;
+            3) die "wallet XLM donor ${index} has duplicate payments" ;;
+        esac
+    done
+    case "${lookup_status}" in
+        0) return ;;
+        1) ;;
+        *) die "unable to determine wallet XLM donor ${index} payment state" ;;
+    esac
+    if ! capture "fund-wallet-xlm-${index}" \
+            stellar_cli tx new payment \
+            --source-account "${identity}" \
+            --destination "${V3_USER_WALLET}" \
+            --asset native \
+            --amount "${amount}" \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+    then
+        note "Wallet XLM donor ${index} submission was inconclusive; verifying on-chain state."
+    fi
+    for _ in {1..30}; do
+        if v3_only_wallet_xlm_payment_exists "${donor}" "${amount}"; then
+            return
+        fi
+        lookup_status=$?
+        (( lookup_status != 3 )) ||
+            die "wallet XLM donor ${index} has duplicate payments"
+        sleep 1
+    done
+    die "wallet XLM donor ${index} payment was not recorded by Horizon"
+}
+
+v3_only_fund_user_xlm() {
+    local identity amount
+    local completed total index batch_end batch_index failed pid
+    local -a pids
+
+    completed="$(state_optional wallet_xlm_donors_completed)"
+    completed="${completed:-0}"
+    if (( completed <= V3_USER_XLM_FULL_DONORS )); then
+        total=$((completed * V3_USER_XLM_FULL_DONOR_PAYMENT))
+    else
+        total="${V3_USER_ASSET_FUNDING}"
+    fi
+    index=$((completed + 1))
+    while (( index <= V3_USER_XLM_FULL_DONORS + 1 )); do
+        batch_end=$((index + V3_USER_XLM_BATCH_SIZE - 1))
+        if (( batch_end > V3_USER_XLM_FULL_DONORS + 1 )); then
+            batch_end=$((V3_USER_XLM_FULL_DONORS + 1))
+        fi
+        for ((batch_index = index; batch_index <= batch_end; batch_index++)); do
+            identity="blnt-v3-only-${NETWORK_MODE}-wallet-xlm-donor-${batch_index}"
+            if ! stellar_cli keys public-key "${identity}" >/dev/null 2>&1; then
+                stellar_cli keys generate "${identity}" >/dev/null
+            fi
+        done
+        pids=()
+        for ((batch_index = index; batch_index <= batch_end; batch_index++)); do
+            if (( batch_index <= V3_USER_XLM_FULL_DONORS )); then
+                amount="${V3_USER_XLM_FULL_DONOR_PAYMENT}"
+            else
+                amount="${V3_USER_XLM_FINAL_PAYMENT}"
+            fi
+            v3_only_fund_user_xlm_donor "${batch_index}" "${amount}" &
+            pids+=("$!")
+        done
+        failed=0
+        for pid in "${pids[@]}"; do
+            wait "${pid}" || failed=1
+        done
+        (( failed == 0 )) || die "one or more wallet XLM donor payments failed"
+        for ((batch_index = index; batch_index <= batch_end; batch_index++)); do
+            if (( batch_index <= V3_USER_XLM_FULL_DONORS )); then
+                total=$((total + V3_USER_XLM_FULL_DONOR_PAYMENT))
+            else
+                total=$((total + V3_USER_XLM_FINAL_PAYMENT))
+            fi
+        done
+        state_set "wallet_xlm_donors_completed" "${batch_end}"
+        index=$((batch_end + 1))
+    done
+    assert_equal "${V3_USER_ASSET_FUNDING}" "${total}" \
+        "wallet XLM transfer total"
+    state_set "wallet_xlm_funded" "${total}"
+}
+
+v3_only_fund_user_assets() {
+    local operator reserve_issuer code label token symbol
+
+    validate_tools
+    require_network
+    load_state
+    v3_only_require_user_access
+    operator="$(state_value operator)"
+    assert_equal "${V3_USER_ASSET_FUNDING}" \
+        "$(state_value wallet_blnt_funded)" "wallet BLNT funding"
+    assert_equal "${V3_USER_ASSET_FUNDING}" \
+        "$(state_value wallet_usdc_funded)" "wallet USDC funding"
+    for code in EURC PYUSD; do
+        label="$(printf '%s' "${code}" | tr '[:upper:]' '[:lower:]')"
+        token="$(modeled_asset_id "${code}")"
+        v3_only_fund_user_classic_asset \
+            "${label}" "${code}" "${token}" "${operator}" "${OPERATOR_IDENTITY}"
+    done
+    reserve_issuer="$(state_value reserve_loss_issuer)"
+    while IFS= read -r code; do
+        label="$(printf '%s' "${code}" | tr '[:upper:]' '[:lower:]')"
+        token="$(reserve_loss_asset_id "${code}")"
+        v3_only_fund_user_classic_asset \
+            "${label}" "${code}" "${token}" "${reserve_issuer}" \
+            "${RESERVE_LOSS_ISSUER_IDENTITY}"
+    done < <(jq -r '.reserves[].asset' "${RESERVE_LOSS_FIXTURE}")
+    while IFS= read -r symbol; do
+        label="$(sep41_label "${symbol}")"
+        token="$(sep41_asset_id "${symbol}")"
+        v3_only_ensure_user_token_funding \
+            "${label}" "${token}" "${OPERATOR_IDENTITY}"
+    done < <(jq -r '.reserves[].asset' "${SEP41_POOL_FIXTURE}")
+    v3_only_fund_user_xlm
+    state_set "wallet_funded_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    v3_only_write_registry
+    note "Funded ${V3_USER_WALLET} with every V3 reserve asset except BLND."
 }
 
 v3_only_update_reward_zone() {
@@ -296,6 +582,16 @@ v3_only_write_registry() {
             } else {} end)
           )
         }
+        + (if ((.funding_wallet // "") | length) > 0 then {
+          wallet_funding: {
+            recipient: .funding_wallet,
+            amount_per_asset: .wallet_asset_funding,
+            assets: ["BLNT", "USDC", "XLM", "EURC", "PYUSD", "HLTY", "IMPR", "EXHT", "USDP", "wBTC", "wETH"],
+            excluded_assets: ["BLND"],
+            lp_share_tokens_included: false,
+            completed_at: (.wallet_funded_at // null)
+          }
+        } else {} end)
     ' "${STATE_FILE}" >"${registry_tmp}"
     mv "${registry_tmp}" "${REGISTRY_FILE}"
     note "Wrote V3-only deployment registry: ${REGISTRY_FILE}"
@@ -453,6 +749,243 @@ v3_only_deploy_modeled_pools() {
     note "Deployed and activated only the modeled Fixed and Custom V3 pools."
 }
 
+v3_only_complete_core_deployment() {
+    local operator depositor controller blnt usdc xlm
+    local v3_emitter backfill blnt_usdc blnt_xlm
+    local balance account admin v3_pool_hash v3_backstop v3_factory
+    local deployed_v3_backstop backfill_balance recipient emitted reward_zone
+    local total_swapped total_blnd_burned capacity
+    local vesting_start vesting_end grant_start grant_end swap_deadline
+
+    operator="$(state_value operator)"
+    depositor="$(state_value depositor)"
+    controller="$(state_value comet_controller)"
+    blnt="$(state_value blnt_token)"
+    usdc="$(state_value usdc_token)"
+    xlm="$(state_value xlm_token)"
+    v3_emitter="$(state_value v3_emitter)"
+    backfill="$(state_value blnt_backfill)"
+    blnt_usdc="$(state_value blnt_usdc_token)"
+    blnt_xlm="$(state_value blnt_xlm_token)"
+
+    balance="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-user-blnt-usdc" "${blnt_usdc}" balance \
+        --id "${depositor}")")"
+    if (( balance == 0 )); then
+        invoke_transaction_as "join-v3-only-blnt-usdc" \
+            "${DEPOSITOR_IDENTITY}" "${blnt_usdc}" join_pool \
+            --pool_amount_out "${V3_BLNT_USDC_LP_TOTAL}" \
+            --user "${depositor}" \
+            --max_amounts_in "[\"${V3_BLNT_MINT}\",\"${V3_USDC_MINT}\"]" >/dev/null
+        balance="$(normalize_scalar "$(invoke_view \
+            "verify-v3-only-user-blnt-usdc" "${blnt_usdc}" balance \
+            --id "${depositor}")")"
+    fi
+    assert_equal "${V3_BLNT_USDC_LP_TOTAL}" "${balance}" \
+        "V3-only depositor BLNT:USDC shares"
+    state_set "phase" "blnt-usdc-liquidity-seeded"
+
+    balance="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-user-blnt-xlm" "${blnt_xlm}" balance \
+        --id "${depositor}")")"
+    if (( balance == 0 )); then
+        invoke_transaction_as "join-v3-only-blnt-xlm" \
+            "${DEPOSITOR_IDENTITY}" "${blnt_xlm}" join_pool \
+            --pool_amount_out "${DUAL_MODELED_V3_LP_BALANCE}" \
+            --user "${depositor}" \
+            --max_amounts_in "[\"${V3_BLNT_MINT}\",\"${COMET_INITIAL_XLM}\"]" >/dev/null
+        balance="$(normalize_scalar "$(invoke_view \
+            "verify-v3-only-user-blnt-xlm" "${blnt_xlm}" balance \
+            --id "${depositor}")")"
+    fi
+    assert_equal "${DUAL_MODELED_V3_LP_BALANCE}" "${balance}" \
+        "V3-only depositor BLNT:XLM shares"
+    state_set "phase" "comet-liquidity-seeded"
+
+    account="$(read_horizon_account "${controller}")"
+    if ! printf '%s' "${account}" | jq -e \
+        --argjson threshold "${COMET_CONTROLLER_THRESHOLD}" '
+          .thresholds.low_threshold == $threshold and
+          .thresholds.med_threshold == $threshold and
+          .thresholds.high_threshold == $threshold and
+          (.signers | length == 1) and .signers[0].weight == 0
+        ' >/dev/null
+    then
+        capture "lock-v3-only-comet-controller" \
+            stellar_cli tx new set-options \
+            --source-account "${COMET_CONTROLLER_IDENTITY}" \
+            --low-threshold "${COMET_CONTROLLER_THRESHOLD}" \
+            --med-threshold "${COMET_CONTROLLER_THRESHOLD}" \
+            --high-threshold "${COMET_CONTROLLER_THRESHOLD}" \
+            --master-weight 0 \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+    fi
+    verify_locked_comet_controller "v3-only-blnt-usdc" \
+        "${blnt_usdc}" "${controller}" "${blnt}" "${usdc}"
+    verify_locked_comet_controller "v3-only-blnt-xlm" \
+        "${blnt_xlm}" "${controller}" "${blnt}" "${xlm}"
+    state_set "phase" "comet-controller-locked"
+
+    admin="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-blnt-admin-before-handoff" "${blnt}" admin)")"
+    if [[ "${admin}" == "${operator}" ]]; then
+        invoke_transaction "set-v3-only-emitter-as-blnt-admin" \
+            "${blnt}" set_admin --new_admin "${v3_emitter}" >/dev/null
+    else
+        assert_equal "${v3_emitter}" "${admin}" "BLNT administrator"
+    fi
+    state_set "phase" "blnt-admin-handed-off"
+
+    v3_pool_hash="$(upload_wasm "upload-v3-only-pool" "${V3_POOL_WASM}")"
+    state_set "v3_pool_hash" "${v3_pool_hash}"
+    state_set "v3_pool_wasm_hash" "${v3_pool_hash}"
+    v3_backstop="$(state_optional v3_backstop)"
+    if [[ -z "${v3_backstop}" ]]; then
+        v3_backstop="$(predict_contract_id "${CANDIDATE_SALT}")"
+        state_set "v3_backstop" "${v3_backstop}"
+        state_set "candidate_backstop" "${v3_backstop}"
+    fi
+    v3_factory="$(state_optional v3_factory)"
+    if [[ -z "${v3_factory}" ]]; then
+        v3_factory="$(deploy_wasm "deploy-v3-only-factory" \
+            "${V3_FACTORY_WASM}" "" \
+            --pool_init_meta \
+            "{\"backstop\":\"${v3_backstop}\",\"blnt_id\":\"${blnt}\",\"pool_hash\":\"${v3_pool_hash}\"}")"
+        state_set "v3_factory" "${v3_factory}"
+        state_set "v3_pool_factory" "${v3_factory}"
+    fi
+    state_set "phase" "v3-factory-deployed"
+
+    if [[ "$(state_optional v3_emitter_initialized)" != "true" ]]; then
+        invoke_transaction "initialize-v3-only-emitter" "${v3_emitter}" initialize \
+            --blnd_token "${blnt}" \
+            --backstop "${v3_backstop}" \
+            --backstop_token "${blnt_xlm}" >/dev/null
+        state_set "v3_emitter_initialized" "true"
+    fi
+    if [[ "$(state_optional v3_backstop_deployed)" != "true" ]]; then
+        deployed_v3_backstop="$(deploy_wasm "deploy-v3-only-backstop" \
+            "${V3_BACKSTOP_WASM}" "${CANDIDATE_SALT}" \
+            --blnt_usdc_token "${blnt_usdc}" \
+            --blnt_xlm_token "${blnt_xlm}" \
+            --emitter "${v3_emitter}" \
+            --blnt_token "${blnt}" \
+            --usdc_token "${usdc}" \
+            --xlm_token "${xlm}" \
+            --pool_factory "${v3_factory}" \
+            --drop_list "[[\"${backfill}\",\"${BLNT_BACKFILL_DROP}\"]]")"
+        assert_equal "${v3_backstop}" "${deployed_v3_backstop}" \
+            "v3 backstop address"
+        state_set "v3_backstop_deployed" "true"
+    fi
+    state_set "phase" "v3-core-contracts-deployed"
+
+    backfill_balance="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-backfill-balance" "${blnt}" balance --id "${backfill}")")"
+    if [[ "$(state_optional v3_backfill_drop_executed)" != "true" ]]; then
+        if [[ "${backfill_balance}" == "${BLNT_BACKFILL_DROP}" ]]; then
+            state_set "v3_backfill_drop_executed" "true"
+        else
+            assert_equal "0" "${backfill_balance}" \
+                "pre-drop backfill BLNT custody"
+            invoke_transaction "activate-v3-only" "${v3_backstop}" distribute >/dev/null
+            invoke_transaction "execute-v3-only-backfill-drop" \
+                "${v3_backstop}" drop >/dev/null
+            backfill_balance="$(normalize_scalar "$(invoke_view \
+                "verify-v3-only-backfill-balance" "${blnt}" balance \
+                --id "${backfill}")")"
+            state_set "v3_backfill_drop_executed" "true"
+        fi
+    fi
+    assert_equal "${BLNT_BACKFILL_DROP}" "${backfill_balance}" \
+        "backfill BLNT custody"
+    total_swapped="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-total-swapped" "${backfill}" get_total_swapped)")"
+    total_blnd_burned="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-total-blnd-burned" "${backfill}" get_total_blnd_burned)")"
+    capacity="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-swap-capacity" "${backfill}" get_remaining_swap_capacity)")"
+    assert_equal "0" "${total_swapped}" "initial converted BLNT output"
+    assert_equal "0" "${total_blnd_burned}" "initial converted BLND burned"
+    assert_equal "${BLNT_SWAP_CAP}" "${capacity}" "initial swap capacity"
+    assert_equal "${EXTERNAL_BLND_TOKEN}" "$(normalize_scalar "$(invoke_view \
+        "query-v3-only-backfill-blnd" "${backfill}" get_legacy_blnd_token)")" \
+        "backfill external BLND binding"
+
+    vesting_start="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-vesting-start" "${backfill}" get_vesting_start)")"
+    vesting_end="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-vesting-end" "${backfill}" get_vesting_end)")"
+    grant_start="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-grant-start" "${backfill}" get_grant_vesting_start)")"
+    grant_end="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-grant-end" "${backfill}" get_grant_vesting_end)")"
+    swap_deadline="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-swap-deadline" "${backfill}" get_swap_deadline)")"
+    assert_equal "${BLNT_BACKFILL_VESTING_SECONDS}" \
+        "$((vesting_end - vesting_start))" "backfill vesting duration"
+    assert_equal "${vesting_start}" "${grant_start}" "shared vesting start"
+    assert_equal "${BLNT_GRANT_VESTING_SECONDS}" \
+        "$((grant_end - grant_start))" "grant vesting duration"
+    assert_equal "${BLNT_SWAP_DURATION_SECONDS}" \
+        "$((swap_deadline - vesting_start))" "swap duration"
+    state_set "blnt_backfill_vesting_start" "${vesting_start}"
+    state_set "blnt_backfill_vesting_end" "${vesting_end}"
+    state_set "blnt_grant_vesting_start" "${grant_start}"
+    state_set "blnt_grant_vesting_end" "${grant_end}"
+    state_set "blnt_swap_deadline" "${swap_deadline}"
+    state_set "blnt_swap_cap" "${BLNT_SWAP_CAP}"
+    state_set "blnd_swap_input_cap" "${BLND_SWAP_INPUT_CAP}"
+    state_set "blnt_backfill_initial_balance" "${BLNT_BACKFILL_DROP}"
+    state_set "phase" "core-deployed"
+
+    v3_only_deploy_modeled_pools
+    sleep "${EMISSION_START_DELAY_SECONDS}"
+    emitted="$(normalize_scalar "$(invoke_transaction \
+        "emit-v3-only-blnt" "${v3_backstop}" distribute)")"
+    [[ "${emitted}" =~ ^[1-9][0-9]*$ ]] || die "v3 emitter minted no BLNT"
+    admin="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-blnt-admin" "${blnt}" admin)")"
+    recipient="$(normalize_scalar "$(invoke_view \
+        "query-v3-only-emitter-recipient" "${v3_emitter}" get_backstop)")"
+    assert_equal "${v3_emitter}" "${admin}" "BLNT administrator"
+    assert_equal "${v3_backstop}" "${recipient}" "V3 emitter recipient"
+    reward_zone="$(invoke_view "query-final-v3-only-reward-zone" \
+        "${v3_backstop}" reward_zone)"
+    state_set "v3_reward_zone" "$(printf '%s' "${reward_zone}" | jq -c '.')"
+    state_set "v3_emitted" "${emitted}"
+    state_set "phase" "verified"
+    state_set "verified_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    v3_only_write_registry
+    stellar_cli ledger latest \
+        --rpc-url "${RPC_URL}" \
+        --network-passphrase "${NETWORK_PASSPHRASE}" \
+        --output json-formatted >"${RUN_DIR}/ledger-after-v3-only-deploy.json"
+    note "V3-only deployment verified. State: ${STATE_FILE}"
+}
+
+v3_only_resume_core_deployment() {
+    local phase
+
+    validate_tools
+    require_network
+    load_state
+    v3_only_validate_artifacts
+    phase="$(state_optional phase)"
+    case "${phase}" in
+        core-prerequisites-ready|blnt-usdc-liquidity-seeded|comet-liquidity-seeded|comet-controller-locked|blnt-admin-handed-off|v3-factory-deployed|v3-core-contracts-deployed|core-deployed)
+            ;;
+        verified)
+            die "core deployment is already verified"
+            ;;
+        *)
+            die "core prerequisites are incomplete; refusing unsafe resume from phase: ${phase:-unset}"
+            ;;
+    esac
+    v3_only_complete_core_deployment
+}
+
 v3_only_deploy() {
     local skip_build="${1:-false}"
     local operator depositor controller issuer blnt usdc xlm xlm_balance
@@ -573,132 +1106,17 @@ v3_only_deploy() {
     invoke_transaction "mint-v3-depositor-usdc" "${usdc}" mint \
         --to "${depositor}" --amount "${V3_USDC_MINT}" >/dev/null
 
+    # BLNT must reach the configured test wallet before its administrator is
+    # permanently handed to the emitter. USDC is funded here alongside it so
+    # the core funding is atomic from the runner's perspective.
+    v3_only_fund_user_core_assets "${blnt}" "${usdc}" "${issuer}"
+
     initialize_comet "v3-only-blnt-usdc" "${blnt_usdc}" "${controller}" \
         "${blnt}" "${usdc}" "${COMET_INITIAL_BLND}" "${COMET_INITIAL_PAIR_TOKEN}"
     initialize_comet "v3-only-blnt-xlm" "${blnt_xlm}" "${controller}" \
         "${blnt}" "${xlm}" "${COMET_INITIAL_BLND}" "${xlm_balance}"
-    invoke_transaction_as "join-v3-only-blnt-usdc" \
-        "${DEPOSITOR_IDENTITY}" "${blnt_usdc}" join_pool \
-        --pool_amount_out "${V3_BLNT_USDC_LP_TOTAL}" \
-        --user "${depositor}" \
-        --max_amounts_in "[\"${V3_BLNT_MINT}\",\"${V3_USDC_MINT}\"]" >/dev/null
-    invoke_transaction_as "join-v3-only-blnt-xlm" \
-        "${DEPOSITOR_IDENTITY}" "${blnt_xlm}" join_pool \
-        --pool_amount_out "${DUAL_MODELED_V3_LP_BALANCE}" \
-        --user "${depositor}" \
-        --max_amounts_in "[\"${V3_BLNT_MINT}\",\"${COMET_INITIAL_XLM}\"]" >/dev/null
-    capture "lock-v3-only-comet-controller" \
-        stellar_cli tx new set-options \
-        --source-account "${COMET_CONTROLLER_IDENTITY}" \
-        --low-threshold "${COMET_CONTROLLER_THRESHOLD}" \
-        --med-threshold "${COMET_CONTROLLER_THRESHOLD}" \
-        --high-threshold "${COMET_CONTROLLER_THRESHOLD}" \
-        --master-weight 0 \
-        --rpc-url "${RPC_URL}" \
-        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
-    verify_locked_comet_controller "v3-only-blnt-usdc" \
-        "${blnt_usdc}" "${controller}" "${blnt}" "${usdc}"
-    verify_locked_comet_controller "v3-only-blnt-xlm" \
-        "${blnt_xlm}" "${controller}" "${blnt}" "${xlm}"
-
-    invoke_transaction "set-v3-only-emitter-as-blnt-admin" \
-        "${blnt}" set_admin --new_admin "${v3_emitter}" >/dev/null
-    v3_pool_hash="$(upload_wasm "upload-v3-only-pool" "${V3_POOL_WASM}")"
-    v3_backstop="$(predict_contract_id "${CANDIDATE_SALT}")"
-    state_set "v3_backstop" "${v3_backstop}"
-    state_set "candidate_backstop" "${v3_backstop}"
-    v3_factory="$(deploy_wasm "deploy-v3-only-factory" \
-        "${V3_FACTORY_WASM}" "" \
-        --pool_init_meta \
-        "{\"backstop\":\"${v3_backstop}\",\"blnt_id\":\"${blnt}\",\"pool_hash\":\"${v3_pool_hash}\"}")"
-    state_set "v3_factory" "${v3_factory}"
-    state_set "v3_pool_factory" "${v3_factory}"
-    state_set "v3_pool_hash" "${v3_pool_hash}"
-    state_set "v3_pool_wasm_hash" "${v3_pool_hash}"
-    invoke_transaction "initialize-v3-only-emitter" "${v3_emitter}" initialize \
-        --blnd_token "${blnt}" \
-        --backstop "${v3_backstop}" \
-        --backstop_token "${blnt_xlm}" >/dev/null
-    deployed_v3_backstop="$(deploy_wasm "deploy-v3-only-backstop" \
-        "${V3_BACKSTOP_WASM}" "${CANDIDATE_SALT}" \
-        --blnt_usdc_token "${blnt_usdc}" \
-        --blnt_xlm_token "${blnt_xlm}" \
-        --emitter "${v3_emitter}" \
-        --blnt_token "${blnt}" \
-        --usdc_token "${usdc}" \
-        --xlm_token "${xlm}" \
-        --pool_factory "${v3_factory}" \
-        --drop_list "[[\"${backfill}\",\"${BLNT_BACKFILL_DROP}\"]]")"
-    assert_equal "${v3_backstop}" "${deployed_v3_backstop}" "v3 backstop address"
-    invoke_transaction "activate-v3-only" "${v3_backstop}" distribute >/dev/null
-    invoke_transaction "execute-v3-only-backfill-drop" "${v3_backstop}" drop >/dev/null
-
-    backfill_balance="$(normalize_scalar "$(invoke_view \
-        "query-v3-only-backfill-balance" "${blnt}" balance --id "${backfill}")")"
-    assert_equal "${BLNT_BACKFILL_DROP}" "${backfill_balance}" "backfill BLNT custody"
-    total_swapped="$(normalize_scalar "$(invoke_view \
-        "query-v3-only-total-swapped" "${backfill}" get_total_swapped)")"
-    total_blnd_burned="$(normalize_scalar "$(invoke_view \
-        "query-v3-only-total-blnd-burned" "${backfill}" get_total_blnd_burned)")"
-    capacity="$(normalize_scalar "$(invoke_view \
-        "query-v3-only-swap-capacity" "${backfill}" get_remaining_swap_capacity)")"
-    assert_equal "0" "${total_swapped}" "initial converted BLNT output"
-    assert_equal "0" "${total_blnd_burned}" "initial converted BLND burned"
-    assert_equal "${BLNT_SWAP_CAP}" "${capacity}" "initial swap capacity"
-    assert_equal "${EXTERNAL_BLND_TOKEN}" "$(normalize_scalar "$(invoke_view \
-        "query-v3-only-backfill-blnd" "${backfill}" get_legacy_blnd_token)")" \
-        "backfill external BLND binding"
-
-    vesting_start="$(normalize_scalar "$(invoke_view \
-        "query-v3-only-vesting-start" "${backfill}" get_vesting_start)")"
-    vesting_end="$(normalize_scalar "$(invoke_view \
-        "query-v3-only-vesting-end" "${backfill}" get_vesting_end)")"
-    grant_start="$(normalize_scalar "$(invoke_view \
-        "query-v3-only-grant-start" "${backfill}" get_grant_vesting_start)")"
-    grant_end="$(normalize_scalar "$(invoke_view \
-        "query-v3-only-grant-end" "${backfill}" get_grant_vesting_end)")"
-    swap_deadline="$(normalize_scalar "$(invoke_view \
-        "query-v3-only-swap-deadline" "${backfill}" get_swap_deadline)")"
-    assert_equal "${BLNT_BACKFILL_VESTING_SECONDS}" \
-        "$((vesting_end - vesting_start))" "backfill vesting duration"
-    assert_equal "${vesting_start}" "${grant_start}" "shared vesting start"
-    assert_equal "${BLNT_GRANT_VESTING_SECONDS}" \
-        "$((grant_end - grant_start))" "grant vesting duration"
-    assert_equal "${BLNT_SWAP_DURATION_SECONDS}" \
-        "$((swap_deadline - vesting_start))" "swap duration"
-    state_set "blnt_backfill_vesting_start" "${vesting_start}"
-    state_set "blnt_backfill_vesting_end" "${vesting_end}"
-    state_set "blnt_grant_vesting_start" "${grant_start}"
-    state_set "blnt_grant_vesting_end" "${grant_end}"
-    state_set "blnt_swap_deadline" "${swap_deadline}"
-    state_set "blnt_swap_cap" "${BLNT_SWAP_CAP}"
-    state_set "blnd_swap_input_cap" "${BLND_SWAP_INPUT_CAP}"
-    state_set "blnt_backfill_initial_balance" "${BLNT_BACKFILL_DROP}"
-    state_set "phase" "core-deployed"
-
-    v3_only_deploy_modeled_pools
-    sleep "${EMISSION_START_DELAY_SECONDS}"
-    emitted="$(normalize_scalar "$(invoke_transaction \
-        "emit-v3-only-blnt" "${v3_backstop}" distribute)")"
-    [[ "${emitted}" =~ ^[1-9][0-9]*$ ]] || die "v3 emitter minted no BLNT"
-    admin="$(normalize_scalar "$(invoke_view \
-        "query-v3-only-blnt-admin" "${blnt}" admin)")"
-    recipient="$(normalize_scalar "$(invoke_view \
-        "query-v3-only-emitter-recipient" "${v3_emitter}" get_backstop)")"
-    assert_equal "${v3_emitter}" "${admin}" "BLNT administrator"
-    assert_equal "${v3_backstop}" "${recipient}" "V3 emitter recipient"
-    reward_zone="$(invoke_view "query-final-v3-only-reward-zone" \
-        "${v3_backstop}" reward_zone)"
-    state_set "v3_reward_zone" "$(printf '%s' "${reward_zone}" | jq -c '.')"
-    state_set "v3_emitted" "${emitted}"
-    state_set "phase" "verified"
-    state_set "verified_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    v3_only_write_registry
-    stellar_cli ledger latest \
-        --rpc-url "${RPC_URL}" \
-        --network-passphrase "${NETWORK_PASSPHRASE}" \
-        --output json-formatted >"${RUN_DIR}/ledger-after-v3-only-deploy.json"
-    note "V3-only deployment verified. State: ${STATE_FILE}"
+    state_set "phase" "core-prerequisites-ready"
+    v3_only_complete_core_deployment
 }
 
 v3_only_resume_modeled_pools() {
@@ -837,6 +1255,9 @@ V3-only ${NETWORK_LABEL} status
   SEP-41 Assets pool: $(state_optional sep41_pool)
   configured grant user: $(state_value configured_user)
   grant amount: $(state_value blnt_grant_total)
+  funded user: $(state_optional funding_wallet)
+  amount per funded asset: $(state_optional wallet_asset_funding)
+  funding completed at: $(state_optional wallet_funded_at)
   state: ${STATE_FILE}
 EOF
 }
@@ -848,6 +1269,7 @@ v3_only_run() {
     v3_only_reserve_loss command_deploy_reserve_loss_pool
     v3_only_permissioned command_deploy_permissioned_pool true
     v3_only_sep41 command_deploy_sep41_pool true
+    v3_only_fund_user_assets
 }
 
 main_v3_only() {
@@ -856,6 +1278,7 @@ main_v3_only() {
         validate) v3_only_validate ;;
         start) command_start ;;
         deploy) v3_only_deploy ;;
+        resume-core) v3_only_resume_core_deployment ;;
         deploy-modeled-pools) v3_only_resume_modeled_pools ;;
         deploy-reserve-loss-pool) v3_only_reserve_loss command_deploy_reserve_loss_pool ;;
         verify-reserve-loss-pool) v3_only_reserve_loss command_verify_reserve_loss_pool ;;
@@ -865,6 +1288,7 @@ main_v3_only() {
         verify-sep41-pool) v3_only_sep41 command_verify_sep41_pool ;;
         run) v3_only_run ;;
         status) v3_only_status ;;
+        fund-user) v3_only_fund_user_assets ;;
         write-registry)
             validate_tools
             load_state

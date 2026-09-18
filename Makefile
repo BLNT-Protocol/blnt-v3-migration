@@ -72,6 +72,9 @@ testnet-v3-only-validate:
 testnet-v3-only-run:
 	bash scripts/testnet-v3-only.sh run
 
+testnet-v3-only-resume-core:
+	bash scripts/testnet-v3-only.sh resume-core
+
 testnet-v3-only-deploy-modeled-pools:
 	bash scripts/testnet-v3-only.sh deploy-modeled-pools
 
@@ -101,6 +104,9 @@ testnet-v3-only-write-registry:
 
 testnet-v3-only-refresh-oracle:
 	bash scripts/testnet-v3-only.sh refresh-oracle
+
+testnet-v3-only-fund-user:
+	bash scripts/testnet-v3-only.sh fund-user
 
 testnet-v3-only-keeper-plan:
 	BLEND_KEEPER_REGISTRY=deployments/testnet-v3-only.json \

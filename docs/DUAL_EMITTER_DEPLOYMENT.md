@@ -99,17 +99,20 @@ directory. The runner never reads a mainnet wallet or submits to mainnet.
 
 The on-chain classic asset and SAC expose the asset code `BLNT`; the
 human-readable name and icon are issuer metadata hosted by the issuer's home
-domain. Set `BLEND_BLNT_HOME_DOMAIN=blent.trade` during deployment, then publish
-the following currency entry at `https://blent.trade/.well-known/stellar.toml`,
+domain. Set `BLEND_BLNT_HOME_DOMAIN=blnt.trade` during deployment, then publish
+the following currency entry at `https://blnt.trade/.well-known/stellar.toml`,
 replacing the issuer placeholder with the deployment operator account:
 
 ```toml
+NETWORK_PASSPHRASE = "Test SDF Network ; September 2015"
+
 [[CURRENCIES]]
 code = "BLNT"
 issuer = "<deployment operator account>"
 display_decimals = 7
 name = "Blent Token"
-image = "https://blent.trade/assets/blnt.png"
+desc = "Testnet BLNT used by Blend V3"
+image = "https://blnt.trade/icons/tokens/blnd-yellow.svg"
 ```
 
 ## Recorded evidence

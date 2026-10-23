@@ -345,7 +345,9 @@ command_deploy_permissioned_pool() {
         require_contract_id "${eurc}" "modeled EURC"
     fi
     oracle="$(state_optional modeled_v3_fixed_oracle)"
-    [[ -n "${oracle}" ]] || oracle="$(ensure_modeled_v3_oracle fixed)"
+    if [[ -z "${oracle}" ]]; then
+        oracle="$(ensure_modeled_v3_oracle fixed)" || return
+    fi
     setup="$(ensure_permissioned_setup_identity)"
     identity="$(state_value permissioned_setup_identity)"
     ensure_permissioned_trustline EURC "${setup}" "${identity}"

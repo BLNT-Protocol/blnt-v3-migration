@@ -128,10 +128,9 @@ make testnet-production-keeper
 Continuous mode performs its first pass immediately and schedules subsequent
 passes hourly without allowing overlapping passes. It also refreshes all
 controlled v2 and v3 lending-oracle histories when their last successful
-refresh is at least 12 hours old. Oracle refresh runs before emissions, and a
+refresh is at least one hour old. Oracle refresh runs before emissions, and a
 failure remains due for retry on the next hourly pass. This keeps the fixture
-prices comfortably inside Blend's one-day validity window without refreshing
-them on every pass.
+prices comfortably inside Blend's one-day validity window.
 
 Override either interval, in seconds, when an isolated test needs a different
 schedule:

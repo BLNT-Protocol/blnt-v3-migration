@@ -129,22 +129,25 @@ sep41_pool_asset_ids() {
     printf '%s\n' "${result}"
 }
 
+# This seeder is also called by an ensure helper through command substitution;
+# keep failures explicit so a partial refresh cannot be checkpointed.
 seed_sep41_oracle() {
     local oracle="$1" symbol token price prices label
 
     while IFS= read -r symbol; do
         label="$(sep41_label "${symbol}")"
-        token="$(sep41_asset_id "${symbol}")"
+        token="$(sep41_asset_id "${symbol}")" || return
         price="$(jq -er --arg symbol "${symbol}" \
             '.reserves[] | select(.asset == $symbol) | .price' \
-            "${SEP41_POOL_FIXTURE}")"
-        prices="$(fixture_price_series "${price}")"
+            "${SEP41_POOL_FIXTURE}")" || return
+        prices="$(fixture_price_series "${price}")" || return
         invoke_transaction "seed-sep41-oracle-${label}" \
             "${oracle}" set_prices \
             --asset "{\"Stellar\":\"${token}\"}" \
-            --prices "${prices}" >/dev/null
+            --prices "${prices}" >/dev/null || return
     done < <(jq -r '.reserves[].asset' "${SEP41_POOL_FIXTURE}")
-    state_set "sep41_oracle_refreshed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    state_set "sep41_oracle_refreshed_at" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return
 }
 
 ensure_sep41_oracle() {
@@ -152,7 +155,7 @@ ensure_sep41_oracle() {
 
     oracle="$(state_optional sep41_pool_oracle)"
     if [[ -z "${oracle}" ]]; then
-        assets="$(sep41_pool_asset_ids)"
+        assets="$(sep41_pool_asset_ids)" || return
         oracle="$(deploy_wasm \
             "deploy-sep41-assets-oracle" \
             "${V3_TEST_SEP40_ORACLE_WASM}" "${SEP41_ORACLE_SALT}" \
@@ -160,11 +163,11 @@ ensure_sep41_oracle() {
             --base '{"Other":"USD"}' \
             --assets "${assets}" \
             --decimals 7 \
-            --resolution "${FIXTURE_ORACLE_RESOLUTION}")"
-        state_set "sep41_pool_oracle" "${oracle}"
+            --resolution "${FIXTURE_ORACLE_RESOLUTION}")" || return
+        state_set "sep41_pool_oracle" "${oracle}" || return
     fi
     require_contract_id "${oracle}" "SEP-41 Assets oracle"
-    seed_sep41_oracle "${oracle}"
+    seed_sep41_oracle "${oracle}" || return
     printf '%s\n' "${oracle}"
 }
 

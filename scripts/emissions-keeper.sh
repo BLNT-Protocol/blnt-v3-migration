@@ -10,7 +10,7 @@ STATE_FILE="${BLEND_KEEPER_STATE_FILE:-${WORK_DIR}/dual-emitter-state.json}"
 SOURCE_ACCOUNT="${BLEND_KEEPER_SOURCE_ACCOUNT:-blend-v3-dual-20260830-operator}"
 INCLUSION_FEE="${BLEND_KEEPER_INCLUSION_FEE:-10000}"
 INTERVAL_SECONDS="${BLEND_KEEPER_INTERVAL_SECONDS:-3600}"
-ORACLE_REFRESH_INTERVAL_SECONDS="${BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS:-43200}"
+ORACLE_REFRESH_INTERVAL_SECONDS="${BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS:-3600}"
 TESTNET_PASSPHRASE="Test SDF Network ; September 2015"
 STOP_REQUESTED=0
 SLEEP_PID=""
@@ -31,8 +31,8 @@ a V3-only registry leaves the external Blend lane untouched. It gulps each
 registered reward-zone pool for the corresponding enabled protocol version and
 reconciles direct reserve-custody deficits
 across every registered v3 pool. On Stellar testnet, it
-refreshes the controlled fixture-oracle histories when they are at least 12
-hours old. The default keeper interval is one hour. Configuration may be overridden with
+refreshes the controlled fixture-oracle histories when they are at least one
+hour old. The default keeper interval is one hour. Configuration may be overridden with
 BLEND_KEEPER_REGISTRY, BLEND_KEEPER_WORK_DIR, BLEND_KEEPER_CONFIG_DIR,
 BLEND_KEEPER_STATE_FILE, BLEND_KEEPER_SOURCE_ACCOUNT, BLEND_KEEPER_RPC_URL,
 BLEND_KEEPER_INCLUSION_FEE, BLEND_KEEPER_INTERVAL_SECONDS, and

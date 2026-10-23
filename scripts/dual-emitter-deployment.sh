@@ -264,11 +264,12 @@ dual_deploy_modeled_pools() {
 
     ensure_modeled_asset EURC
     ensure_modeled_asset PYUSD
-    fixed_v2_oracle="$(ensure_modeled_v2_oracle fixed)"
-    custom_v2_oracle="$(ensure_modeled_v2_oracle custom)"
-    fixed_v3_oracle="$(ensure_modeled_v3_oracle fixed)"
-    custom_v3_oracle="$(ensure_modeled_v3_oracle custom)"
-    state_set "modeled_oracles_refreshed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    fixed_v2_oracle="$(ensure_modeled_v2_oracle fixed)" || return
+    custom_v2_oracle="$(ensure_modeled_v2_oracle custom)" || return
+    fixed_v3_oracle="$(ensure_modeled_v3_oracle fixed)" || return
+    custom_v3_oracle="$(ensure_modeled_v3_oracle custom)" || return
+    state_set "modeled_oracles_refreshed_at" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return
 
     fixed_v2_pool="$(ensure_modeled_v2_pool fixed "${fixed_v2_oracle}")"
     custom_v2_pool="$(ensure_modeled_v2_pool custom "${custom_v2_oracle}")"

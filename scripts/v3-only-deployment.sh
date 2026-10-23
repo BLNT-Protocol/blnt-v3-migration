@@ -622,20 +622,21 @@ v3_only_refresh_oracles() {
     load_state
     require_modeled_pool_support
     for model in fixed custom; do
-        oracle="$(state_value "$(modeled_oracle_state_key v3 "${model}")")"
-        seed_modeled_sep40_oracle v3 "${model}" "${oracle}"
+        oracle="$(state_value "$(modeled_oracle_state_key v3 "${model}")")" || return
+        seed_modeled_sep40_oracle v3 "${model}" "${oracle}" || return
     done
     reserve_loss_oracle="$(state_optional reserve_loss_oracle)"
     if [[ -n "${reserve_loss_oracle}" ]]; then
         require_reserve_loss_support
-        seed_reserve_loss_oracle "${reserve_loss_oracle}"
+        seed_reserve_loss_oracle "${reserve_loss_oracle}" || return
     fi
     sep41_oracle="$(state_optional sep41_pool_oracle)"
     if [[ -n "${sep41_oracle}" ]]; then
         require_sep41_pool_support
-        seed_sep41_oracle "${sep41_oracle}"
+        seed_sep41_oracle "${sep41_oracle}" || return
     fi
-    state_set "modeled_oracles_refreshed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    state_set "modeled_oracles_refreshed_at" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return
     note "Refreshed the V3-only fixture-oracle histories."
 }
 
@@ -708,9 +709,10 @@ v3_only_deploy_modeled_pools() {
 
     ensure_modeled_asset EURC
     ensure_modeled_asset PYUSD
-    fixed_oracle="$(ensure_modeled_v3_oracle fixed)"
-    custom_oracle="$(ensure_modeled_v3_oracle custom)"
-    state_set "modeled_oracles_refreshed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    fixed_oracle="$(ensure_modeled_v3_oracle fixed)" || return
+    custom_oracle="$(ensure_modeled_v3_oracle custom)" || return
+    state_set "modeled_oracles_refreshed_at" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return
     fixed_pool="$(ensure_modeled_v3_pool fixed "${fixed_oracle}")"
     custom_pool="$(ensure_modeled_v3_pool custom "${custom_oracle}")"
 

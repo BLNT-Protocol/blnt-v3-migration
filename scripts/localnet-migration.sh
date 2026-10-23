@@ -1213,19 +1213,21 @@ ensure_modeled_asset() {
     fi
 }
 
+# Oracle ensure helpers run inside command substitutions. Bash may suppress
+# errexit there, so every fallible step must propagate its status explicitly.
 seed_modeled_sep40_oracle() {
     local version="$1" model="$2" oracle="$3" asset asset_id price prices label
 
     while IFS= read -r asset; do
         label="$(printf '%s' "${asset}" | tr '[:upper:]' '[:lower:]')"
-        asset_id="$(modeled_asset_id "${asset}")"
+        asset_id="$(modeled_asset_id "${asset}")" || return
         price="$(jq -er --arg asset "${asset}" \
-            '.prices[$asset]' "${MODELED_POOLS_FIXTURE}")"
-        prices="$(fixture_price_series "${price}")"
+            '.prices[$asset]' "${MODELED_POOLS_FIXTURE}")" || return
+        prices="$(fixture_price_series "${price}")" || return
         invoke_transaction "seed-${model}-${version}-oracle-${label}" \
             "${oracle}" set_prices \
             --asset "{\"Stellar\":\"${asset_id}\"}" \
-            --prices "${prices}" >/dev/null
+            --prices "${prices}" >/dev/null || return
     done < <(jq -r --arg model "${model}" \
         '.pools[$model].reserves[].asset' "${MODELED_POOLS_FIXTURE}")
 }
@@ -1235,11 +1237,12 @@ refresh_modeled_pool_oracles() {
 
     for version in v2 v3; do
         for model in fixed custom; do
-            oracle="$(state_value "$(modeled_oracle_state_key "${version}" "${model}")")"
-            seed_modeled_sep40_oracle "${version}" "${model}" "${oracle}"
+            oracle="$(state_value "$(modeled_oracle_state_key "${version}" "${model}")")" || return
+            seed_modeled_sep40_oracle "${version}" "${model}" "${oracle}" || return
         done
     done
-    state_set "modeled_oracles_refreshed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    state_set "modeled_oracles_refreshed_at" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return
     note "Refreshed the modeled lending-pool oracles (${label_prefix})."
 }
 
@@ -1249,21 +1252,21 @@ ensure_modeled_v2_oracle() {
     state_key="$(modeled_oracle_state_key v2 "${model}")"
     oracle="$(state_optional "${state_key}")"
     if [[ -z "${oracle}" ]]; then
-        assets="$(modeled_pool_asset_ids "${model}")"
+        assets="$(modeled_pool_asset_ids "${model}")" || return
         oracle="$(deploy_wasm \
             "deploy-${model}-v2-oracle" "${V3_TEST_SEP40_ORACLE_WASM}" "" \
             --admin "$(state_value operator)" \
             --base '{"Other":"USD"}' \
             --assets "${assets}" \
             --decimals 7 \
-            --resolution "${FIXTURE_ORACLE_RESOLUTION}")"
-        state_set "${state_key}" "${oracle}"
+            --resolution "${FIXTURE_ORACLE_RESOLUTION}")" || return
+        state_set "${state_key}" "${oracle}" || return
         seed_required=true
     fi
     if [[ "${seed_required}" == "true" ||
         -z "$(state_optional modeled_oracles_refreshed_at)" ]]
     then
-        seed_modeled_sep40_oracle v2 "${model}" "${oracle}"
+        seed_modeled_sep40_oracle v2 "${model}" "${oracle}" || return
     fi
     printf '%s\n' "${oracle}"
 }
@@ -1274,7 +1277,7 @@ ensure_modeled_v3_oracle() {
     state_key="$(modeled_oracle_state_key v3 "${model}")"
     oracle="$(state_optional "${state_key}")"
     if [[ -z "${oracle}" ]]; then
-        assets="$(modeled_pool_asset_ids "${model}")"
+        assets="$(modeled_pool_asset_ids "${model}")" || return
         oracle="$(deploy_wasm \
             "deploy-${model}-v3-lending-oracle" \
             "${V3_TEST_SEP40_ORACLE_WASM}" "" \
@@ -1282,14 +1285,14 @@ ensure_modeled_v3_oracle() {
             --base '{"Other":"USD"}' \
             --assets "${assets}" \
             --decimals 7 \
-            --resolution "${FIXTURE_ORACLE_RESOLUTION}")"
-        state_set "${state_key}" "${oracle}"
+            --resolution "${FIXTURE_ORACLE_RESOLUTION}")" || return
+        state_set "${state_key}" "${oracle}" || return
         seed_required=true
     fi
     if [[ "${seed_required}" == "true" ||
         -z "$(state_optional modeled_oracles_refreshed_at)" ]]
     then
-        seed_modeled_sep40_oracle v3 "${model}" "${oracle}"
+        seed_modeled_sep40_oracle v3 "${model}" "${oracle}" || return
     fi
     printf '%s\n' "${oracle}"
 }
@@ -2290,8 +2293,8 @@ command_deploy() {
         "$(sha256_file "${MODELED_POOLS_FIXTURE}")"
     state_set "modeled_v3_lending_oracle_wasm_sha256" \
         "$(sha256_file "${V3_TEST_SEP40_ORACLE_WASM}")"
-    fixed_v2_oracle="$(ensure_modeled_v2_oracle fixed)"
-    fixed_v3_oracle="$(ensure_modeled_v3_oracle fixed)"
+    fixed_v2_oracle="$(ensure_modeled_v2_oracle fixed)" || return
+    fixed_v3_oracle="$(ensure_modeled_v3_oracle fixed)" || return
     fixed_v2_pool="$(ensure_modeled_v2_pool fixed "${fixed_v2_oracle}")"
     pool_id="$(ensure_modeled_v3_pool fixed "${fixed_v3_oracle}")"
     state_set "v3_pool" "${pool_id}"
@@ -2377,11 +2380,12 @@ command_deploy_modeled_pools() {
     ensure_modeled_asset EURC
     ensure_modeled_asset PYUSD
 
-    fixed_v2_oracle="$(ensure_modeled_v2_oracle fixed)"
-    custom_v2_oracle="$(ensure_modeled_v2_oracle custom)"
-    fixed_v3_oracle="$(ensure_modeled_v3_oracle fixed)"
-    custom_v3_oracle="$(ensure_modeled_v3_oracle custom)"
-    state_set "modeled_oracles_refreshed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    fixed_v2_oracle="$(ensure_modeled_v2_oracle fixed)" || return
+    custom_v2_oracle="$(ensure_modeled_v2_oracle custom)" || return
+    fixed_v3_oracle="$(ensure_modeled_v3_oracle fixed)" || return
+    custom_v3_oracle="$(ensure_modeled_v3_oracle custom)" || return
+    state_set "modeled_oracles_refreshed_at" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return
 
     fixed_v2_pool="$(ensure_modeled_v2_pool fixed "${fixed_v2_oracle}")"
     custom_v2_pool="$(ensure_modeled_v2_pool custom "${custom_v2_oracle}")"
@@ -2952,23 +2956,25 @@ reserve_loss_pool_asset_ids() {
     printf '%s\n' "${result}"
 }
 
+# This seeder is also called by an ensure helper through command substitution;
+# keep failures explicit so a partial refresh cannot be checkpointed.
 seed_reserve_loss_oracle() {
     local oracle="$1" code token price prices label
 
     while IFS= read -r code; do
         label="$(printf '%s' "${code}" | tr '[:upper:]' '[:lower:]')"
-        token="$(reserve_loss_asset_id "${code}")"
+        token="$(reserve_loss_asset_id "${code}")" || return
         price="$(jq -er --arg code "${code}" \
             '.reserves[] | select(.asset == $code) | .price' \
-            "${RESERVE_LOSS_FIXTURE}")"
-        prices="$(fixture_price_series "${price}")"
+            "${RESERVE_LOSS_FIXTURE}")" || return
+        prices="$(fixture_price_series "${price}")" || return
         invoke_transaction "seed-reserve-loss-oracle-${label}" \
             "${oracle}" set_prices \
             --asset "{\"Stellar\":\"${token}\"}" \
-            --prices "${prices}" >/dev/null
+            --prices "${prices}" >/dev/null || return
     done < <(jq -r '.reserves[].asset' "${RESERVE_LOSS_FIXTURE}")
     state_set "reserve_loss_oracle_refreshed_at" \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return
 }
 
 ensure_reserve_loss_oracle() {
@@ -2976,7 +2982,7 @@ ensure_reserve_loss_oracle() {
 
     oracle="$(state_optional reserve_loss_oracle)"
     if [[ -z "${oracle}" ]]; then
-        assets="$(reserve_loss_pool_asset_ids)"
+        assets="$(reserve_loss_pool_asset_ids)" || return
         oracle="$(deploy_wasm \
             "deploy-reserve-loss-oracle" \
             "${V3_TEST_SEP40_ORACLE_WASM}" "" \
@@ -2984,10 +2990,10 @@ ensure_reserve_loss_oracle() {
             --base '{"Other":"USD"}' \
             --assets "${assets}" \
             --decimals 7 \
-            --resolution "${FIXTURE_ORACLE_RESOLUTION}")"
-        state_set "reserve_loss_oracle" "${oracle}"
+            --resolution "${FIXTURE_ORACLE_RESOLUTION}")" || return
+        state_set "reserve_loss_oracle" "${oracle}" || return
     fi
-    seed_reserve_loss_oracle "${oracle}"
+    seed_reserve_loss_oracle "${oracle}" || return
     printf '%s\n' "${oracle}"
 }
 

@@ -1,7 +1,10 @@
 V2_DIR := blend-contracts-v2
 V3_DIR := blnt-contracts-v3
 MIGRATION_HARNESS_DIR := migration-harness
-COMET_V2_DIR := comet-contracts-v2
+COMET_V1_DIR := comet-contracts-v1
+COMET_V1_COMMIT := b3a2d827ed6c158341f8e67ea91eb3b0395d3871
+COMET_V1_WASM := $(V3_DIR)/comet.wasm
+COMET_V1_WASM_SHA256 := d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687
 BLNT_BACKFILL_DIR := blnt-backfill-contract
 
 default: build
@@ -240,9 +243,12 @@ testnet-production-keeper-once:
 testnet-production-keeper:
 	bash scripts/emissions-keeper.sh run
 
-build-v3:
+verify-comet-v1.1:
+	test "$$(git -C $(COMET_V1_DIR) rev-parse HEAD)" = "$(COMET_V1_COMMIT)"
+	test "$$(shasum -a 256 $(COMET_V1_WASM) | cut -d ' ' -f 1)" = "$(COMET_V1_WASM_SHA256)"
+
+build-v3: verify-comet-v1.1
 	$(MAKE) -C $(V3_DIR) build
-	$(MAKE) -C $(COMET_V2_DIR) build
 	$(MAKE) -C $(BLNT_BACKFILL_DIR) build
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blnt-test-sep41-token --target wasm32v1-none --release --locked
@@ -263,7 +269,7 @@ build-v3:
 
 check-v3: verify-deployed-artifacts build-v3
 	$(MAKE) -C $(V3_DIR) test
-	$(MAKE) -C $(COMET_V2_DIR) test
+	$(MAKE) -C $(COMET_V1_DIR) test
 	$(MAKE) -C $(BLNT_BACKFILL_DIR) test
 	cargo +1.91.1 fmt --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --all -- --check
 	cargo +1.91.1 check --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --all-targets --locked
@@ -292,14 +298,13 @@ build: verify-deployed-artifacts
 fmt:
 	cargo +1.81 fmt --manifest-path $(V2_DIR)/Cargo.toml --all
 	$(MAKE) -C $(V3_DIR) fmt
-	cargo +1.91.1 fmt --manifest-path $(COMET_V2_DIR)/Cargo.toml --all
 	cargo +1.91.1 fmt --manifest-path $(BLNT_BACKFILL_DIR)/Cargo.toml --all
 	cargo +1.91.1 fmt --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --all
 
 clean:
 	cargo +1.81 clean --manifest-path $(V2_DIR)/Cargo.toml
 	$(MAKE) -C $(V3_DIR) clean
-	$(MAKE) -C $(COMET_V2_DIR) clean
+	cargo +1.92.0 clean --manifest-path $(COMET_V1_DIR)/Cargo.toml
 	$(MAKE) -C $(BLNT_BACKFILL_DIR) clean
 	cargo +1.91.1 clean --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml
 

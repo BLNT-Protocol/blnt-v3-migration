@@ -90,7 +90,7 @@ separate 51-million-BLNT conversion reserve.
 The backfill contract owns `swap_blnd_for_blnt(user, blnt_amount)`, which:
 
 1. requires `user` authorization and a positive `blnt_amount`;
-2. transfers exactly `2 * blnt_amount` legacy BLND from `user` to the contract;
+2. transfers exactly `blnt_amount` legacy BLND from `user` to the contract;
 3. verifies the exact receipt and immediately burns that BLND;
 4. transfers exactly `blnt_amount` of its pre-funded BLNT back to `user`; and
 5. increments cumulative successful BLNT output by `blnt_amount`.
@@ -115,8 +115,12 @@ allocation-mutation, or claim-deadline API.
 
 ## 3. Canonical v3 liquidity
 
-V3 deploys new canonical 80:20 BLNT:USDC and BLNT:XLM LPs from the Protocol-27
-Comet v2 source pinned in the workspace directory `comet-contracts-v2`.
+V3 deploys new canonical 80:20 BLNT:USDC and BLNT:XLM LPs from the official
+Comet V1.1 `v1.1.0_contracts_pkg1.0.0_cli25.1.0` release WASM. The upstream
+source is pinned at tag `v1.1.0` commit
+`b3a2d827ed6c158341f8e67ea91eb3b0395d3871` in `comet-contracts-v1`, and the
+deployed artifact MUST have SHA-256
+`d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687`.
 
 Both pools MUST contain exactly their expected seven-decimal Stellar Asset
 Contracts, use normalized weights 80% BLNT and 20% paired asset, start
@@ -171,7 +175,7 @@ A deployment SHOULD use the following deterministic order:
 3. create BLNT with the v3 emitter as administrator;
 4. deploy the BLNT backfill contract bound to legacy BLND, BLNT, and the
    immutable backfill and grant lists;
-5. deploy and initialize the canonical Comet v2 BLNT:USDC and BLNT:XLM pools;
+5. deploy and initialize the canonical Comet V1.1 BLNT:USDC and BLNT:XLM pools;
 6. determine the v3 backstop address and deploy its factory;
 7. initialize the v3 emitter with BLNT, the v3 backstop, and BLNT:XLM LP;
 8. deploy the v3 backstop with the single 150-million-BLNT backfill-contract
@@ -184,7 +188,7 @@ administrators, the backfill-contract artifact and immutable bindings, exact
 150-million-BLNT custody, the immutable 180-day backfill and 360-day grant
 vesting timestamps and allocations, the
 51-million-BLNT output cap,
-102-million-BLND input capacity, and 270-day deadline, Comet v2 artifact hash
+51-million-BLND input capacity, and 270-day deadline, Comet V1.1 artifact hash
 and pool configuration, v3 direct
 activation, and the absence of BLND in every v3 pool, backstop, and emitter
 binding.

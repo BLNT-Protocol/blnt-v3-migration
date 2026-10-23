@@ -118,7 +118,9 @@ V3_FACTORY_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/po
 V3_BACKSTOP_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
 V3_POOL_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/pool.wasm"
 V3_TEST_SEP40_ORACLE_WASM="${ROOT_DIR}/migration-harness/target/wasm32v1-none/optimized/blend_v3_test_sep40_oracle.wasm"
-COMET_WASM="${BLEND_MIGRATION_COMET_WASM:-${ROOT_DIR}/comet-contracts-v2/target/wasm32v1-none/optimized/comet.wasm}"
+COMET_WASM="${ROOT_DIR}/blnt-contracts-v3/comet.wasm"
+EXPECTED_COMET_V1_1_SHA256="d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687"
+EXPECTED_COMET_V1_1_COMMIT="b3a2d827ed6c158341f8e67ea91eb3b0395d3871"
 
 EXPECTED_EMITTER_SHA256="438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89"
 EMITTER_WASM="${ROOT_DIR}/deployed-artifacts/mainnet/emitter.wasm"
@@ -164,9 +166,9 @@ period. The contract retains v2's distribute/drop migration surface. Generated
 configuration, public state, results, and cost logs live below the
 network-specific ignored work directory.
 
-The canonical v3 LP default is the Comet v2 artifact built from the workspace's
-`comet-contracts-v2` checkout. Set BLEND_MIGRATION_COMET_WASM only to test an
-explicit alternate build.
+The canonical v3 LP is the official Comet V1.1 release artifact embedded at
+`blnt-contracts-v3/comet.wasm`. Its digest and the pinned upstream source
+commit are verified before deployment.
 EOF
 }
 
@@ -209,6 +211,18 @@ resolve_emitter_wasm() {
         die "frozen emitter WASM has SHA-256 ${actual_hash}; expected ${EXPECTED_EMITTER_SHA256}"
 }
 
+validate_comet_v1_1_artifact() {
+    local actual_hash actual_commit
+
+    [[ -s "${COMET_WASM}" ]] || die "official Comet V1.1 WASM is missing: ${COMET_WASM}"
+    actual_hash="$(sha256_file "${COMET_WASM}")"
+    [[ "${actual_hash}" == "${EXPECTED_COMET_V1_1_SHA256}" ]] ||
+        die "Comet V1.1 WASM has SHA-256 ${actual_hash}; expected ${EXPECTED_COMET_V1_1_SHA256}"
+    actual_commit="$(git -C "${ROOT_DIR}/comet-contracts-v1" rev-parse HEAD)"
+    [[ "${actual_commit}" == "${EXPECTED_COMET_V1_1_COMMIT}" ]] ||
+        die "Comet V1.1 source is ${actual_commit}; expected ${EXPECTED_COMET_V1_1_COMMIT}"
+}
+
 validate_tools() {
     local version_text version_line version major
 
@@ -248,6 +262,7 @@ validate_artifacts() {
     local artifact
 
     resolve_emitter_wasm
+    validate_comet_v1_1_artifact
     for artifact in \
         "${V2_FACTORY_WASM}" \
         "${V2_BACKSTOP_WASM}" \
@@ -1601,7 +1616,7 @@ ensure_modeled_blnd_usdc_lp_capacity() {
     (( available >= required )) && return 0
 
     deficit=$((required - available))
-    # The controlled Comet v2 pool is initialized at 10 BLND and 0.25 USDC per LP.
+    # The controlled Comet V1.1 pool is initialized at 10 BLND and 0.25 USDC per LP.
     # These transaction bounds leave margin for integer rounding while keeping
     # the synthetic test-only issuance explicitly bounded.
     max_blnd=$((deficit * 11))
@@ -1851,7 +1866,7 @@ command_plan() {
     else
         asset_description="isolated BLND, USDC, and XLM assets"
     fi
-    valuation_description="integrated Comet v2-derived backstop valuation and bounded test-only lending oracles"
+    valuation_description="integrated Comet V1.1-derived backstop valuation and bounded test-only lending oracles"
     pool_funding_description="Fixed's three candidate tiers, Custom's 2:1 XLM/USDC tiers, and their lending positions"
     incumbent_funding_description="Fund both modeled v2 pools with ${INCUMBENT_BALANCE} BLNDUSDC each while retaining the candidate's one-base-unit aggregate majority."
     cat <<EOF
@@ -1868,15 +1883,15 @@ Artifacts:
   Frozen incumbent: exact deployed mainnet v2 pool, pool factory, and backstop WASM
   Deployed emitter: exact deployed mainnet emitter WASM
   Candidate: SDK 27 pool, pool factory, and backstop with ${valuation_description}
-  Comet v2: ${COMET_WASM}
+  Comet V1.1: ${COMET_WASM}
 
 Deployment:
-  1. Create and fund isolated issuer/operator, depositor, and one-way Comet v2-controller identities.
-  2. Provision ${asset_description}; deploy real 80:20 BLND:USDC and BLND:XLM Comet v2 pools; then lock their shared controller at zero signer weight.
+  1. Create and fund isolated issuer/operator, depositor, and one-way Comet V1.1-controller identities.
+  2. Provision ${asset_description}; deploy real 80:20 BLND:USDC and BLND:XLM Comet V1.1 pools; then lock their shared controller at zero signer weight.
   3. Deploy the exact emitter WASM and a coherent SDK-22 incumbent stack.
   4. Predict the candidate address, bind its immutable factory, and deploy it.
   5. Deploy the modeled Fixed v2/v3 pools with transferable v2-style admins.
-  6. Fund Fixed v3 first and reject the deployment unless its shared USDC and canonical Comet v2 custody entries prove non-clawbackable.
+  6. Fund Fixed v3 first and reject the deployment unless its shared USDC and canonical Comet V1.1 custody entries prove non-clawbackable.
   7. Deploy the modeled Custom v2/v3 pools, fund all remaining tiers with ${pool_funding_description}, activate the pools, admit them to their reward zones, and configure selected reserve-position emissions.
   8. ${incumbent_funding_description}
   9. Assert strict candidate qualification, start backfill through distribute, queue the emitter swap, and observe it through distribute.
@@ -1941,7 +1956,7 @@ command_begin() {
     [[ -n "$(state_optional backstop_non_clawbackable_custody_verified_at)" ]] ||
         die "backstop custody must pass non-clawbackable verification before beginning migration"
     [[ -n "$(state_optional canonical_comet_controllers_verified_at)" ]] ||
-        die "canonical Comet v2 controllers must be irreversibly locked before beginning migration"
+        die "canonical Comet V1.1 controllers must be irreversibly locked before beginning migration"
     begin_deployed_migration
 }
 
@@ -2079,7 +2094,9 @@ command_deploy() {
     state_set "v3_pool_wasm_sha256" "$(sha256_file "${V3_POOL_WASM}")"
     state_set "test_sep40_oracle_wasm_sha256" \
         "$(sha256_file "${V3_TEST_SEP40_ORACLE_WASM}")"
-    state_set "comet_wasm_sha256" "$(sha256_file "${COMET_WASM}")"
+    state_set "comet_v1_1_wasm_sha256" "$(sha256_file "${COMET_WASM}")"
+    state_set "comet_v1_1_source_commit" \
+        "$(git -C "${ROOT_DIR}/comet-contracts-v1" rev-parse HEAD)"
 
     note "Creating and funding isolated ${NETWORK_LABEL} depositor ${DEPOSITOR_IDENTITY}..."
     stellar_cli keys generate "${DEPOSITOR_IDENTITY}" \
@@ -2088,7 +2105,7 @@ command_deploy() {
     fund_and_wait_for_account "${depositor}"
     state_set "depositor" "${depositor}"
 
-    note "Creating and funding one-way ${NETWORK_LABEL} Comet v2 controller ${COMET_CONTROLLER_IDENTITY}..."
+    note "Creating and funding one-way ${NETWORK_LABEL} Comet V1.1 controller ${COMET_CONTROLLER_IDENTITY}..."
     stellar_cli keys generate "${COMET_CONTROLLER_IDENTITY}" \
         --overwrite >/dev/null
     comet_controller="$(stellar_cli keys public-key "${COMET_CONTROLLER_IDENTITY}")"
@@ -2301,7 +2318,7 @@ command_deploy() {
         --pool-address "${pool_id}" \
         --amount "${ACTIVATION_USDC_BALANCE}" >/dev/null
     # This first real plain-USDC deposit creates the candidate's one shared
-    # SAC balance entry. Verify it and both Comet v2 pools' underlying custody before
+    # SAC balance entry. Verify it and both Comet V1.1 pools' underlying custody before
     # any later pool is deployed; a failure invalidates this deployment lane.
     verify_fixed_v3_backstop_custody
     invoke_transaction \
@@ -3987,7 +4004,7 @@ ${NETWORK_LABEL} migration verified
   candidate pool: ${pool_id}
   candidate pool admin: ${pool_operator}
   candidate pool status: ${pool_status}
-  candidate valuation: integrated Comet v2 reserve valuation
+  candidate valuation: integrated Comet V1.1 reserve valuation
   activation timestamp: ${activated_at}
   scheduled and funded backfill: ${scheduled_backfill}
   evidence directory: ${RUN_DIR}

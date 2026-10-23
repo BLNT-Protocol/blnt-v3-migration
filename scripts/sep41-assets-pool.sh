@@ -353,25 +353,13 @@ ensure_sep41_backstop() {
 }
 
 ensure_sep41_pool_active() {
-    local pool="$1" identity="$2" status reward_zone
+    local pool="$1" identity="$2" status
 
     status="$(invoke_view "query-funded-sep41-status" \
         "${pool}" get_config | jq -er '.status | tostring')"
     if [[ "${status}" != "0" && "${status}" != "1" ]]; then
         invoke_transaction_as "activate-sep41-pool" "${identity}" \
             "${pool}" set_status --pool_status 0 >/dev/null
-    fi
-    reward_zone="$(invoke_view "query-sep41-reward-zone" \
-        "$(state_value v3_backstop)" reward_zone)"
-    if ! printf '%s' "${reward_zone}" | jq -e \
-        --arg pool "${pool}" 'index($pool) != null' >/dev/null
-    then
-        sleep "${EMISSION_START_DELAY_SECONDS}"
-        invoke_transaction "checkpoint-sep41-reward-zone" \
-            "$(state_value v3_backstop)" distribute >/dev/null
-        invoke_transaction "add-sep41-reward" \
-            "$(state_value v3_backstop)" add_reward \
-            --to_add "${pool}" --to_remove null >/dev/null
     fi
 }
 
@@ -523,14 +511,16 @@ command_verify_sep41_pool() {
         die "SEP-41 Assets pool is below the activation threshold: ${active_value}"
     reward_zone="$(invoke_view "verify-sep41-reward-zone" \
         "${backstop}" reward_zone)"
-    printf '%s' "${reward_zone}" | jq -e \
-        --arg pool "${pool}" 'index($pool) != null' >/dev/null ||
-        die "SEP-41 Assets pool is missing from its reward zone"
+    if printf '%s' "${reward_zone}" | jq -e \
+        --arg pool "${pool}" 'index($pool) != null' >/dev/null
+    then
+        die "plain-USDC SEP-41 Assets pool unexpectedly entered the reward zone"
+    fi
 
     state_set "sep41_pool_verified_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     cat <<EOF
 ${NETWORK_LABEL} SEP-41 Assets pool verified
-  pool:       ${pool} (active; reward-zone member)
+  pool:       ${pool} (active; not reward-zone eligible)
   setup user: ${setup}
   wBTC:       500 supplied; 200 borrowed
   wETH:       10,000 supplied; 5,000 borrowed

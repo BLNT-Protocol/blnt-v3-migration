@@ -46,13 +46,10 @@ git submodule update --init --recursive
 
 - `blend-contracts-v2` is the authoritative SDK-22 source submodule.
 - `blnt-contracts-v3` is the sole production v3 contract source submodule.
-- `comet-contracts-v2` is the Protocol-27 Comet v2 weighted-pool source
-  submodule. Do not silently substitute it for frozen or incumbent Comet v1
-  WASM inputs in migration lanes.
-- `soroban-fixed-point-math` is the Protocol-27 dependency source submodule
-  used by Comet v2. V3's SEP-41 wrapper is maintained within
-  `blnt-contracts-v3/compat/sep-41-token` and is not a parent-repository
-  submodule.
+- `comet-contracts-v1` is the upstream Comet V1.1 source submodule pinned to
+  tag `v1.1.0` commit `b3a2d827ed6c158341f8e67ea91eb3b0395d3871`.
+  Deployment uses the official release WASM embedded at
+  `blnt-contracts-v3/comet.wasm`, not a locally rebuilt substitute.
 - `blnt-sdk-js` and `blnt-ui` are pinned client-integration source
   submodules.
 - `deployed-artifacts/mainnet` contains exact deployed mainnet WASM compatibility
@@ -75,9 +72,9 @@ a side effect of work in this repository.
   silently substituted for those files.
 - New v3 code belongs in the `blnt-contracts-v3/` submodule. It MUST target
   Protocol 27 with Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
-- Protocol-27 Comet v2 work belongs in the `comet-contracts-v2/` submodule and
-  MUST use the same Rust, SDK, protocol, and WASM target lane. Migration
-  runners must explicitly opt into rebuilt Comet v2 artifacts.
+- Comet V1.1 source review belongs in the `comet-contracts-v1/` submodule.
+  Do not modify the upstream source or replace the official
+  `v1.1.0_contracts_pkg1.0.0_cli25.1.0` release artifact used by V3.
 - Migration-only tests and fixtures belong in `migration-harness/` and MUST
   NOT become production contract dependencies.
 - Do not add an SDK 26 compatibility lane. Migration compatibility is tested
@@ -176,9 +173,9 @@ a side effect of work in this repository.
   activation valuation. Stored pool status is not an additional reward-zone
   eligibility gate.
 - Backstop value uses current reserves from the immutable BLND:USDC and
-  BLND:XLM 80:20 Comet v2 pools. BLND:USDC is the USDC anchor, authorized plain USDC
+  BLND:XLM 80:20 Comet V1.1 pools. BLND:USDC is the USDC anchor, authorized plain USDC
   is valued one-for-one, and plain XLM is priced by the BLND reserve ratio
-  between the two Comet v2 pools. Do not introduce a backstop price oracle or caller-
+  between the two Comet V1.1 pools. Do not introduce a backstop price oracle or caller-
   supplied production values.
 - Every positive borrower-interest accrual reserves an immutable 0.2% of gross
   interest as separate protocol credit before applying the pool take rate.

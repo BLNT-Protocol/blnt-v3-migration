@@ -18,7 +18,7 @@ USDC_MINT=$((2 * COMET_INITIAL_PAIR_TOKEN))
 CONVERSION_TEST_AMOUNT=$((10 * SCALAR_7))
 BLNT_BACKFILL_DROP=$((150000000 * SCALAR_7))
 BLNT_SWAP_CAP=$((51000000 * SCALAR_7))
-BLND_SWAP_INPUT_CAP=$((2 * BLNT_SWAP_CAP))
+BLND_SWAP_INPUT_CAP=${BLNT_SWAP_CAP}
 BLNT_BACKFILL_ALLOCATION=$((74000000 * SCALAR_7))
 BLNT_BACKFILL_VESTING_SECONDS=$((180 * 24 * 60 * 60))
 BLNT_GRANT_CAP=$((25000000 * SCALAR_7))
@@ -156,7 +156,7 @@ Usage: scripts/dual-emitter-deployment.sh COMMAND
 
 Commands:
   plan      Describe the independent BLND/BLNT deployment.
-  validate  Verify legacy artifacts and build v3 plus Comet v2 artifacts.
+  validate  Verify legacy artifacts, build v3, and verify Comet V1.1.
   start     Start local Protocol-27 Quickstart or verify public testnet RPC.
   deploy    Deploy and verify the independent legacy and v3 lanes.
   auctions  On local Quickstart, start and fill V3 auction types 0 through 3.
@@ -174,16 +174,17 @@ dual_plan() {
     cat <<EOF
 Dual-emitter ${NETWORK_LABEL} deployment:
   1. Verify the exact deployed legacy emitter and v2 artifacts.
-  2. Build the v3 contracts, BLNT backfill contract, and workspace Comet v2.
+  2. Build the v3 contracts and BLNT backfill contract, and verify the official
+     Comet V1.1 release artifact.
   3. Deploy legacy BLND, BLNT, USDC, and ${XLM_ASSET_MODE} XLM assets.
-  4. Deploy BLND:USDC, BLNT:USDC, and BLNT:XLM Comet v2 pools.
-  5. Lock the shared Comet v2 controller at 100/100/100 with signer weight zero.
+  4. Deploy BLND:USDC, BLNT:USDC, and BLNT:XLM Comet V1.1 pools.
+  5. Lock the shared Comet V1.1 controller at 100/100/100 with signer weight zero.
   6. Leave the legacy emitter pointed at the deployed v2 backstop.
   7. Point the separate v3 emitter at the v3 backstop with BLNT:XLM designated.
   8. Send the exact 150-million-BLNT initial drop to the immutable backfill
      contract, bind the 180-day backfill and 360-day grant schedules, and
-     smoke-test its same-user 2-BLND-to-1-BLNT conversion and immediate burn.
-  9. Verify separate administrators, recipients, emissions, Comet v2 pools,
+     smoke-test its same-user 1:1 BLND-to-BLNT conversion and immediate burn.
+  9. Verify separate administrators, recipients, emissions, Comet V1.1 pools,
      backfill custody, and the immutable 51-million-BLNT conversion cap and
      270-day expiration.
  10. On local Quickstart, use a dedicated V3 pool to start and fill user
@@ -199,6 +200,7 @@ dual_validate_artifacts() {
     local artifact
 
     resolve_emitter_wasm
+    validate_comet_v1_1_artifact
     for artifact in \
         "${V2_FACTORY_WASM}" \
         "${V2_BACKSTOP_WASM}" \
@@ -221,7 +223,7 @@ dual_validate() {
     validate_backfill_manifest
     build_artifacts
     dual_validate_artifacts
-    note "Validated exact legacy artifacts, v3 contracts, and workspace Comet v2."
+    note "Validated exact legacy artifacts, v3 contracts, and official Comet V1.1 release artifact."
 }
 
 create_trustline() {
@@ -435,9 +437,9 @@ dual_deploy() {
     state_set "blnt_backfill_wasm_sha256" "$(sha256_file "${BLNT_BACKFILL_WASM}")"
     state_set "blnt_backfill_source_commit" \
         "$(git -C "${ROOT_DIR}/blnt-backfill-contract" rev-parse HEAD)"
-    state_set "comet_v2_wasm_sha256" "$(sha256_file "${COMET_WASM}")"
-    state_set "comet_v2_source_commit" \
-        "$(git -C "${ROOT_DIR}/comet-contracts-v2" rev-parse HEAD)"
+    state_set "comet_v1_1_wasm_sha256" "$(sha256_file "${COMET_WASM}")"
+    state_set "comet_v1_1_source_commit" \
+        "$(git -C "${ROOT_DIR}/comet-contracts-v1" rev-parse HEAD)"
 
     stellar_cli keys generate "${DEPOSITOR_IDENTITY}" --overwrite >/dev/null
     depositor="$(stellar_cli keys public-key "${DEPOSITOR_IDENTITY}")"
@@ -508,7 +510,7 @@ dual_deploy() {
         --to "${controller}" --amount "${COMET_INITIAL_BLND}" >/dev/null
     invoke_transaction "mint-depositor-blnd" "${legacy_blnd}" mint \
         --to "${depositor}" \
-        --amount "$((DUAL_MODELED_BLND_MINT + 2 * CONVERSION_TEST_AMOUNT))" >/dev/null
+        --amount "$((DUAL_MODELED_BLND_MINT + CONVERSION_TEST_AMOUNT))" >/dev/null
     invoke_transaction "mint-depositor-blnt" "${blnt}" mint \
         --to "${depositor}" --amount "${DUAL_MODELED_BLNT_MINT}" >/dev/null
     invoke_transaction "mint-depositor-usdc" "${usdc}" mint \
@@ -665,7 +667,7 @@ dual_deploy() {
     assert_equal "${CONVERSION_TEST_AMOUNT}" "${swapped}" "BLNT conversion total"
     blnd_burned="$(normalize_scalar "$(invoke_view \
         "query-total-blnd-burned" "${blnt_backfill}" get_total_blnd_burned)")"
-    assert_equal "$((2 * CONVERSION_TEST_AMOUNT))" \
+    assert_equal "${CONVERSION_TEST_AMOUNT}" \
         "${blnd_burned}" "converted BLND burned"
     remaining_capacity="$(normalize_scalar "$(invoke_view \
         "query-conversion-capacity" "${blnt_backfill}" get_remaining_swap_capacity)")"
@@ -853,7 +855,7 @@ auction_reserve_config() {
 
     if [[ "${profile}" == "fast-debt" ]]; then
         # A bounded high-rate fixture lets the deployed pool accrue the real
-        # inclusive $200 protocol-credit minimum in seconds instead of months.
+        # inclusive $20 protocol-credit minimum in seconds instead of months.
         # It stays below both the u32 ceiling and the configured 99.5% maximum
         # utilization, and changes no production parameter or contract state.
         r_base=9999999
@@ -1037,12 +1039,12 @@ auction_wait_for_protocol_credit() {
             return
         fi
         if (( waited % 15 == 0 )); then
-            note "Waiting for the real 0.2% borrower-interest fee to reach the 200-USDC auction minimum (${waited}s)."
+            note "Waiting for the real 0.2% borrower-interest fee to reach the 20-USDC auction minimum (${waited}s)."
         fi
         sleep 1
         waited=$((waited + 1))
     done
-    die "protocol credit did not reach the 200-USDC auction minimum within ${AUCTION_PROTOCOL_CREDIT_WAIT_SECONDS}s"
+    die "protocol credit did not reach the 20-USDC auction minimum within ${AUCTION_PROTOCOL_CREDIT_WAIT_SECONDS}s"
 }
 
 dual_auction_coverage() {
@@ -1174,11 +1176,11 @@ dual_auction_coverage() {
     protocol_auction="$(printf '%s' "${protocol_auction}" | jq -c .)"
     printf '%s' "${interest_auction}" | jq -e \
         --arg usdc "${usdc}" \
-        '(.bid[$usdc] | tonumber) > 0 and (.lot[$usdc] | tonumber) >= 2000000000' \
+        '(.bid[$usdc] | tonumber) > 0 and (.lot[$usdc] | tonumber) >= 200000000' \
         >/dev/null || die "type-2 auction did not contain positive USDC bid and minimum lot"
     printf '%s' "${protocol_auction}" | jq -e \
         --arg blnt "${blnt}" --arg usdc "${usdc}" \
-        '(.bid[$blnt] | tonumber) > 0 and (.lot[$usdc] | tonumber) >= 2000000000' \
+        '(.bid[$blnt] | tonumber) > 0 and (.lot[$usdc] | tonumber) >= 200000000' \
         >/dev/null || die "type-3 auction did not contain canonical BLNT bid and minimum lot"
     assert_json_equal "${interest_auction}" "$(invoke_view \
         "verify-concurrent-type-2-auction" "${pool}" get_auction \
@@ -1436,8 +1438,8 @@ Dual-emitter ${NETWORK_LABEL} status
   conversion deadline: ${swap_deadline}
   expired conversion-reserve BLNT burned: ${expired_blnt_burned}
   local auction coverage completed: $(state_optional auction_coverage_completed_at)
-  Comet v2 commit: $(state_value comet_v2_source_commit)
-  Comet v2 WASM: $(state_value comet_v2_wasm_sha256)
+  Comet V1.1 commit: $(state_value comet_v1_1_source_commit)
+  Comet V1.1 WASM: $(state_value comet_v1_1_wasm_sha256)
   state: ${STATE_FILE}
 EOF
 }

@@ -10,12 +10,9 @@
 [submodule "blnt-sdk-js"]
 	path = blnt-sdk-js
 	url = git@github.com:blnt-protocol/blnt-sdk-js.git
-[submodule "comet-contracts-v2"]
-	path = comet-contracts-v2
-	url = git@github.com:blnt-protocol/comet-contracts-v2.git
-[submodule "soroban-fixed-point-math"]
-	path = soroban-fixed-point-math
-	url = git@github.com:blnt-protocol/soroban-fixed-point-math.git
 [submodule "blnt-backfill-contract"]
 	path = blnt-backfill-contract
 	url = git@github.com:blnt-protocol/blnt-backfill-contract.git
+[submodule "comet-contracts-v1"]
+	path = comet-contracts-v1
+	url = git@github.com:CometDEX/comet-contracts-v1.git

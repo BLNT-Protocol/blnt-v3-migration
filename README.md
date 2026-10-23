@@ -20,15 +20,16 @@ git submodule update --init --recursive
 The deployed v2 source baseline is Blend Protocol v2 commit
 `ba22b487b2c5057a4ecc28b05b5193c28e4bd117`. The Blend contract submodules are
 `blend-contracts-v2/` and `blnt-contracts-v3/`. The production transition
-contract is pinned in `blnt-backfill-contract/`. Protocol-27 Comet v2
-weighted-pool source is pinned in `comet-contracts-v2/`, with its Protocol-27
-fixed-point dependency source pinned in `soroban-fixed-point-math/`. V3's
+contract is pinned in `blnt-backfill-contract/`. Upstream Comet V1.1 source is
+pinned at tag `v1.1.0` in `comet-contracts-v1/`; V3 uses the official
+`v1.1.0_contracts_pkg1.0.0_cli25.1.0` release WASM embedded in
+`blnt-contracts-v3/comet.wasm`. V3's
 SEP-41 compatibility wrapper is maintained within
 `blnt-contracts-v3/compat/sep-41-token/`. The client-integration submodules
 are `blnt-sdk-js/` and `blnt-ui/`.
 
 Blend v1/v2 LPs use Comet v1. The fresh BLNT LPs deployed for Blend v3 use
-Comet v2.
+Comet V1.1.
 
 Exact mainnet emitter, v2 backstop, pool-factory, and pool WASMs are checked in
 under `deployed-artifacts/mainnet/` with their contract IDs and SHA-256 digests. These
@@ -44,8 +45,8 @@ V3 no longer replaces or depends on the deployed BLND emitter. The legacy
 emitter remains with v1/v2, while v3 deploys a separate emitter that creates
 BLNT for the v3 backstop from launch. The v3 emitter sends its complete
 150-million-BLNT initial drop to the immutable backfill contract. That contract
-owns same-address claims and a 270-day, 2-BLND-to-1-BLNT conversion capped at
-51 million BLNT output. Converted BLND is burned immediately; at expiry it
+owns same-address claims and a 270-day, 1:1 BLND-to-BLNT conversion capped at
+51 million BLNT output and 51 million BLND input. Converted BLND is burned immediately; at expiry it
 permissionlessly burns the unused BLNT conversion reserve. The production
 claim manifest allocates 74 million BLNT across
 the 434 positive pre-incident `flattened_total_cpal_raw` ownership rows (423
@@ -63,7 +64,7 @@ for the migration protocol. Contract behavior is composed by
 [docs/BASELINE.md](docs/BASELINE.md) defines source and artifact policy, and
 [docs/MIGRATION_ACCEPTANCE.md](docs/MIGRATION_ACCEPTANCE.md) defines
 cross-version migration acceptance. The contract submodule's v3 specification
-defines the integrated Comet v2-based backstop valuation.
+defines the integrated Comet V1.1-based backstop valuation.
 Operational instructions live in
 [docs/DUAL_EMITTER_DEPLOYMENT.md](docs/DUAL_EMITTER_DEPLOYMENT.md). The older
 queued-migration localnet and testnet runbooks are retained only for regression
@@ -83,10 +84,10 @@ with supporting Protocol-27 dependency sources pinned separately:
   1.91.1, Soroban SDK 27.0.3, Protocol 27 tooling, and `wasm32v1-none`.
 - `blnt-backfill-contract/` is the production transition-contract submodule,
   pinned to the same Protocol-27 toolchain.
-- `comet-contracts-v2/` is the Protocol-27 Comet v2 weighted-pool source
-  submodule, pinned to Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
-- `soroban-fixed-point-math/` is Comet v2's Protocol-27 fixed-point dependency
-  source submodule, pinned to the same toolchain.
+- `comet-contracts-v1/` is the upstream Comet V1.1 weighted-pool source at
+  tag `v1.1.0` commit `b3a2d827ed6c158341f8e67ea91eb3b0395d3871`.
+- `blnt-contracts-v3/comet.wasm` is the official Comet V1.1 release artifact
+  with SHA-256 `d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687`.
 - `migration-harness/` contains only Protocol-27 cross-version tests and
   test-only support contracts.
 

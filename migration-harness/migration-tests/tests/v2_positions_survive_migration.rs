@@ -641,8 +641,7 @@ fn run_v2_backfill_timeline() -> BackfillOutcome {
     pool_tranche += backstop.gulp_emissions(&fixture.pool);
     withdrawn_lp += backstop.withdraw(&fixture.user_a, &fixture.pool, &USER_A_LP);
     withdrawn_lp += backstop.withdraw(&fixture.user_b, &fixture.pool, &REMOVAL_QUEUE_B_LP);
-    backstop.remove_reward(&fixture.pool);
-    assert!(backstop.reward_zone().is_empty());
+    assert_eq!(backstop.reward_zone(), vec![env, fixture.pool.clone()]);
     emitter.swap_backstop();
     assert_eq!(backstop.distribute(), 0);
     backstop.drop();
@@ -780,8 +779,7 @@ fn run_v3_backfill_timeline() -> BackfillOutcome {
         &REMOVAL_QUEUE_B_LP,
         &fixture.user_b,
     );
-    backstop.remove_reward(&fixture.pool);
-    assert!(backstop.reward_zone().is_empty());
+    assert_eq!(backstop.reward_zone(), vec![env, fixture.pool.clone()]);
     assert_eq!(
         migration_state(env, &fixture.candidate).scheduled_backfill,
         scheduled

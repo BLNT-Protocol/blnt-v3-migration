@@ -368,7 +368,7 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     );
     assert_eq!(
         TokenClient::new(&env, &legacy_blnd).balance(&holder),
-        2 * SCALAR_7
+        6 * SCALAR_7
     );
     assert_eq!(
         TokenClient::new(&env, &legacy_blnd).balance(&backfill_id),
@@ -376,7 +376,7 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
     );
     assert_eq!(TokenClient::new(&env, &blnt).balance(&holder), 4 * SCALAR_7);
     assert_eq!(backfill.get_total_swapped(), 4 * SCALAR_7);
-    assert_eq!(backfill.get_total_blnd_burned(), 8 * SCALAR_7);
+    assert_eq!(backfill.get_total_blnd_burned(), 4 * SCALAR_7);
     assert_eq!(
         backfill.get_remaining_swap_capacity(),
         50_999_996 * SCALAR_7

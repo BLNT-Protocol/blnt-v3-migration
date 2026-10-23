@@ -16,24 +16,24 @@ wrapper documented in
 [TESTNET_PRODUCTION_MIGRATION.md](TESTNET_PRODUCTION_MIGRATION.md).
 Network-specific state and keys remain separate.
 
-The runner uses independently issued local assets and real Comet v2 contracts:
+The runner uses independently issued local assets and real Comet V1.1 contracts:
 
 - `BLND`
-- A BLND:USDC Comet v2 LP, representing the incumbent designated token
-- A BLND:XLM Comet v2 LP, representing the candidate's next designated token and
+- A BLND:USDC Comet V1.1 LP, representing the incumbent designated token
+- A BLND:XLM Comet V1.1 LP, representing the candidate's next designated token and
   first-loss backstop tier
 - `USDC`, representing the plain-USDC third backstop tier
-- `XLM`, representing the isolated pair asset for the next Comet v2 LP and the
+- `XLM`, representing the isolated pair asset for the next Comet V1.1 LP and the
   fourth canonical asset available to an operator-defined tier
 
-The two LPs execute the checked-in Comet v2 WASM and expose current reserve
+The two LPs execute the checked-in Comet V1.1 WASM and expose current reserve
 composition to the candidate's integrated valuation and emission calculations.
 Their isolated initial balances are deterministic fixtures; they do not
 represent production market pricing or liquidity. Separate authenticated
 SEP-40 fixtures provide the modeled pools' deterministic reserve prices and
 are not used for backstop valuation.
 
-Both Comet v2 pools are initialized unfrozen by one dedicated controller account. The
+Both Comet V1.1 pools are initialized unfrozen by one dedicated controller account. The
 runner then sets that account's thresholds to 100 and its sole signer weight to
 zero, verifies the controller and exact 80:20 token configuration, and performs
 the depositor LP joins only after the lock. This mirrors the canonical mainnet
@@ -49,17 +49,17 @@ open reward-zone slot, and supports XLM, USDC, and PYUSD lending. Because it has
 no BLND-bearing tier, it receives zero BLND allocation. Both incumbent pools
 receive BLND:USDC capital and enter the v2 reward zone.
 
-The classic-asset issuer/operator, candidate depositor, and one-way Comet v2
+The classic-asset issuer/operator, candidate depositor, and one-way Comet V1.1
 controller use separate local identities. The runner creates the required
-modeled-asset trustlines, initializes and locks both Comet v2 pools, and mints the
+modeled-asset trustlines, initializes and locks both Comet V1.1 pools, and mints the
 depositor LP positions before funding the two backstops and lending positions.
 
 Fixed v3 is created and receives the first plain-USDC backstop deposit before
 Custom v3 is deployed. The runner then decodes the shared backstop USDC balance
-and both Comet v2 pools' underlying SAC balance entries directly from persistent
+and both Comet V1.1 pools' underlying SAC balance entries directly from persistent
 ledger state. It fails the deployment unless each entry is positive,
 authorized, and records `clawback = false`; local issued XLM is checked at both
-the Comet v2 pool and shared backstop after its first deposit. Modeled-pool verification
+the Comet V1.1 pool and shared backstop after its first deposit. Modeled-pool verification
 repeats the complete proof before the emitter queue may open.
 
 The local operator pays for deployment and migration transactions but receives
@@ -129,7 +129,7 @@ make localnet-keepalive
 ```
 
 This explicitly extends the deployed emitter, incumbent distribution
-checkpoint, both Comet v2 pools, all four modeled pools and their lending oracles,
+checkpoint, both Comet V1.1 pools, all four modeled pools and their lending oracles,
 configured assets, backstop positions, and relevant token balances. It also
 refreshes each lending-oracle history. Before reporting success, it verifies
 the saved queue target, next designated token, unlock time, and the candidate's

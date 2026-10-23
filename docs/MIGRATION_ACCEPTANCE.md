@@ -12,7 +12,8 @@ Acceptance requires:
 
 1. the frozen SDK-22 v2 tests and deployed-artifact verification to pass;
 2. the complete native and optimized-WASM v3 contract suite to pass;
-3. the Comet v2 workspace build and tests to pass;
+3. the upstream Comet V1.1 source tests and official-release artifact checks
+   to pass;
 4. the v3 WASM-size and resource guards to pass; and
 5. the Protocol-27 compatibility harness to pass without rebuilding deployed
    v2 or the legacy emitter as SDK-27 contracts.
@@ -42,7 +43,7 @@ remain unchanged and usable after the independent v3 lane is created.
 
 Native and optimized-WASM backfill-contract tests MUST cover:
 
-- successful authorized 2-BLND-to-1-BLNT conversion in raw seven-decimal units;
+- successful authorized 1:1 BLND-to-BLNT conversion in raw seven-decimal units;
 - exact BLND receipt and immediate burn plus exact pre-funded BLNT transfer
   back to the same authorized address, with no BLNT mint or escrow;
 - rejection of zero and negative amounts;
@@ -84,12 +85,15 @@ launch harness MUST use exactly one recipient, verify that it is the immutable
 backfill-contract address, and verify that contract receives exactly 150 million
 BLNT. V3 launch MUST schedule no migration backfill.
 
-## Comet v2 canonical LPs
+## Comet V1.1 canonical LPs
 
-Build and deployment evidence MUST identify the workspace's
-`comet-contracts-v2` checkout as the Comet v2 source and record its commit and
-optimized WASM hash. Tests and network verification MUST prove that canonical
-v3 BLNT:USDC and BLNT:XLM pools:
+Build and deployment evidence MUST identify tag `v1.1.0` commit
+`b3a2d827ed6c158341f8e67ea91eb3b0395d3871` as the upstream Comet V1.1 source
+and the official `v1.1.0_contracts_pkg1.0.0_cli25.1.0` release WASM as the
+deployed artifact. Its SHA-256 MUST equal
+`d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687`.
+Tests and network verification MUST prove that canonical v3 BLNT:USDC and
+BLNT:XLM pools:
 
 - are deployed from that artifact;
 - contain only the expected Stellar Asset Contracts;
@@ -128,7 +132,7 @@ No test or deployment may add a privileged replacement route.
 | Native Soroban `Env` | Conversion cap, address claims, direct activation, queue compatibility, conservation, and rollback |
 | Optimized WASM | Public ABI, constructor encoding, serialization, cross-contract behavior, and resource limits |
 | Protocol-27 compatibility harness | Exact deployed v2 and legacy emitter alongside independent optimized v3 emitter/backstop WASM |
-| Local Quickstart | Reproducible dual-emitter deployment, Comet v2 bindings, initial activation, recorded costs, and deployed-WASM start/fill coverage for auction types 0 through 3 |
+| Local Quickstart | Reproducible dual-emitter deployment, Comet V1.1 bindings, initial activation, recorded costs, and deployed-WASM start/fill coverage for auction types 0 through 3 |
 | Public testnet | Production transaction assembly, signer separation, artifact hashes, backfill custody and caps, and final bindings |
 
 ## Transition-ready gate

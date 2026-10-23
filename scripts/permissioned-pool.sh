@@ -301,25 +301,13 @@ ensure_permissioned_backstop() {
 }
 
 ensure_permissioned_pool_active() {
-    local pool="$1" identity="$2" status reward_zone
+    local pool="$1" identity="$2" status
 
     status="$(invoke_view "query-funded-permissioned-status" \
         "${pool}" get_config | jq -er '.status | tostring')"
     if [[ "${status}" != "0" && "${status}" != "1" ]]; then
         invoke_transaction_as "activate-permissioned-pool" "${identity}" \
             "${pool}" set_status --pool_status 0 >/dev/null
-    fi
-    reward_zone="$(invoke_view "query-permissioned-reward-zone" \
-        "$(state_value v3_backstop)" reward_zone)"
-    if ! printf '%s' "${reward_zone}" | jq -e \
-        --arg pool "${pool}" 'index($pool) != null' >/dev/null
-    then
-        sleep "${EMISSION_START_DELAY_SECONDS}"
-        invoke_transaction "checkpoint-permissioned-reward-zone" \
-            "$(state_value v3_backstop)" distribute >/dev/null
-        invoke_transaction "add-permissioned-reward" \
-            "$(state_value v3_backstop)" add_reward \
-            --to_add "${pool}" --to_remove null >/dev/null
     fi
 }
 
@@ -494,14 +482,16 @@ command_verify_permissioned_pool() {
         die "permissioned pool is below the activation threshold: ${active_value}"
     reward_zone="$(invoke_view "verify-permissioned-reward-zone" \
         "${backstop}" reward_zone)"
-    printf '%s' "${reward_zone}" | jq -e \
-        --arg pool "${pool}" 'index($pool) != null' >/dev/null ||
-        die "permissioned pool is missing from its reward zone"
+    if printf '%s' "${reward_zone}" | jq -e \
+        --arg pool "${pool}" 'index($pool) != null' >/dev/null
+    then
+        die "plain-USDC permissioned pool unexpectedly entered the reward zone"
+    fi
 
     state_set "permissioned_pool_verified_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     cat <<EOF
 ${NETWORK_LABEL} permissioned pool verified
-  pool:        ${pool} (active; reward-zone member)
+  pool:        ${pool} (active; not reward-zone eligible)
   controller:  ${controller} (setup mask 7; default mask 0)
   setup user:  ${setup}
   XLM:         100,000 supplied; 50,000 borrowed

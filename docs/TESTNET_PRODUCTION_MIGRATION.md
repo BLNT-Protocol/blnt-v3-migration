@@ -5,8 +5,8 @@
 > [DUAL_EMITTER_DEPLOYMENT.md](DUAL_EMITTER_DEPLOYMENT.md) for the independent
 > BLND/BLNT deployment.
 
-This isolated lane exercises the candidate's integrated Comet v2 valuation with
-native XLM and fresh Comet v2 contracts on public testnet. Its state, keys,
+This isolated lane exercises the candidate's integrated Comet V1.1 valuation with
+native XLM and fresh Comet V1.1 contracts on public testnet. Its state, keys,
 transaction results, and cost evidence live below the ignored
 `.testnet-production/` directory.
 
@@ -22,14 +22,14 @@ The runner creates:
 - synthetic test-only BLND and USDC Stellar assets;
 - the native XLM Stellar asset contract, with transaction accounts funded by
   Friendbot;
-- a real 80:20 BLND:USDC Comet v2 pool initialized with 1,000 BLND and 25 USDC;
-- a real 80:20 BLND:XLM Comet v2 pool initialized with 1,000 BLND and 100 native XLM;
-- a dedicated controller shared by both Comet v2 pools, irreversibly locked at
+- a real 80:20 BLND:USDC Comet V1.1 pool initialized with 1,000 BLND and 25 USDC;
+- a real 80:20 BLND:XLM Comet V1.1 pool initialized with 1,000 BLND and 100 native XLM;
+- a dedicated controller shared by both Comet V1.1 pools, irreversibly locked at
   100/100/100 thresholds with every signer weight zero;
 - bounded, authenticated, test-only SEP-40 lending oracles for the modeled
   pools;
 - the optimized candidate backstop bound immutably to the canonical assets and
-  both Comet v2 pools;
+  both Comet V1.1 pools;
 - matched Fixed and Custom v2/v3 lending pools;
 - Fixed v3 BLND:XLM, BLND:USDC, and USDC tiers with 4:3:2 weights; and
 - Custom v3 XLM and USDC tiers with 2:1 weights, plus single-tier incumbent
@@ -38,20 +38,20 @@ The runner creates:
 Fixed v3 is deployed and receives the first plain-USDC backstop deposit before
 Custom v3 is created. That transfer establishes the shared candidate USDC SAC
 balance. The runner then reads its persistent Protocol-27 balance value and the
-issuer-controlled balances held by both Comet v2 pools, and rejects the deployment
+issuer-controlled balances held by both Comet V1.1 pools, and rejects the deployment
 unless every entry is positive, currently authorized, and permanently marked
 non-clawbackable. Native XLM has no issuer clawback. Complete modeled-pool
 verification repeats this proof before the emitter queue opens.
 
-The runner initializes both Comet v2 pools unfrozen, locks their dedicated controller,
+The runner initializes both Comet V1.1 pools unfrozen, locks their dedicated controller,
 verifies each exact token pair and 80:20 weights, and only then performs the
 depositor LP joins. Any controller mismatch, nonzero signer weight, or threshold
 other than 100 invalidates the lane. This reproduces the canonical mainnet
-BLND:USDC Comet v1 pool's controller posture so neither testnet Comet v2 pool can later be
+BLND:USDC Comet v1 pool's controller posture so neither testnet Comet V1.1 pool can later be
 frozen or assigned a replacement controller.
 
-The BLND:USDC Comet v2 pool is the backstop's USDC anchor. The backstop uses current
-reserves from both 80:20 Comet v2 pools to value the LP assets and plain XLM, values
+The BLND:USDC Comet V1.1 pool is the backstop's USDC anchor. The backstop uses current
+reserves from both 80:20 Comet V1.1 pools to value the LP assets and plain XLM, values
 plain USDC one-for-one, and does not call an oracle. The controlled SEP-40
 contracts are used only by the modeled lending pools for reserve pricing.
 
@@ -64,7 +64,7 @@ make testnet-production-plan
 make testnet-production-validate
 ```
 
-Deploy the complete incumbent and candidate stacks, create and lock both Comet v2 pools,
+Deploy the complete incumbent and candidate stacks, create and lock both Comet V1.1 pools,
 deploy and fund both modeled pool pairs, verify their non-clawbackable backstop
 custody, and then begin the unshortened 31-day deployed-emitter queue:
 
@@ -205,7 +205,7 @@ base unit required for a strict aggregate migration majority. It also receives
 weights and receives 1,000 XLM plus 12,250 USDC, worth $12,500 at the fixture
 price.
 
-The v2 balance exceeds the v2 activation formula at the controlled Comet v2
+The v2 balance exceeds the v2 activation formula at the controlled Comet V1.1
 ratio. The runner sets both v2 pools to Admin Active, configures their 30% pool
 tranche for USDC suppliers, seeds 1,000 USDC of supply per pool, adds both to
 the incumbent reward zone, advances the deployed emitter, and starts the

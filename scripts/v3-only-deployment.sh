@@ -21,9 +21,10 @@ V3_BLNT_MINT=$((1000 * SCALAR_7))
 V3_USDC_MINT=$((100000 * SCALAR_7))
 V3_BLNT_USDC_LP_TOTAL=$((2 * DUAL_MODELED_V3_LP_BALANCE))
 V3_USER_ASSET_FUNDING=$((1000000 * SCALAR_7))
-V3_USER_XLM_FULL_DONORS=100
+V3_USER_XLM_FUNDING=$((100000 * SCALAR_7))
+V3_USER_XLM_FULL_DONORS=10
 V3_USER_XLM_FULL_DONOR_PAYMENT=$((9998 * SCALAR_7))
-V3_USER_XLM_FINAL_PAYMENT=$((200 * SCALAR_7))
+V3_USER_XLM_FINAL_PAYMENT=$((20 * SCALAR_7))
 V3_USER_XLM_BATCH_SIZE=4
 
 # shellcheck source=permissioned-pool.sh
@@ -37,7 +38,7 @@ Usage: scripts/v3-only-deployment.sh COMMAND
 
 Commands:
   plan      Describe the V3-only deployment and external Blend dependencies.
-  validate  Build and validate only V3, backfill, oracle, and Comet v2 artifacts.
+  validate  Build V3, backfill, and oracle artifacts and verify Comet V1.1.
   start     Verify the public testnet RPC (or start local Quickstart).
   deploy    Deploy and verify a fresh V3 stack without deploying or mutating V1/V2.
   resume-core
@@ -62,8 +63,9 @@ Commands:
             Write the V3-only deployment registry from verified state.
   refresh-oracle
             Refresh the controlled V3 fixture-oracle histories.
-  fund-user Fund the configured user with one million of every V3 reserve
-            asset except BLND. LP-share tokens are not included.
+  fund-user Fund the configured user with one million of each issued V3
+            reserve asset except BLND and at least 100,000 native XLM.
+            LP-share tokens are not included.
   stop      Stop the local Quickstart container.
 
 The external Blend backstop and BLND token are read-only inputs. The runner
@@ -82,17 +84,17 @@ V3-only ${NETWORK_LABEL} deployment:
   1. Read and verify the existing Blend backstop, reward zone, canonical LP,
      and BLND token. No transaction is submitted to the legacy lane.
   2. Build and deploy BLNT, a V3 USDC fixture asset, the V3 emitter, backfill
-     contract, V3 factory/backstop, and BLNT:USDC / BLNT:XLM Comet v2 LPs.
+     contract, V3 factory/backstop, and BLNT:USDC / BLNT:XLM Comet V1.1 LPs.
   3. Send the 150-million-BLNT initial drop to the backfill contract: 74
      million for pre-incident LP holders, 25 million for grants, and 51 million
-     for the 2-BLND-to-1-BLNT conversion using the existing BLND token.
+     for the 1:1 BLND-to-BLNT conversion using the existing BLND token.
   4. Deploy and activate the Fixed, Custom, Reserve Loss, Permissioned, and
-     SEP-41 Assets V3 pools, add them to the V3 reward zone, seed their
-     positions, and start BLNT emissions.
+     SEP-41 Assets V3 pools, add the BLNT-bearing pools to the V3 reward zone,
+     seed their positions, and start BLNT emissions.
   5. Preserve the configured 25-million-BLNT grant for ${V3_USER_WALLET}.
-  6. Send that wallet 1 million each of BLNT, USDC, native XLM, EURC,
-     PYUSD, HLTY, IMPR, EXHT, USDP, wBTC, and wETH. Do not send BLND or
-     LP-share tokens.
+  6. Ensure that wallet holds 1 million each of BLNT, USDC, EURC, PYUSD,
+     HLTY, IMPR, EXHT, USDP, wBTC, and wETH, plus at least 100,000 native
+     XLM. Do not send BLND or LP-share tokens.
 
 No V1/V2 contracts or BLND assets are deployed or mutated.
 EOF
@@ -280,16 +282,30 @@ v3_only_fund_user_xlm_donor() {
 }
 
 v3_only_fund_user_xlm() {
-    local identity amount
+    local identity amount account balance whole fraction current_balance
     local completed total index batch_end batch_index failed pid
     local -a pids
+
+    account="$(read_horizon_account "${V3_USER_WALLET}")"
+    balance="$(printf '%s' "${account}" | jq -er '
+        .balances[] | select(.asset_type == "native") | .balance
+    ')"
+    whole="${balance%%.*}"
+    fraction="${balance#*.}0000000"
+    fraction="${fraction:0:7}"
+    current_balance=$((10#${whole} * SCALAR_7 + 10#${fraction}))
+    state_set "wallet_xlm_funding_target" "${V3_USER_XLM_FUNDING}"
+    if (( current_balance >= V3_USER_XLM_FUNDING )); then
+        state_set "wallet_xlm_funded" "${current_balance}"
+        return
+    fi
 
     completed="$(state_optional wallet_xlm_donors_completed)"
     completed="${completed:-0}"
     if (( completed <= V3_USER_XLM_FULL_DONORS )); then
         total=$((completed * V3_USER_XLM_FULL_DONOR_PAYMENT))
     else
-        total="${V3_USER_ASSET_FUNDING}"
+        total="${V3_USER_XLM_FUNDING}"
     fi
     index=$((completed + 1))
     while (( index <= V3_USER_XLM_FULL_DONORS + 1 )); do
@@ -328,7 +344,7 @@ v3_only_fund_user_xlm() {
         state_set "wallet_xlm_donors_completed" "${batch_end}"
         index=$((batch_end + 1))
     done
-    assert_equal "${V3_USER_ASSET_FUNDING}" "${total}" \
+    assert_equal "${V3_USER_XLM_FUNDING}" "${total}" \
         "wallet XLM transfer total"
     state_set "wallet_xlm_funded" "${total}"
 }
@@ -455,7 +471,7 @@ v3_only_write_registry() {
             grant_allocation: .blnt_grant_total,
             swap_blnt_cap: .blnt_swap_cap,
             swap_blnd_input_cap: .blnd_swap_input_cap,
-            blnd_per_blnt: 2,
+            blnd_per_blnt: 1,
             swap_deadline: .blnt_swap_deadline
           },
           modeled_pools: {
@@ -471,7 +487,7 @@ v3_only_write_registry() {
               v3: {
                 pool: .modeled_v3_custom_pool,
                 oracle: .modeled_v3_custom_oracle,
-                reward_zone_member: true,
+                reward_zone_member: false,
                 pool_emission_position: null
               }
             }
@@ -530,7 +546,7 @@ v3_only_write_registry() {
                   tier: "FirstLoss",
                   asset: "USDC",
                   deposited: (.permissioned_backstop_deposit | tonumber),
-                  reward_zone_member: true
+                  reward_zone_member: false
                 },
                 reserves: {
                   XLM: {
@@ -564,7 +580,7 @@ v3_only_write_registry() {
                   tier: "FirstLoss",
                   asset: "USDC",
                   deposited: (.sep41_backstop_deposit | tonumber),
-                  reward_zone_member: true
+                  reward_zone_member: false
                 },
                 reserves: {
                   wBTC: {
@@ -586,7 +602,8 @@ v3_only_write_registry() {
           wallet_funding: {
             recipient: .funding_wallet,
             amount_per_asset: .wallet_asset_funding,
-            assets: ["BLNT", "USDC", "XLM", "EURC", "PYUSD", "HLTY", "IMPR", "EXHT", "USDP", "wBTC", "wETH"],
+            assets: ["BLNT", "USDC", "EURC", "PYUSD", "HLTY", "IMPR", "EXHT", "USDP", "wBTC", "wETH"],
+            native_xlm_minimum: .wallet_xlm_funding_target,
             excluded_assets: ["BLND"],
             lp_share_tokens_included: false,
             completed_at: (.wallet_funded_at // null)
@@ -625,6 +642,7 @@ v3_only_refresh_oracles() {
 v3_only_validate_artifacts() {
     local artifact
 
+    validate_comet_v1_1_artifact
     for artifact in \
         "${V3_FACTORY_WASM}" \
         "${V3_BACKSTOP_WASM}" \
@@ -650,7 +668,7 @@ v3_only_validate() {
         make build-v3
     )
     v3_only_validate_artifacts
-    note "Validated V3, backfill, oracle, and Comet v2 artifacts only."
+    note "Validated V3, backfill, oracle, and official Comet V1.1 artifacts only."
 }
 
 verify_external_blend_lane() {
@@ -720,22 +738,23 @@ v3_only_deploy_modeled_pools() {
 
     reward_zone="$(invoke_view "query-v3-only-reward-zone" \
         "$(state_value v3_backstop)" reward_zone)"
-    for pool in "${fixed_pool}" "${custom_pool}"; do
-        if ! printf '%s' "${reward_zone}" | jq -e \
-            --arg pool "${pool}" 'index($pool) != null' >/dev/null
-        then
-            invoke_transaction "add-v3-only-modeled-reward" \
-                "$(state_value v3_backstop)" add_reward \
-                --to_add "${pool}" --to_remove null >/dev/null
-            reward_zone="$(invoke_view "query-updated-v3-only-reward-zone" \
-                "$(state_value v3_backstop)" reward_zone)"
-        fi
-    done
-    for pool in "${fixed_pool}" "${custom_pool}"; do
-        printf '%s' "${reward_zone}" | jq -e \
-            --arg pool "${pool}" 'index($pool) != null' >/dev/null ||
-            die "modeled v3 pool missing from reward zone: ${pool}"
-    done
+    if ! printf '%s' "${reward_zone}" | jq -e \
+        --arg pool "${fixed_pool}" 'index($pool) != null' >/dev/null
+    then
+        invoke_transaction "add-v3-only-modeled-reward" \
+            "$(state_value v3_backstop)" add_reward \
+            --to_add "${fixed_pool}" --to_remove null >/dev/null
+        reward_zone="$(invoke_view "query-updated-v3-only-reward-zone" \
+            "$(state_value v3_backstop)" reward_zone)"
+    fi
+    printf '%s' "${reward_zone}" | jq -e \
+        --arg pool "${fixed_pool}" 'index($pool) != null' >/dev/null ||
+        die "modeled fixed v3 pool missing from reward zone: ${fixed_pool}"
+    if printf '%s' "${reward_zone}" | jq -e \
+        --arg pool "${custom_pool}" 'index($pool) != null' >/dev/null
+    then
+        die "plain-asset modeled custom v3 pool unexpectedly entered the reward zone"
+    fi
 
     ensure_modeled_v3_emissions_config fixed "${fixed_pool}"
     ensure_modeled_v3_supply fixed "${fixed_pool}"
@@ -1034,9 +1053,9 @@ v3_only_deploy() {
     state_set "v3_emitter_wasm_sha256" "$(sha256_file "${V3_EMITTER_WASM}")"
     state_set "v3_backstop_wasm_sha256" "$(sha256_file "${V3_BACKSTOP_WASM}")"
     state_set "blnt_backfill_wasm_sha256" "$(sha256_file "${BLNT_BACKFILL_WASM}")"
-    state_set "comet_v2_wasm_sha256" "$(sha256_file "${COMET_WASM}")"
-    state_set "comet_v2_source_commit" \
-        "$(git -C "${ROOT_DIR}/comet-contracts-v2" rev-parse HEAD)"
+    state_set "comet_v1_1_wasm_sha256" "$(sha256_file "${COMET_WASM}")"
+    state_set "comet_v1_1_source_commit" \
+        "$(git -C "${ROOT_DIR}/comet-contracts-v1" rev-parse HEAD)"
 
     verify_external_blend_lane
 

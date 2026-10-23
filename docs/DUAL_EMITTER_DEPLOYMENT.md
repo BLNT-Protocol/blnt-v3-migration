@@ -3,12 +3,12 @@
 The active deployment lane uses independent emitters: the exact deployed
 legacy emitter continues BLND to v2, while the new v3 emitter sends BLNT to v3
 from launch. It deploys canonical BLNT:USDC and BLNT:XLM pools from the
-workspace's Comet v2 artifact and does not queue a legacy-emitter replacement.
+official Comet V1.1 release artifact and does not queue a legacy-emitter replacement.
 The v3 emitter constructor binds the deployment operator as a one-time
 initializer; successful initialization consumes that authority, leaving no
 ongoing emitter administrator. A separate immutable backfill contract receives
 the complete 150-million-BLNT initial drop, manages address claims, and owns a
-270-day, 2-BLND-to-1-BLNT conversion path capped at 51 million BLNT output.
+270-day, 1:1 BLND-to-BLNT conversion path capped at 51 million BLNT output.
 Each conversion burns BLND immediately. After that window, anyone may burn the
 unused BLNT conversion reserve without affecting claim liabilities.
 
@@ -49,7 +49,7 @@ a live success.
 
 The auction pass uses real deployed-WASM transactions and two isolated signer
 accounts. A deliberately high but valid interest-rate configuration reaches
-the inclusive 200-USDC protocol-credit minimum without altering production
+the inclusive 20-USDC protocol-credit minimum without altering production
 contracts. It proves type 2 (interest) and type 3 (protocol fee) can coexist,
 then fills both through submit discriminants 8 and 10. It next crashes only the
 test oracle's collateral price, starts type 0 (user liquidation), and waits for
@@ -121,27 +121,27 @@ The network-specific `dual-emitter-state.json` and timestamped run directory
 record:
 
 - exact legacy and v3 emitter WASM hashes;
-- the Comet v2 source commit and optimized WASM hash;
+- the pinned Comet V1.1 source commit and official release WASM hash;
 - BLND, BLNT, USDC, and XLM contract IDs;
 - the BLNT metadata name `Blent Token` and configured issuer home domain;
-- BLND:USDC, BLNT:USDC, and BLNT:XLM Comet v2 IDs;
+- BLND:USDC, BLNT:USDC, and BLNT:XLM Comet V1.1 IDs;
 - separate emitter and backstop IDs;
 - the backfill-contract artifact hash, address, and immutable token bindings;
 - the immutable 180-day backfill and 360-day grant vesting timestamps and
   allocation totals;
 - both token administrators and emitter recipients;
 - direct v3 activation and exact 150-million-BLNT backfill custody;
-- exact same-user 2:1 BLND burn and pre-funded BLNT transfer events;
+- exact same-user 1:1 BLND burn and pre-funded BLNT transfer events;
 - positive independent BLND and BLNT distributions;
 - active modeled Fixed and Custom pools in their respective V2 and V3 reward
   zones, including verified seven-day V2 USDC-supply emission streams; and
 - a dedicated local V3 pool where auction types 0, 1, 2, and 3 were each
   started, filled, removed, and checked for their corresponding position,
   custody, donation, tier-impairment, or BLNT-burn balance deltas; and
-- the immutable 51-million-BLNT output cap, 102-million-BLND input capacity,
+- the immutable 51-million-BLNT output cap, 51-million-BLND input capacity,
   270-day deadline, zero initial BLNT expiry burns, and empty initial v3 queue.
 
-The runner initializes all three Comet v2 pools at 80:20, verifies positive authorized
+The runner initializes all three Comet V1.1 pools at 80:20, verifies positive authorized
 non-clawbackable custody, and then locks their shared classic controller at
 100/100/100 thresholds with its only signer weight set to zero.
 

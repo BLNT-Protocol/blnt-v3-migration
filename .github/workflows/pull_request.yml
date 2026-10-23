@@ -51,6 +51,10 @@ jobs:
 
   check-v3:
     runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
@@ -60,8 +64,6 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          blnt-contracts-v3/target
-          migration-harness/target
         key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('blnt-contracts-v3/Cargo.lock', 'migration-harness/Cargo.lock', 'deployed-artifacts/mainnet/manifest.json') }}-${{ github.sha }}
         restore-keys: |
           cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('blnt-contracts-v3/Cargo.lock', 'migration-harness/Cargo.lock', 'deployed-artifacts/mainnet/manifest.json') }}-

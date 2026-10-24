@@ -235,6 +235,18 @@ make testnet-v3-only-deploy-no-backstop-pool
 make testnet-v3-only-verify-no-backstop-pool
 ```
 
+The optional Traditional scenario also reuses Fixed v3's XLM, USDC, and EURC
+reserve configuration, controlled oracle, and seeded lending positions. Its
+immutable backstop contains two plain-USDC tiers with 3:2 take-rate weights,
+funded with 15,000 USDC in FirstLoss and 10,000 USDC in SecondLoss. Because
+neither tier contains BLNT, the active pool is not reward-zone eligible. Deploy
+or reverify it independently with:
+
+```bash
+make testnet-v3-only-deploy-traditional-pool
+make testnet-v3-only-verify-traditional-pool
+```
+
 The controlled lending-oracle fixtures use seven-decimal USD prices. Their
 price setters require authorization from the isolated runner operator bound at
 construction, and verification checks that immutable

@@ -527,7 +527,9 @@ load_configuration() {
         (.test_scenarios.sep41_assets? |
             select(type == "object") | ["sep41_assets", .contracts.pool]),
         (.test_scenarios.no_backstop? |
-            select(type == "object") | ["no_backstop", .contracts.pool]) |
+            select(type == "object") | ["no_backstop", .contracts.pool]),
+        (.test_scenarios.traditional? |
+            select(type == "object") | ["traditional", .contracts.pool]) |
         @tsv
     ' "${REGISTRY}")
 

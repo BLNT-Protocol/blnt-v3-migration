@@ -1,7 +1,7 @@
 {
   "schema_version": 4,
   "topology": "v3-only-external-blend",
-  "generated_at": "2026-10-24T15:18:37Z",
+  "generated_at": "2026-10-24T16:12:43Z",
   "network": {
     "name": "Public testnet",
     "passphrase": "Test SDF Network ; September 2015",
@@ -214,6 +214,62 @@
         "tiers": [],
         "take_rate": 0,
         "active_value": 0,
+        "reward_zone_member": false
+      },
+      "reserves": {
+        "XLM": {
+          "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
+        },
+        "USDC": {
+          "contract_id": "CCHBRHIMKBHM2SUCMNNPD3BRS7AK7FZJELJJCU4PKQMCPDBSZXM4QGGM"
+        },
+        "EURC": {
+          "contract_id": "CDCE4Q2RC6SSRMFPLCCXV5XG7X2LVVZIILUGVTLEGA3ZGZLV44IT2UUC"
+        }
+      },
+      "positions": {
+        "USDC": {
+          "supplied": 10000000000,
+          "collateral": 10000000000
+        },
+        "EURC": {
+          "supplied": 5000000000,
+          "borrowed": 1000000000
+        }
+      }
+    },
+    "traditional": {
+      "purpose": "V3 repeated plain-USDC tier UI and lending scenario",
+      "deployed_at": "2026-10-24T16:10:17Z",
+      "verified_at": "2026-10-24T16:12:42Z",
+      "contracts": {
+        "pool_factory": "CAOQMPJBI2GSLKHOBZ6ZTS77QXFKSPDRZAWRFAPMVZVRJYH7IMLMAANU",
+        "backstop": "CBIQJM65BM3VFCV47IFH6K2XPCSZCXFBU5XNAUYPDALJJBJP24HC6HHS",
+        "pool": "CDBX7EHY47WUTUX7ADMYAWV6W2FELCVNO7CEHIDO6ZMBRQEATT4FIA2Z",
+        "oracle": "CCJPXNWJNST5QAXUF4RUQJRW6UH3WHXBPTHBPBLDYXZFXVRZRTFSO54C"
+      },
+      "source": {
+        "migration_repository_commit": "c30f1968b70bb758412e7c782fef71929930d51d",
+        "dirty": true,
+        "patch_sha256": "403d2320831c5a69b1d2ec4d0be3d6874e05bd349ece0371b9c87196751f3d4c"
+      },
+      "backstop": {
+        "tiers": [
+          {
+            "tier": "FirstLoss",
+            "asset": "USDC",
+            "take_rate_weight": 3,
+            "deposited": 150000000000
+          },
+          {
+            "tier": "SecondLoss",
+            "asset": "USDC",
+            "take_rate_weight": 2,
+            "deposited": 100000000000
+          }
+        ],
+        "take_rate": 2000000,
+        "active_value": 250000000000,
         "reward_zone_member": false
       },
       "reserves": {

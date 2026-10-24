@@ -105,6 +105,12 @@ testnet-v3-only-deploy-no-backstop-pool:
 testnet-v3-only-verify-no-backstop-pool:
 	bash scripts/testnet-v3-only.sh verify-no-backstop-pool
 
+testnet-v3-only-deploy-traditional-pool:
+	bash scripts/testnet-v3-only.sh deploy-traditional-pool
+
+testnet-v3-only-verify-traditional-pool:
+	bash scripts/testnet-v3-only.sh verify-traditional-pool
+
 testnet-v3-only-status:
 	bash scripts/testnet-v3-only.sh status
 

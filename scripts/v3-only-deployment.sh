@@ -33,6 +33,8 @@ source "${SCRIPT_DIR}/permissioned-pool.sh"
 source "${SCRIPT_DIR}/sep41-assets-pool.sh"
 # shellcheck source=no-backstop-pool.sh
 source "${SCRIPT_DIR}/no-backstop-pool.sh"
+# shellcheck source=traditional-pool.sh
+source "${SCRIPT_DIR}/traditional-pool.sh"
 
 usage_v3_only() {
     cat <<'EOF'
@@ -63,6 +65,10 @@ Commands:
             Deploy and verify the V3 No Backstop scenario pool.
   verify-no-backstop-pool
             Reverify the deployed V3 No Backstop scenario pool.
+  deploy-traditional-pool
+            Deploy and verify the V3 Traditional scenario pool.
+  verify-traditional-pool
+            Reverify the deployed V3 Traditional scenario pool.
   run       Validate, start, and deploy.
   status    Query the recorded V3 and external legacy bindings.
   write-registry
@@ -95,8 +101,8 @@ V3-only ${NETWORK_LABEL} deployment:
      million for pre-incident LP holders, 25 million for grants, and 51 million
      for the 1:1 BLND-to-BLNT conversion using the existing BLND token.
   4. Deploy and activate the Fixed, Custom, Reserve Loss, Permissioned,
-     SEP-41 Assets, and No Backstop V3 pools, add the BLNT-bearing pools to the
-     V3 reward zone, seed their positions, and start BLNT emissions.
+     SEP-41 Assets, No Backstop, and Traditional V3 pools, add the BLNT-bearing
+     pools to the V3 reward zone, seed their positions, and start BLNT emissions.
   5. Preserve the configured 25-million-BLNT grant for ${V3_USER_WALLET}.
   6. Ensure that wallet holds 1 million each of BLNT, USDC, EURC, PYUSD,
      HLTY, IMPR, EXHT, USDP, wBTC, and wETH, plus at least 100,000 native
@@ -638,6 +644,60 @@ v3_only_write_registry() {
                   EURC: {
                     supplied: (.no_backstop_eurc_supply | tonumber),
                     borrowed: (.no_backstop_eurc_borrow | tonumber)
+                  }
+                }
+              }
+            } else {} end)
+            +
+            (if ((.traditional_pool // "") | length) > 0 then {
+              traditional: {
+                purpose: "V3 repeated plain-USDC tier UI and lending scenario",
+                deployed_at: .traditional_pool_deployed_at,
+                verified_at: .traditional_pool_verified_at,
+                contracts: {
+                  pool_factory: .v3_factory,
+                  backstop: .v3_backstop,
+                  pool: .traditional_pool,
+                  oracle: .traditional_pool_oracle
+                },
+                source: {
+                  migration_repository_commit: .traditional_source_commit,
+                  dirty: ((.traditional_source_dirty // "false") == "true"),
+                  patch_sha256: .traditional_source_patch_sha256
+                },
+                backstop: {
+                  tiers: [
+                    {
+                      tier: "FirstLoss",
+                      asset: "USDC",
+                      take_rate_weight: 3,
+                      deposited: (.traditional_first_loss_usdc | tonumber)
+                    },
+                    {
+                      tier: "SecondLoss",
+                      asset: "USDC",
+                      take_rate_weight: 2,
+                      deposited: (.traditional_second_loss_usdc | tonumber)
+                    }
+                  ],
+                  take_rate: 2000000,
+                  active_value: ((.traditional_first_loss_usdc | tonumber) +
+                    (.traditional_second_loss_usdc | tonumber)),
+                  reward_zone_member: false
+                },
+                reserves: {
+                  XLM: {contract_id: .xlm_token},
+                  USDC: {contract_id: .usdc_token},
+                  EURC: {contract_id: .modeled_asset_eurc}
+                },
+                positions: {
+                  USDC: {
+                    supplied: (.traditional_usdc_supply | tonumber),
+                    collateral: (.traditional_usdc_collateral | tonumber)
+                  },
+                  EURC: {
+                    supplied: (.traditional_eurc_supply | tonumber),
+                    borrowed: (.traditional_eurc_borrow | tonumber)
                   }
                 }
               }
@@ -1308,6 +1368,23 @@ v3_only_no_backstop() {
     v3_only_write_registry
 }
 
+v3_only_traditional() {
+    local handler="$1"
+
+    validate_tools
+    require_network
+    load_state
+    require_traditional_pool_support
+    if [[ "${handler}" == "command_deploy_traditional_pool" ]]; then
+        v3_only_validate_artifacts
+        v3_only_refresh_oracles
+        load_state
+    fi
+    "${handler}"
+    v3_only_update_reward_zone
+    v3_only_write_registry
+}
+
 v3_only_status() {
     local backfill emitter backstop recipient blnd_binding reward_zone
 
@@ -1338,6 +1415,7 @@ V3-only ${NETWORK_LABEL} status
   Permissioned pool: $(state_optional permissioned_pool)
   SEP-41 Assets pool: $(state_optional sep41_pool)
   No Backstop pool: $(state_optional no_backstop_pool)
+  Traditional pool: $(state_optional traditional_pool)
   configured grant user: $(state_value configured_user)
   grant amount: $(state_value blnt_grant_total)
   funded user: $(state_optional funding_wallet)
@@ -1355,6 +1433,7 @@ v3_only_run() {
     v3_only_permissioned command_deploy_permissioned_pool true
     v3_only_sep41 command_deploy_sep41_pool true
     v3_only_no_backstop command_deploy_no_backstop_pool
+    v3_only_traditional command_deploy_traditional_pool
     v3_only_fund_user_assets
 }
 
@@ -1374,6 +1453,8 @@ main_v3_only() {
         verify-sep41-pool) v3_only_sep41 command_verify_sep41_pool ;;
         deploy-no-backstop-pool) v3_only_no_backstop command_deploy_no_backstop_pool ;;
         verify-no-backstop-pool) v3_only_no_backstop command_verify_no_backstop_pool ;;
+        deploy-traditional-pool) v3_only_traditional command_deploy_traditional_pool ;;
+        verify-traditional-pool) v3_only_traditional command_verify_traditional_pool ;;
         run) v3_only_run ;;
         status) v3_only_status ;;
         fund-user) v3_only_fund_user_assets ;;

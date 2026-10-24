@@ -99,6 +99,12 @@ testnet-v3-only-deploy-sep41-pool:
 testnet-v3-only-verify-sep41-pool:
 	bash scripts/testnet-v3-only.sh verify-sep41-pool
 
+testnet-v3-only-deploy-no-backstop-pool:
+	bash scripts/testnet-v3-only.sh deploy-no-backstop-pool
+
+testnet-v3-only-verify-no-backstop-pool:
+	bash scripts/testnet-v3-only.sh verify-no-backstop-pool
+
 testnet-v3-only-status:
 	bash scripts/testnet-v3-only.sh status
 

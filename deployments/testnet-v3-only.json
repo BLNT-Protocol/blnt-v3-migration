@@ -1,7 +1,7 @@
 {
   "schema_version": 4,
   "topology": "v3-only-external-blend",
-  "generated_at": "2026-10-23T14:14:28Z",
+  "generated_at": "2026-10-24T15:18:37Z",
   "network": {
     "name": "Public testnet",
     "passphrase": "Test SDF Network ; September 2015",
@@ -192,6 +192,49 @@
           "contract_id": "CDYXSKLE54WUHD6WNPGS5YM5SER2XBJTGU2W2XYKHOOEV6VXAZALNIZX",
           "supplied": 100000000000,
           "borrowed": 50000000000
+        }
+      }
+    },
+    "no_backstop": {
+      "purpose": "V3 zero-tier pool UI and lending scenario",
+      "deployed_at": "2026-10-23T17:31:00Z",
+      "verified_at": "2026-10-24T15:18:36Z",
+      "contracts": {
+        "pool_factory": "CAOQMPJBI2GSLKHOBZ6ZTS77QXFKSPDRZAWRFAPMVZVRJYH7IMLMAANU",
+        "backstop": "CBIQJM65BM3VFCV47IFH6K2XPCSZCXFBU5XNAUYPDALJJBJP24HC6HHS",
+        "pool": "CBELSNOBGYGU4WVT7FQH63D7BD7QKQXNGYOUQ3IPWSHZB5F7QHKCLDNQ",
+        "oracle": "CCJPXNWJNST5QAXUF4RUQJRW6UH3WHXBPTHBPBLDYXZFXVRZRTFSO54C"
+      },
+      "source": {
+        "migration_repository_commit": "b594472b08a528761e5a6e058d118ae8d5d40c18",
+        "dirty": true,
+        "patch_sha256": "b34a22624b4f27662e544d874afa846693f7579d3ce89639b2875ef0b8d69e4f"
+      },
+      "backstop": {
+        "tiers": [],
+        "take_rate": 0,
+        "active_value": 0,
+        "reward_zone_member": false
+      },
+      "reserves": {
+        "XLM": {
+          "contract_id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
+        },
+        "USDC": {
+          "contract_id": "CCHBRHIMKBHM2SUCMNNPD3BRS7AK7FZJELJJCU4PKQMCPDBSZXM4QGGM"
+        },
+        "EURC": {
+          "contract_id": "CDCE4Q2RC6SSRMFPLCCXV5XG7X2LVVZIILUGVTLEGA3ZGZLV44IT2UUC"
+        }
+      },
+      "positions": {
+        "USDC": {
+          "supplied": 10000000000,
+          "collateral": 10000000000
+        },
+        "EURC": {
+          "supplied": 5000000000,
+          "borrowed": 1000000000
         }
       }
     }

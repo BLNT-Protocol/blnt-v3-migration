@@ -1710,11 +1710,11 @@ ensure_modeled_v3_supply() {
 }
 
 ensure_fixed_v3_eurc_borrow() {
-    local pool="$1" positions usdc_collateral eurc_supply eurc_borrow
+    local pool="$1" label="${2:-fixed}" positions usdc_collateral eurc_supply eurc_borrow
     local usdc eurc
 
     positions="$(invoke_view \
-        "query-fixed-v3-emission-positions" "${pool}" get_positions \
+        "query-${label}-v3-emission-positions" "${pool}" get_positions \
         --address "$(state_value depositor)")"
     usdc_collateral="$(printf '%s' "${positions}" |
         jq -er '(.collateral["1"] // "0") | tostring')"
@@ -1724,7 +1724,7 @@ ensure_fixed_v3_eurc_borrow() {
         jq -er '(.liabilities["2"] // "0") | tostring')"
     for value in "${usdc_collateral}" "${eurc_supply}" "${eurc_borrow}"; do
         [[ "${value}" =~ ^[0-9]+$ ]] ||
-            die "invalid Fixed v3 EURC-borrow fixture position"
+            die "invalid ${label} v3 EURC-borrow fixture position"
     done
 
     if (( usdc_collateral == 0 && eurc_supply == 0 && eurc_borrow == 0 )); then
@@ -1732,11 +1732,11 @@ ensure_fixed_v3_eurc_borrow() {
         eurc="$(modeled_asset_id EURC)"
         ensure_token_balance "${usdc}" \
             "${MODELED_FIXED_V3_USDC_COLLATERAL}" \
-            "fixed-v3-usdc-collateral"
+            "${label}-v3-usdc-collateral"
         ensure_token_balance "${eurc}" \
             "${MODELED_FIXED_V3_EURC_SUPPLY}" \
-            "fixed-v3-eurc-liquidity"
-        invoke_transaction_as "seed-fixed-v3-eurc-borrow" \
+            "${label}-v3-eurc-liquidity"
+        invoke_transaction_as "seed-${label}-v3-eurc-borrow" \
             "${DEPOSITOR_IDENTITY}" "${pool}" submit \
             --from "$(state_value depositor)" \
             --spender "$(state_value depositor)" \
@@ -1748,7 +1748,7 @@ ensure_fixed_v3_eurc_borrow() {
         eurc_supply != MODELED_FIXED_V3_EURC_SUPPLY ||
         eurc_borrow != MODELED_FIXED_V3_EURC_BORROW ))
     then
-        die "Fixed v3 EURC-borrow fixture is partial or differs from its target"
+        die "${label} v3 EURC-borrow fixture is partial or differs from its target"
     fi
 }
 

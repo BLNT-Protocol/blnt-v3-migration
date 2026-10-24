@@ -31,6 +31,8 @@ V3_USER_XLM_BATCH_SIZE=4
 source "${SCRIPT_DIR}/permissioned-pool.sh"
 # shellcheck source=sep41-assets-pool.sh
 source "${SCRIPT_DIR}/sep41-assets-pool.sh"
+# shellcheck source=no-backstop-pool.sh
+source "${SCRIPT_DIR}/no-backstop-pool.sh"
 
 usage_v3_only() {
     cat <<'EOF'
@@ -57,6 +59,10 @@ Commands:
             Deploy and verify the V3 SEP-41 Assets scenario pool.
   verify-sep41-pool
             Reverify the deployed V3 SEP-41 Assets scenario pool.
+  deploy-no-backstop-pool
+            Deploy and verify the V3 No Backstop scenario pool.
+  verify-no-backstop-pool
+            Reverify the deployed V3 No Backstop scenario pool.
   run       Validate, start, and deploy.
   status    Query the recorded V3 and external legacy bindings.
   write-registry
@@ -88,9 +94,9 @@ V3-only ${NETWORK_LABEL} deployment:
   3. Send the 150-million-BLNT initial drop to the backfill contract: 74
      million for pre-incident LP holders, 25 million for grants, and 51 million
      for the 1:1 BLND-to-BLNT conversion using the existing BLND token.
-  4. Deploy and activate the Fixed, Custom, Reserve Loss, Permissioned, and
-     SEP-41 Assets V3 pools, add the BLNT-bearing pools to the V3 reward zone,
-     seed their positions, and start BLNT emissions.
+  4. Deploy and activate the Fixed, Custom, Reserve Loss, Permissioned,
+     SEP-41 Assets, and No Backstop V3 pools, add the BLNT-bearing pools to the
+     V3 reward zone, seed their positions, and start BLNT emissions.
   5. Preserve the configured 25-million-BLNT grant for ${V3_USER_WALLET}.
   6. Ensure that wallet holds 1 million each of BLNT, USDC, EURC, PYUSD,
      HLTY, IMPR, EXHT, USDP, wBTC, and wETH, plus at least 100,000 native
@@ -592,6 +598,46 @@ v3_only_write_registry() {
                     contract_id: .sep41_asset_weth,
                     supplied: (.sep41_wETH_supplied | tonumber),
                     borrowed: (.sep41_wETH_borrowed | tonumber)
+                  }
+                }
+              }
+            } else {} end)
+            +
+            (if ((.no_backstop_pool // "") | length) > 0 then {
+              no_backstop: {
+                purpose: "V3 zero-tier pool UI and lending scenario",
+                deployed_at: .no_backstop_pool_deployed_at,
+                verified_at: .no_backstop_pool_verified_at,
+                contracts: {
+                  pool_factory: .v3_factory,
+                  backstop: .v3_backstop,
+                  pool: .no_backstop_pool,
+                  oracle: .no_backstop_pool_oracle
+                },
+                source: {
+                  migration_repository_commit: .no_backstop_source_commit,
+                  dirty: ((.no_backstop_source_dirty // "false") == "true"),
+                  patch_sha256: .no_backstop_source_patch_sha256
+                },
+                backstop: {
+                  tiers: [],
+                  take_rate: 0,
+                  active_value: 0,
+                  reward_zone_member: false
+                },
+                reserves: {
+                  XLM: {contract_id: .xlm_token},
+                  USDC: {contract_id: .usdc_token},
+                  EURC: {contract_id: .modeled_asset_eurc}
+                },
+                positions: {
+                  USDC: {
+                    supplied: (.no_backstop_usdc_supply | tonumber),
+                    collateral: (.no_backstop_usdc_collateral | tonumber)
+                  },
+                  EURC: {
+                    supplied: (.no_backstop_eurc_supply | tonumber),
+                    borrowed: (.no_backstop_eurc_borrow | tonumber)
                   }
                 }
               }
@@ -1245,6 +1291,23 @@ v3_only_sep41() {
     v3_only_write_registry
 }
 
+v3_only_no_backstop() {
+    local handler="$1"
+
+    validate_tools
+    require_network
+    load_state
+    require_no_backstop_pool_support
+    if [[ "${handler}" == "command_deploy_no_backstop_pool" ]]; then
+        v3_only_validate_artifacts
+        v3_only_refresh_oracles
+        load_state
+    fi
+    "${handler}"
+    v3_only_update_reward_zone
+    v3_only_write_registry
+}
+
 v3_only_status() {
     local backfill emitter backstop recipient blnd_binding reward_zone
 
@@ -1274,6 +1337,7 @@ V3-only ${NETWORK_LABEL} status
   BLNT backfill: ${backfill}
   Permissioned pool: $(state_optional permissioned_pool)
   SEP-41 Assets pool: $(state_optional sep41_pool)
+  No Backstop pool: $(state_optional no_backstop_pool)
   configured grant user: $(state_value configured_user)
   grant amount: $(state_value blnt_grant_total)
   funded user: $(state_optional funding_wallet)
@@ -1290,6 +1354,7 @@ v3_only_run() {
     v3_only_reserve_loss command_deploy_reserve_loss_pool
     v3_only_permissioned command_deploy_permissioned_pool true
     v3_only_sep41 command_deploy_sep41_pool true
+    v3_only_no_backstop command_deploy_no_backstop_pool
     v3_only_fund_user_assets
 }
 
@@ -1307,6 +1372,8 @@ main_v3_only() {
         verify-permissioned-pool) v3_only_permissioned command_verify_permissioned_pool ;;
         deploy-sep41-pool) v3_only_sep41 command_deploy_sep41_pool ;;
         verify-sep41-pool) v3_only_sep41 command_verify_sep41_pool ;;
+        deploy-no-backstop-pool) v3_only_no_backstop command_deploy_no_backstop_pool ;;
+        verify-no-backstop-pool) v3_only_no_backstop command_verify_no_backstop_pool ;;
         run) v3_only_run ;;
         status) v3_only_status ;;
         fund-user) v3_only_fund_user_assets ;;

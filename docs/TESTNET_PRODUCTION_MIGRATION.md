@@ -223,6 +223,18 @@ enters an open reward-zone slot but has no BLND-bearing backstop tier, so its
 emission weight and BLND allocation remain zero. The finalize and claim exercises therefore
 gulp and claim only Fixed's BLND:USDC, BLND:XLM, and EURC-borrow streams.
 
+The optional No Backstop scenario reuses Fixed v3's XLM, USDC, and EURC
+reserve configuration and controlled oracle. It has an immutable empty tier
+list, a zero backstop take rate, zero active backstop value, and no reward-zone
+eligibility. The runner activates it without a backstop deposit, seeds 1,000
+USDC of ordinary supply, supplies another 1,000 USDC as collateral, supplies
+500 EURC, and borrows 100 EURC. Deploy or reverify it independently with:
+
+```bash
+make testnet-v3-only-deploy-no-backstop-pool
+make testnet-v3-only-verify-no-backstop-pool
+```
+
 The controlled lending-oracle fixtures use seven-decimal USD prices. Their
 price setters require authorization from the isolated runner operator bound at
 construction, and verification checks that immutable

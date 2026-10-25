@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "purpose": "Source-verified release artifacts pinned for the next BLNT V3 mainnet deployment",
+  "status": "prepared-not-deployed",
+  "source": {
+    "v3_repository": "https://github.com/BLNT-Protocol/blnt-contracts-v3",
+    "v3_commit": "5d055ca89afc9ed443d36b7ad34e3de59b487764",
+    "v3_release": "v3.0.2",
+    "backfill_repository": "https://github.com/BLNT-Protocol/blnt-backfill-contract",
+    "backfill_commit": "fe366da68da7f24ef20063c43aaf0b13ea752257",
+    "backfill_release": "v1.0.0"
+  },
+  "artifacts": [
+    {
+      "name": "emitter",
+      "path": "emitter.wasm",
+      "sha256": "4fa7d99dee6fe99cad5d07a46ee39e437dc287e53e3ab1f3ccc0aacf7e6cd6c5",
+      "source_repo": "github:BLNT-Protocol/blnt-contracts-v3",
+      "release_tag": "v3.0.2_emitter_emitter_pkg1.0.0_cli28.1.0",
+      "url": "https://github.com/BLNT-Protocol/blnt-contracts-v3/releases/download/v3.0.2_emitter_emitter_pkg1.0.0_cli28.1.0/emitter_v1.0.0.wasm"
+    },
+    {
+      "name": "backstop",
+      "path": "backstop.wasm",
+      "sha256": "0469cfb445bedd87478274f265c8776b32cde1e8840fca4684ffa1dc4d5a750f",
+      "source_repo": "github:BLNT-Protocol/blnt-contracts-v3",
+      "release_tag": "v3.0.2_backstop_pkg2.0.0_cli28.1.0",
+      "url": "https://github.com/BLNT-Protocol/blnt-contracts-v3/releases/download/v3.0.2_backstop_pkg2.0.0_cli28.1.0/backstop_v2.0.0.wasm"
+    },
+    {
+      "name": "pool-factory",
+      "path": "pool_factory.wasm",
+      "sha256": "985d7eda4b610f28103edcb28faa52408169f455ac9a880c4a39f58ecc0c2135",
+      "source_repo": "github:BLNT-Protocol/blnt-contracts-v3",
+      "release_tag": "v3.0.2_pool-factory_pkg2.0.0_cli28.1.0",
+      "url": "https://github.com/BLNT-Protocol/blnt-contracts-v3/releases/download/v3.0.2_pool-factory_pkg2.0.0_cli28.1.0/pool-factory_v2.0.0.wasm"
+    },
+    {
+      "name": "pool",
+      "path": "pool.wasm",
+      "sha256": "0e4f8f45b94e6b0d017a496ac5620ad0e3f866533cf45acd2b070bedda1e7356",
+      "source_repo": "github:BLNT-Protocol/blnt-contracts-v3",
+      "release_tag": "v3.0.2_pool_pkg2.0.0_cli28.1.0",
+      "url": "https://github.com/BLNT-Protocol/blnt-contracts-v3/releases/download/v3.0.2_pool_pkg2.0.0_cli28.1.0/pool_v2.0.0.wasm"
+    },
+    {
+      "name": "backfill",
+      "path": "blnt_backfill_contract.wasm",
+      "sha256": "dcdc0b1860799629c7c88804955dd7373cb6febaf069e2ba863e98ebbaa95c27",
+      "source_repo": "github:BLNT-Protocol/blnt-backfill-contract",
+      "release_tag": "v1.0.0_blnt-backfill-contract_cli28.1.0",
+      "url": "https://github.com/BLNT-Protocol/blnt-backfill-contract/releases/download/v1.0.0_blnt-backfill-contract_cli28.1.0/blnt-backfill-contract_v1.0.0.wasm"
+    }
+  ]
+}

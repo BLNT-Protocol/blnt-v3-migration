@@ -12,6 +12,9 @@ default: build
 verify-deployed-artifacts:
 	bash scripts/verify-deployed-artifacts.sh
 
+mainnet-v3-fetch-release-artifacts:
+	bash scripts/fetch-mainnet-v3-release-artifacts.sh
+
 test: build
 	cargo +1.81 test --manifest-path $(V2_DIR)/Cargo.toml --all --tests --locked
 

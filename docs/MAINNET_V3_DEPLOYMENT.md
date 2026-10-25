@@ -57,4 +57,28 @@ make mainnet-v3-status
 
 Status re-fetches exact deployed WASM bytes and verifies the BLNT administrator, emitter recipient, empty emitter queue, BLNT:XLM migration token, backfill token bindings, allocation totals, vesting durations, conversion duration, 1:1 converted/burned accounting, and BLNT custody conservation. A successful deployment writes `deployments/mainnet-v3.json`; the registry contains contract IDs, asset IDs, artifact hashes, transaction hashes, and allocation digests, but no private contributor address.
 
-Lending-pool deployment is a separate reviewed phase. Do not infer pool parameters, admins, oracle contracts, reserve configuration, or backstop tiers from this core runbook.
+## Fixed lending pool
+
+The separately reviewed Fixed-pool runner deploys exactly one lending pool after the verified core. It captures the live mainnet V2 Fixed configuration in `fixtures/mainnet-fixed-pool.json`, reuses that pool's XLM, USDC, and EURC reserve parameters and oracle, assigns the deployment wallet as the transferable V3 pool admin, and configures immutable BLNT:XLM, BLNT:USDC, and USDC backstop tiers with respective take-rate weights 4, 3, and 2.
+
+Read-only preparation is:
+
+```bash
+make mainnet-v3-fixed-plan
+make mainnet-v3-fixed-validate
+make mainnet-v3-fixed-preflight
+```
+
+The preflight requires clean, pushed `main`, re-fetches the exact core and pool WASMs, checks the live V2 Fixed pool and oracle against the committed fixture, simulates the deterministic factory deployment without submission, and proves that the predicted pool is not registered.
+
+After stopping every process that shares the deployment wallet, deployment requires both explicit confirmations:
+
+```bash
+BLEND_MAINNET_V3_FIXED_CONFIRM=DEPLOY_BLNT_V3_FIXED_MAINNET \
+BLEND_MAINNET_V3_SEQUENCE_LOCK_CONFIRMED=true \
+make mainnet-v3-fixed-deploy
+```
+
+The runner deploys the pool and configures its three reserves while the pool remains in setup status `6`. It does not fund any backstop tier, add the pool to the reward zone, configure emissions, change pool status, activate borrowing, or start a keeper. An interrupted run must be reviewed and resumed with `mainnet-v3-fixed-resume`; completed state is verified with `mainnet-v3-fixed-status` and recorded in `deployments/mainnet-v3-fixed-pool.json`.
+
+Funding and activation remain a separate reviewed phase. Do not infer amounts, emissions, keeper behavior, or activation timing from this runbook.

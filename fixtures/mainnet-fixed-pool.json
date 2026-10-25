@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "source": {
+    "captured_at": "2026-10-25",
+    "fixed_pool_v2": "CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD",
+    "oracle": "CCVTVW2CVA7JLH4ROQGP3CU4T3EXVCK66AZGSM4MUQPXAI4QHCZPOATS"
+  },
+  "deployment": {
+    "name": "Fixed",
+    "operator": "GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL",
+    "salt": "8e847c43cb0fcee9531247a2d1e42715f569e04fb017ab9c0791f6154c29abd6",
+    "expected_pool": "CAOWCC32LIINM27CENUNQLIKGR3R4KONVWI7Y7H42VG7JVMUXKWQZ6YF",
+    "backstop_take_rate": 2000000,
+    "max_positions": 6,
+    "min_collateral": "50000000",
+    "access_controller": null,
+    "backstop_config": [
+      {
+        "asset": "BlntXlm",
+        "take_rate_weight": 4
+      },
+      {
+        "asset": "BlntUsdc",
+        "take_rate_weight": 3
+      },
+      {
+        "asset": "Usdc",
+        "take_rate_weight": 2
+      }
+    ]
+  },
+  "reserves": [
+    {
+      "symbol": "XLM",
+      "asset": "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA",
+      "config": {
+        "c_factor": 7500000,
+        "decimals": 7,
+        "enabled": true,
+        "index": 0,
+        "l_factor": 7500000,
+        "max_util": 7000000,
+        "r_base": 100000,
+        "r_one": 300000,
+        "r_three": 50000000,
+        "r_two": 3000000,
+        "reactivity": 50,
+        "supply_cap": "100000000000000000",
+        "util": 4000000
+      }
+    },
+    {
+      "symbol": "USDC",
+      "asset": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+      "config": {
+        "c_factor": 9500000,
+        "decimals": 7,
+        "enabled": true,
+        "index": 1,
+        "l_factor": 9500000,
+        "max_util": 9000000,
+        "r_base": 300000,
+        "r_one": 400000,
+        "r_three": 50000000,
+        "r_two": 1200000,
+        "reactivity": 20,
+        "supply_cap": "10000000000000000",
+        "util": 8000000
+      }
+    },
+    {
+      "symbol": "EURC",
+      "asset": "CDTKPWPLOURQA2SGTKTUQOWRCBZEORB4BWBOMJ3D3ZTQQSGE5F6JBQLV",
+      "config": {
+        "c_factor": 9500000,
+        "decimals": 7,
+        "enabled": true,
+        "index": 2,
+        "l_factor": 9500000,
+        "max_util": 9000000,
+        "r_base": 300000,
+        "r_one": 400000,
+        "r_three": 50000000,
+        "r_two": 1200000,
+        "reactivity": 20,
+        "supply_cap": "10000000000000000",
+        "util": 8000000
+      }
+    }
+  ]
+}

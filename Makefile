@@ -156,6 +156,24 @@ mainnet-v3-activate:
 mainnet-v3-status:
 	bash scripts/mainnet-v3-deployment.sh status
 
+mainnet-v3-fixed-plan:
+	bash scripts/mainnet-v3-fixed-pool.sh plan
+
+mainnet-v3-fixed-validate:
+	bash scripts/mainnet-v3-fixed-pool.sh validate
+
+mainnet-v3-fixed-preflight:
+	bash scripts/mainnet-v3-fixed-pool.sh preflight
+
+mainnet-v3-fixed-deploy:
+	bash scripts/mainnet-v3-fixed-pool.sh deploy
+
+mainnet-v3-fixed-resume:
+	bash scripts/mainnet-v3-fixed-pool.sh resume
+
+mainnet-v3-fixed-status:
+	bash scripts/mainnet-v3-fixed-pool.sh status
+
 testnet-v3-only-keeper-plan:
 	BLEND_KEEPER_REGISTRY=deployments/testnet-v3-only.json \
 	BLEND_KEEPER_WORK_DIR=.testnet-v3-only \

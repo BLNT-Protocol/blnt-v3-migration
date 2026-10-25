@@ -458,11 +458,12 @@ deploy_expected_contract() {
         return
     fi
     rm -f "${temporary}"
-    raw="$(capture "${label}" wallet_stellar contract deploy \
+    capture "${label}" wallet_stellar contract deploy \
         --wasm "${wasm}" --optimize=false --salt "${salt}" \
         --source-account "${WALLET}" \
         --rpc-url "${RPC_URL}" --network-passphrase "${NETWORK_PASSPHRASE}" \
-        --cost -- "$@")"
+        --cost -- "$@" >/dev/null
+    raw="$(<"${RUN_DIR}/${label}.out")"
     deployed="$(normalize_scalar "${raw}")"
     assert_equal "${expected}" "${deployed}" "${label} deployed contract"
     record_transaction "${label}"
@@ -485,9 +486,11 @@ ensure_pool_wasm_uploaded() {
         return
     fi
     rm -r -- "${temporary_dir}"
-    raw="$(capture upload-v3-pool wallet_stellar contract upload \
+    capture upload-v3-pool wallet_stellar contract upload \
         --wasm "${POOL_WASM}" --optimize=false --source-account "${WALLET}" \
-        --rpc-url "${RPC_URL}" --network-passphrase "${NETWORK_PASSPHRASE}" --cost)"
+        --rpc-url "${RPC_URL}" --network-passphrase "${NETWORK_PASSPHRASE}" \
+        --cost >/dev/null
+    raw="$(<"${RUN_DIR}/upload-v3-pool.out")"
     uploaded="$(normalize_scalar "${raw}")"
     assert_equal "${POOL_SHA256}" "${uploaded}" "uploaded pool WASM hash"
     record_transaction upload-v3-pool

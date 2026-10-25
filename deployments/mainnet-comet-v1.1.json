@@ -96,5 +96,47 @@
     "join-blnt-xlm": "0c87501e7806328b86923f025dc2fd26b2f9b5ad0864ebfef239fce22145a67f",
     "lock-comet-controller": "f8e721b68124ada7a8196e99dbb605b781a86ebc978a6408c883a24d77f2437f"
   },
-  "verified_at": "2026-10-25T14:05:08Z"
+  "verified_at": "2026-10-25T14:05:08Z",
+  "retirement": {
+    "status": "wallet-liquidity-exited-and-recovered-blnt-burned",
+    "completed_at": "2026-10-25T18:25:18Z",
+    "wallet_lp_exited": {
+      "blnt_usdc": "999000000000",
+      "blnt_xlm": "999000000000"
+    },
+    "recovered": {
+      "blnt": "19980000000000",
+      "usdc": "11738250000",
+      "xlm": "69930000000"
+    },
+    "blnt_burn": {
+      "issuer": "GBRDT5KNVHGUNRK432N2HDQLXLA33KAFXSNXLUUFZOZEJF2C76HI4UZC",
+      "amount": "19980000000000"
+    },
+    "residual_locked": {
+      "blnt_usdc_lp_supply": "1000000000",
+      "blnt_usdc_blnt": "10000000000",
+      "blnt_usdc_usdc": "11750000",
+      "blnt_xlm_lp_supply": "1000000000",
+      "blnt_xlm_blnt": "10000000000",
+      "blnt_xlm_xlm": "70000000"
+    },
+    "transactions": {
+      "exit-blnt-usdc": {
+        "hash": "6c6d1ec55240143ca2627dba36388f3b97d0e95705f5d81ec4c7507f345cfe2e",
+        "ledger": 65133368,
+        "fee_charged": "261609"
+      },
+      "exit-blnt-xlm": {
+        "hash": "bd8e35411948097ab2eb20c1b89363ad8f31fb11f84ab7c9a238ac3797f07309",
+        "ledger": 65133376,
+        "fee_charged": "261385"
+      },
+      "burn-recovered-blnt": {
+        "hash": "fa60d003011bb0a81ec6b95228fe4fcfbf57d9df5084dd6ef58fc9eca7d045ea",
+        "ledger": 65133387,
+        "fee_charged": "4796"
+      }
+    }
+  }
 }

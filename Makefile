@@ -123,6 +123,21 @@ testnet-v3-only-refresh-oracle:
 testnet-v3-only-fund-user:
 	bash scripts/testnet-v3-only.sh fund-user
 
+mainnet-comet-plan:
+	bash scripts/mainnet-comet-deployment.sh plan
+
+mainnet-comet-validate:
+	bash scripts/mainnet-comet-deployment.sh validate
+
+mainnet-comet-preflight:
+	bash scripts/mainnet-comet-deployment.sh preflight
+
+mainnet-comet-deploy:
+	bash scripts/mainnet-comet-deployment.sh deploy
+
+mainnet-comet-status:
+	bash scripts/mainnet-comet-deployment.sh status
+
 testnet-v3-only-keeper-plan:
 	BLEND_KEEPER_REGISTRY=deployments/testnet-v3-only.json \
 	BLEND_KEEPER_WORK_DIR=.testnet-v3-only \

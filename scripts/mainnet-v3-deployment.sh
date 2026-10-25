@@ -20,39 +20,39 @@ COMET_STATE_FILE="${BLEND_MAINNET_COMET_STATE_FILE:-${ROOT_DIR}/.mainnet-v3/come
 GRANT_FILE="${BLEND_MAINNET_V3_GRANT_FILE:-${ROOT_DIR}/.mainnet-v3/blnt-grants.json}"
 ISSUER_IDENTITY="${BLEND_MAINNET_V3_ISSUER_IDENTITY:-blnt-v3-mainnet-issuer}"
 
-EMITTER_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/emitter.wasm"
-BACKSTOP_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm"
-FACTORY_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/pool_factory.wasm"
-POOL_WASM="${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/pool.wasm"
-BACKFILL_WASM="${ROOT_DIR}/blnt-backfill-contract/target/wasm32v1-none/optimized/blnt_backfill_contract.wasm"
+EMITTER_WASM="${BLEND_MAINNET_V3_EMITTER_WASM:-${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/emitter.wasm}"
+BACKSTOP_WASM="${BLEND_MAINNET_V3_BACKSTOP_WASM:-${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/backstop.wasm}"
+FACTORY_WASM="${BLEND_MAINNET_V3_FACTORY_WASM:-${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/pool_factory.wasm}"
+POOL_WASM="${BLEND_MAINNET_V3_POOL_WASM:-${ROOT_DIR}/blnt-contracts-v3/target/wasm32v1-none/optimized/pool.wasm}"
+BACKFILL_WASM="${BLEND_MAINNET_V3_BACKFILL_WASM:-${ROOT_DIR}/blnt-backfill-contract/target/wasm32v1-none/optimized/blnt_backfill_contract.wasm}"
 
 BACKFILL_SOURCE="${ROOT_DIR}/comet_cpal_flattened_ownership_before_41c898a1.csv"
 BACKFILL_MANIFEST="${ROOT_DIR}/blnt-backfill-contract/allocations/comet_cpal_backfill.json"
 BACKFILL_GENERATOR="${ROOT_DIR}/blnt-backfill-contract/scripts/generate-backfill-claims.mjs"
 
-V3_SOURCE_COMMIT="2aa1857c769771357cb5d6980555ce8b4cf9c15c"
-BACKFILL_SOURCE_COMMIT="ec3b89b0853df5c1cba9ed988423aa838edee9c9"
+V3_SOURCE_COMMIT="${BLEND_MAINNET_V3_SOURCE_COMMIT:-2aa1857c769771357cb5d6980555ce8b4cf9c15c}"
+BACKFILL_SOURCE_COMMIT="${BLEND_MAINNET_BACKFILL_SOURCE_COMMIT:-ec3b89b0853df5c1cba9ed988423aa838edee9c9}"
 EXPECTED_GRANT_SHA256="ef8707b6b20e9828c9086ee2b00188fff4025f84418d5bdfa2545d69c8f854a2"
 EXPECTED_BACKFILL_MANIFEST_SHA256="6786d7f2e8ecf11acf322d768f650aa860e7eaa15566bf047a9a34fbffd9bdd9"
 
-EMITTER_SHA256="bc2ba3c5b37b1daf32f9015d41b0f1c7a2e5bd79138029ef8be76de36bbb568a"
-BACKSTOP_SHA256="bda2e1cb2de7ec0621a9408e0a2d7989bc84649bc401fa879aa48fa27b349d3f"
-FACTORY_SHA256="b956b222641fe8a419668157351311127b40afd80c7289af1cd19ac98e2e8cec"
-POOL_SHA256="8df52229d11a1ede42ee8f77189e30ca54cb0b6d502db53809ba249ed6bc7782"
-BACKFILL_SHA256="035fa1de88122a2bcd0707433557914dd17136fc65676aca1ce223ca0d9c945d"
+EMITTER_SHA256="${BLEND_MAINNET_V3_EMITTER_SHA256:-bc2ba3c5b37b1daf32f9015d41b0f1c7a2e5bd79138029ef8be76de36bbb568a}"
+BACKSTOP_SHA256="${BLEND_MAINNET_V3_BACKSTOP_SHA256:-bda2e1cb2de7ec0621a9408e0a2d7989bc84649bc401fa879aa48fa27b349d3f}"
+FACTORY_SHA256="${BLEND_MAINNET_V3_FACTORY_SHA256:-b956b222641fe8a419668157351311127b40afd80c7289af1cd19ac98e2e8cec}"
+POOL_SHA256="${BLEND_MAINNET_V3_POOL_SHA256:-8df52229d11a1ede42ee8f77189e30ca54cb0b6d502db53809ba249ed6bc7782}"
+BACKFILL_SHA256="${BLEND_MAINNET_V3_BACKFILL_SHA256:-035fa1de88122a2bcd0707433557914dd17136fc65676aca1ce223ca0d9c945d}"
 
-EMITTER_SALT="9ded6a157115f3af8e5454402d10a2ecd6eb687a0408b49967ec59097fae0022"
-BACKFILL_SALT="86b927ed705244682236c1742f246803bafd0f40c84075a2379e4d313dea0f13"
-FACTORY_SALT="7ba9b2a78e969ffb744a3ada9b943d35655fd91cbeb63b30c2f53c9cfd0a6f1e"
-BACKSTOP_SALT="d88613203bbb361777a1e5e5f562f6874233b8b7e3aae406e55e6bf0ad76f653"
+EMITTER_SALT="${BLEND_MAINNET_V3_EMITTER_SALT:-9ded6a157115f3af8e5454402d10a2ecd6eb687a0408b49967ec59097fae0022}"
+BACKFILL_SALT="${BLEND_MAINNET_V3_BACKFILL_SALT:-86b927ed705244682236c1742f246803bafd0f40c84075a2379e4d313dea0f13}"
+FACTORY_SALT="${BLEND_MAINNET_V3_FACTORY_SALT:-7ba9b2a78e969ffb744a3ada9b943d35655fd91cbeb63b30c2f53c9cfd0a6f1e}"
+BACKSTOP_SALT="${BLEND_MAINNET_V3_BACKSTOP_SALT:-d88613203bbb361777a1e5e5f562f6874233b8b7e3aae406e55e6bf0ad76f653}"
 
-EXPECTED_EMITTER="CAL2PDDBVHMONNTZ2B5KMRWJMXYJ7NWWRYEYZU2PCBWOZVKACEW7CSY3"
-EXPECTED_BACKFILL="CDAEU5SHJZE3XHH62IMCVOR6PX2ZPJVWS6WQMPAPSWRFDF66XKIQZBCJ"
-EXPECTED_FACTORY="CCF73PABFG3DBKQW5QK2E5JZOQN4OJNA4PLFY7MZVQNHF676RI33QVTM"
-EXPECTED_BACKSTOP="CACD7TLQBWNR74MB3DDLZXXVM3MERNMKXCWAN3ONNADNDV7H4R54G7MU"
+EXPECTED_EMITTER="${BLEND_MAINNET_V3_EXPECTED_EMITTER:-CAL2PDDBVHMONNTZ2B5KMRWJMXYJ7NWWRYEYZU2PCBWOZVKACEW7CSY3}"
+EXPECTED_BACKFILL="${BLEND_MAINNET_V3_EXPECTED_BACKFILL:-CDAEU5SHJZE3XHH62IMCVOR6PX2ZPJVWS6WQMPAPSWRFDF66XKIQZBCJ}"
+EXPECTED_FACTORY="${BLEND_MAINNET_V3_EXPECTED_FACTORY:-CCF73PABFG3DBKQW5QK2E5JZOQN4OJNA4PLFY7MZVQNHF676RI33QVTM}"
+EXPECTED_BACKSTOP="${BLEND_MAINNET_V3_EXPECTED_BACKSTOP:-CACD7TLQBWNR74MB3DDLZXXVM3MERNMKXCWAN3ONNADNDV7H4R54G7MU}"
 
-BLNT_USDC="CBGQHIZUV7SSZQ3MCMN7NETTDU3Z5MCQOGHJJTRD7UTQ7ZVXUGP7AKJJ"
-BLNT_XLM="CBFKHCZDHYOWGO6QQJ4MCDYGSNSVC7IZ5SSMLV5LWV5CJUJMT5AGLKI6"
+BLNT_USDC="${BLEND_MAINNET_COMET_BLNT_USDC:-CBGQHIZUV7SSZQ3MCMN7NETTDU3Z5MCQOGHJJTRD7UTQ7ZVXUGP7AKJJ}"
+BLNT_XLM="${BLEND_MAINNET_COMET_BLNT_XLM:-CBFKHCZDHYOWGO6QQJ4MCDYGSNSVC7IZ5SSMLV5LWV5CJUJMT5AGLKI6}"
 
 BACKFILL_ALLOCATION=$((74000000 * SCALAR_7))
 GRANT_ALLOCATION=$((25000000 * SCALAR_7))
@@ -62,6 +62,8 @@ BACKFILL_VESTING_SECONDS=$((180 * 24 * 60 * 60))
 GRANT_VESTING_SECONDS=$((360 * 24 * 60 * 60))
 SWAP_DURATION_SECONDS=$((270 * 24 * 60 * 60))
 MIN_DEPLOYMENT_XLM="1000"
+LOCK_BLNT_ISSUER="${BLEND_MAINNET_V3_LOCK_BLNT_ISSUER:-false}"
+ISSUER_LOCK_THRESHOLD=100
 
 GRANT_LIST=""
 CLAIM_LIST=""
@@ -206,6 +208,8 @@ validate_inputs() {
     require_command node
     require_command shasum
     require_command stellar
+    [[ "${LOCK_BLNT_ISSUER}" == true || "${LOCK_BLNT_ISSUER}" == false ]] ||
+        die "BLEND_MAINNET_V3_LOCK_BLNT_ISSUER must be true or false"
     validate_source_pins
     validate_backfill_manifest
     load_private_grants
@@ -215,6 +219,21 @@ validate_inputs() {
     validate_artifact "${POOL_WASM}" "${POOL_SHA256}" pool
     validate_artifact "${BACKFILL_WASM}" "${BACKFILL_SHA256}" backfill
     validate_release
+}
+
+verify_blnt_issuer_lock() {
+    local account
+    [[ "${LOCK_BLNT_ISSUER}" == true ]] || return
+    account="$(horizon_account "${BLNT_ISSUER}")"
+    printf '%s' "${account}" | jq -e \
+        --arg issuer "${BLNT_ISSUER}" --argjson threshold "${ISSUER_LOCK_THRESHOLD}" '
+        .thresholds.low_threshold == $threshold and
+        .thresholds.med_threshold == $threshold and
+        .thresholds.high_threshold == $threshold and
+        (.signers | length == 1) and
+        .signers[0].key == $issuer and
+        .signers[0].weight == 0
+    ' >/dev/null || die "BLNT issuer is not irreversibly locked"
 }
 
 predict_contract() {
@@ -512,6 +531,41 @@ ensure_blnt_admin_handoff() {
     assert_equal "${EXPECTED_EMITTER}" "${admin}" "BLNT administrator after handoff"
 }
 
+ensure_blnt_issuer_lock() {
+    local account admin unlocked
+    [[ "${LOCK_BLNT_ISSUER}" == true ]] || return
+    admin="$(normalize_scalar "$(invoke_view "${BLNT}" admin)")"
+    assert_equal "${EXPECTED_EMITTER}" "${admin}" \
+        "BLNT administrator before issuer lock"
+    account="$(horizon_account "${BLNT_ISSUER}")"
+    if printf '%s' "${account}" | jq -e \
+        --arg issuer "${BLNT_ISSUER}" '
+        .thresholds.low_threshold == 0 and
+        .thresholds.med_threshold == 0 and
+        .thresholds.high_threshold == 0 and
+        (.signers | length == 1) and
+        .signers[0].key == $issuer and
+        .signers[0].weight == 1
+    ' >/dev/null
+    then
+        unlocked=true
+    else
+        unlocked=false
+    fi
+    if [[ "${unlocked}" == true ]]; then
+        capture lock-blnt-issuer stellar_cli tx new set-options \
+            --source-account "${ISSUER_IDENTITY}" \
+            --low-threshold "${ISSUER_LOCK_THRESHOLD}" \
+            --med-threshold "${ISSUER_LOCK_THRESHOLD}" \
+            --high-threshold "${ISSUER_LOCK_THRESHOLD}" \
+            --master-weight 0 \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+        record_transaction lock-blnt-issuer
+    fi
+    verify_blnt_issuer_lock
+}
+
 ensure_emitter_initialized() {
     local current
     if current="$(invoke_view "${EXPECTED_EMITTER}" get_backstop 2>/dev/null)"; then
@@ -606,6 +660,7 @@ verify_live_deployment() {
     verify_contract_artifact "${EXPECTED_BACKSTOP}" "${BACKSTOP_WASM}" backstop
     admin="$(normalize_scalar "$(invoke_view "${BLNT}" admin)")"
     assert_equal "${EXPECTED_EMITTER}" "${admin}" "BLNT administrator"
+    verify_blnt_issuer_lock
     recipient="$(normalize_scalar "$(invoke_view "${EXPECTED_EMITTER}" get_backstop)")"
     assert_equal "${EXPECTED_BACKSTOP}" "${recipient}" "emitter backstop"
     queued="$(invoke_view "${EXPECTED_EMITTER}" get_queued_swap)"
@@ -704,6 +759,7 @@ BLNT V3 mainnet core deployment plan (no lending pools)
   Grant input SHA-256: ${EXPECTED_GRANT_SHA256}
   Conversion reserve: ${SWAP_ALLOCATION} raw BLNT
   Initial drop: ${INITIAL_DROP} raw BLNT
+  Permanently lock BLNT issuer after emitter handoff: ${LOCK_BLNT_ISSUER}
 
 The emitter, lending-pool WASM, and factory are prepared before the backfill
 constructor starts its vesting clock. Execution is deliberately continuous
@@ -718,7 +774,9 @@ EOF
 }
 
 validate_command() {
-    (cd "${ROOT_DIR}" && make build-v3)
+    if [[ "${BLEND_MAINNET_V3_SKIP_BUILD:-false}" != true ]]; then
+        (cd "${ROOT_DIR}" && make build-v3)
+    fi
     validate_inputs
     validate_predictions
     note "Validated pinned source, reproducible allocations, exact WASM artifacts, and deterministic addresses."
@@ -761,6 +819,10 @@ complete_deployment() {
     state_set phase backfill-deployed
     ensure_blnt_admin_handoff
     state_set phase blnt-admin-handed-off
+    ensure_blnt_issuer_lock
+    if [[ "${LOCK_BLNT_ISSUER}" == true ]]; then
+        state_set phase blnt-issuer-locked
+    fi
     ensure_emitter_initialized
     state_set phase emitter-initialized
     deploy_expected_contract deploy-v3-backstop "${EXPECTED_BACKSTOP}" \

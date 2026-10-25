@@ -15,6 +15,21 @@ verify-deployed-artifacts:
 mainnet-v3-fetch-release-artifacts:
 	bash scripts/fetch-mainnet-v3-release-artifacts.sh
 
+mainnet-v3-redeployment-plan:
+	bash scripts/mainnet-v3-redeployment.sh plan
+
+mainnet-v3-redeployment-validate:
+	bash scripts/mainnet-v3-redeployment.sh validate
+
+mainnet-v3-redeployment-preflight:
+	bash scripts/mainnet-v3-redeployment.sh preflight
+
+mainnet-v3-redeployment-comet-plan:
+	bash scripts/mainnet-v3-redeployment.sh comet-plan
+
+mainnet-v3-redeployment-core-plan:
+	bash scripts/mainnet-v3-redeployment.sh core-plan
+
 test: build
 	cargo +1.81 test --manifest-path $(V2_DIR)/Cargo.toml --all --tests --locked
 

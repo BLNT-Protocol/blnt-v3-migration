@@ -62,6 +62,20 @@ enum FactoryKey {
 }
 
 #[contract]
+struct MockMigrationBackstop;
+
+#[contractimpl]
+impl MockMigrationBackstop {
+    pub fn __constructor(env: Env, migration_token: Address) {
+        env.storage().instance().set(&0_u32, &migration_token);
+    }
+
+    pub fn migration_token(env: Env) -> Address {
+        env.storage().instance().get(&0_u32).unwrap()
+    }
+}
+
+#[contract]
 struct MockPoolFactory;
 
 #[contractimpl]
@@ -386,7 +400,7 @@ fn v3_starts_with_blnt_while_legacy_blnd_emissions_continue_independently() {
 
     // Qualification uses the current BLNT:XLM designation. The queued
     // replacement independently selects BLNT:USDC as the next designation.
-    let future_backstop = Address::generate(&env);
+    let future_backstop = env.register(MockMigrationBackstop, (&blnt_usdc,));
     MockCometClient::new(&env, &blnt_xlm).mint(&candidate_id, &(100 * SCALAR_7));
     MockCometClient::new(&env, &blnt_xlm).mint(&future_backstop, &(100 * SCALAR_7 + 1));
     let queued_at = env.ledger().timestamp();

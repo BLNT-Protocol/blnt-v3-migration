@@ -16,4 +16,5 @@ local.*
 /.localnet*/
 /.testnet-production/
 /.testnet-v3-only/
+/.mainnet-v3/
 /.oracle-validation/

@@ -138,6 +138,24 @@ mainnet-comet-deploy:
 mainnet-comet-status:
 	bash scripts/mainnet-comet-deployment.sh status
 
+mainnet-v3-plan:
+	bash scripts/mainnet-v3-deployment.sh plan
+
+mainnet-v3-validate:
+	bash scripts/mainnet-v3-deployment.sh validate
+
+mainnet-v3-preflight:
+	bash scripts/mainnet-v3-deployment.sh preflight
+
+mainnet-v3-deploy-core:
+	bash scripts/mainnet-v3-deployment.sh deploy-core
+
+mainnet-v3-activate:
+	bash scripts/mainnet-v3-deployment.sh activate
+
+mainnet-v3-status:
+	bash scripts/mainnet-v3-deployment.sh status
+
 testnet-v3-only-keeper-plan:
 	BLEND_KEEPER_REGISTRY=deployments/testnet-v3-only.json \
 	BLEND_KEEPER_WORK_DIR=.testnet-v3-only \

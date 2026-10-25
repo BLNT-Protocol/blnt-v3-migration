@@ -66,7 +66,9 @@ for the migration protocol. Contract behavior is composed by
 cross-version migration acceptance. The contract submodule's v3 specification
 defines the integrated Comet V1.1-based backstop valuation.
 Operational instructions live in
-[docs/DUAL_EMITTER_DEPLOYMENT.md](docs/DUAL_EMITTER_DEPLOYMENT.md). The older
+[docs/DUAL_EMITTER_DEPLOYMENT.md](docs/DUAL_EMITTER_DEPLOYMENT.md). The
+mainnet core deployment procedure is documented separately in
+[docs/MAINNET_V3_DEPLOYMENT.md](docs/MAINNET_V3_DEPLOYMENT.md). The older
 queued-migration localnet and testnet runbooks are retained only for regression
 coverage of the legacy replacement path.
 The integrated pool/SAC clawback and reserve-loss reconciliation fixture is

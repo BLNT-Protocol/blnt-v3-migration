@@ -277,19 +277,55 @@ pool_value() {
     normalize_scalar "$(invoke_view "${pool}" "${function}" "$@")"
 }
 
+fetch_contract_artifact() {
+    local destination="$1" description="$2" attempt stderr_file stderr_output temporary_dir
+    shift 2
+    for attempt in 1 2 3; do
+        temporary_dir="$(mktemp -d)"
+        stderr_file="${temporary_dir}/fetch.err"
+        rm -f "${destination}"
+        if stellar_cli contract fetch "$@" \
+            --out-file "${destination}" \
+            --rpc-url "${RPC_URL}" \
+            --network-passphrase "${NETWORK_PASSPHRASE}" \
+            2>"${stderr_file}"
+        then
+            rm -r -- "${temporary_dir}"
+            return 0
+        fi
+        stderr_output="$(<"${stderr_file}")"
+        if [[ "${stderr_output}" == *"Contract not found"* ||
+            "${stderr_output}" == *"Wasm not found"* ||
+            "${stderr_output}" == *"not found in ledger"* ]]
+        then
+            rm -r -- "${temporary_dir}"
+            return 1
+        fi
+        if (( attempt == 3 )); then
+            note "Failed to fetch ${description} after three attempts."
+            sed -n '1,20p' "${stderr_file}" >&2
+            rm -r -- "${temporary_dir}"
+            die "unable to determine the on-chain state of ${description}"
+        fi
+        rm -r -- "${temporary_dir}"
+    done
+}
+
 contract_matches_release() {
-    local contract="$1" fetched
-    fetched="${WORK_DIR}/fetched-${contract}.wasm"
-    if ! stellar_cli contract fetch \
-        --id "${contract}" \
-        --out-file "${fetched}" \
-        --rpc-url "${RPC_URL}" \
-        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null 2>&1
+    local contract="$1" fetched temporary_dir
+    temporary_dir="$(mktemp -d)"
+    fetched="${temporary_dir}/${contract}.wasm"
+    if ! fetch_contract_artifact "${fetched}" "contract ${contract}" \
+        --id "${contract}"
     then
+        rm -r -- "${temporary_dir}"
         return 1
     fi
-    cmp --silent "${COMET_WASM}" "${fetched}" ||
+    if ! cmp --silent "${COMET_WASM}" "${fetched}"; then
+        rm -r -- "${temporary_dir}"
         die "deployed contract ${contract} does not use the exact release WASM"
+    fi
+    rm -r -- "${temporary_dir}"
 }
 
 pool_initialized() {
@@ -472,13 +508,11 @@ ensure_controller_account() {
 }
 
 ensure_release_uploaded() {
-    local fetched uploaded
-    fetched="${WORK_DIR}/fetched-release.wasm"
-    if ! stellar_cli contract fetch \
-        --wasm-hash "${COMET_SHA256}" \
-        --out-file "${fetched}" \
-        --rpc-url "${RPC_URL}" \
-        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null 2>&1
+    local fetched temporary_dir uploaded
+    temporary_dir="$(mktemp -d)"
+    fetched="${temporary_dir}/release.wasm"
+    if ! fetch_contract_artifact "${fetched}" "Comet WASM ${COMET_SHA256}" \
+        --wasm-hash "${COMET_SHA256}"
     then
         capture upload-comet-v1-1 \
             wallet_stellar contract upload \
@@ -493,13 +527,12 @@ ensure_release_uploaded() {
         [[ "${uploaded}" == "${COMET_SHA256}" ]] || die "uploaded Comet WASM hash mismatch"
         record_transaction upload-comet-v1-1
     fi
-    stellar_cli contract fetch \
-        --wasm-hash "${COMET_SHA256}" \
-        --out-file "${fetched}" \
-        --rpc-url "${RPC_URL}" \
-        --network-passphrase "${NETWORK_PASSPHRASE}" >/dev/null
+    rm -f "${fetched}"
+    fetch_contract_artifact "${fetched}" "Comet WASM ${COMET_SHA256}" \
+        --wasm-hash "${COMET_SHA256}" >/dev/null
     cmp --silent "${COMET_WASM}" "${fetched}" ||
         die "on-chain Comet code differs from the official release bytes"
+    rm -r -- "${temporary_dir}"
     state_set phase release-uploaded
 }
 
@@ -818,11 +851,13 @@ Commands:
 EOF
 }
 
-case "${1:-}" in
-    plan) deployment_plan ;;
-    validate) validate_release ;;
-    preflight) validate_release; preflight ;;
-    deploy) deploy ;;
-    status) status ;;
-    *) usage; exit 2 ;;
-esac
+if [[ "${BLEND_MAINNET_COMET_LIBRARY_ONLY:-false}" != "true" ]]; then
+    case "${1:-}" in
+        plan) deployment_plan ;;
+        validate) validate_release ;;
+        preflight) validate_release; preflight ;;
+        deploy) deploy ;;
+        status) status ;;
+        *) usage; exit 2 ;;
+    esac
+fi

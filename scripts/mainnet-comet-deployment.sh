@@ -295,6 +295,7 @@ fetch_contract_artifact() {
         fi
         stderr_output="$(<"${stderr_file}")"
         if [[ "${stderr_output}" == *"Contract not found"* ||
+            "${stderr_output}" == *"Contract Code not found"* ||
             "${stderr_output}" == *"Wasm not found"* ||
             "${stderr_output}" == *"not found in ledger"* ]]
         then

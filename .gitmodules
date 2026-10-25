@@ -16,3 +16,6 @@
 [submodule "comet-contracts-v1"]
 	path = comet-contracts-v1
 	url = git@github.com:CometDEX/comet-contracts-v1.git
+[submodule "blnt-ui-testnet"]
+	path = blnt-ui-testnet
+	url = git@github.com:BLNT-Testnet/blnt-ui-testnet.git

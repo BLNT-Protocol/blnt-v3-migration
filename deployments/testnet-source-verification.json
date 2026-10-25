@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "purpose": "Isolated source-verification deployments for metadata-bearing release artifacts; not a V3 testnet stack",
+  "generated_at": "2026-10-25T18:03:03Z",
+  "network": {
+    "name": "Public testnet",
+    "passphrase": "Test SDF Network ; September 2015",
+    "rpc_url": "https://soroban-testnet.stellar.org"
+  },
+  "existing_stack": {
+    "registry": "deployments/testnet-v3-only.json",
+    "mutated": false,
+    "emitter": "CCAC7MVTCMP3JR6VTSRFUYTWPEFTJ4KHUORIUZWFDYFZL2U7YSDWNX25",
+    "backstop": "CBIQJM65BM3VFCV47IFH6K2XPCSZCXFBU5XNAUYPDALJJBJP24HC6HHS",
+    "pool_factory": "CAOQMPJBI2GSLKHOBZ6ZTS77QXFKSPDRZAWRFAPMVZVRJYH7IMLMAANU"
+  },
+  "dependencies": {
+    "operator": "GAOGCZLQ6KA2JMS6GJYCSJ6EDMRJPKQPHO37ZBZVR73FQEJVX3G7JV2C",
+    "legacy_blnd_token": "CB22KRA3YZVCNCQI64JQ5WE7UY2VAV7WFLK6A2JN3HEX56T2EDAFO7QF",
+    "blnt_token": "CC62C4T6NNFKDZ665HMDIIEO2RR2YNIVYYB7M3RHMSBYSOJRLDMXTCQD",
+    "usdc_token": "CCHBRHIMKBHM2SUCMNNPD3BRS7AK7FZJELJJCU4PKQMCPDBSZXM4QGGM",
+    "xlm_token": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "blnt_usdc_comet": "CCT7UEJ6L6RDP4NXPS6VSLGUA3Z6YNIQTLEWJ5VTU6F4UBJWXIP63JHE",
+    "blnt_xlm_comet": "CBYDWPK5536I3FQ4N32DBIICE3WQPQTHS3SILNVJKUO6FC7CILZJYJNS",
+    "oracle": "CCJPXNWJNST5QAXUF4RUQJRW6UH3WHXBPTHBPBLDYXZFXVRZRTFSO54C"
+  },
+  "source": {
+    "v3_repository": "https://github.com/BLNT-Protocol/blnt-contracts-v3",
+    "v3_commit": "5d055ca89afc9ed443d36b7ad34e3de59b487764",
+    "v3_release": "v3.0.2",
+    "backfill_repository": "https://github.com/BLNT-Protocol/blnt-backfill-contract",
+    "backfill_commit": "fe366da68da7f24ef20063c43aaf0b13ea752257",
+    "backfill_release": "v1.0.0"
+  },
+  "contracts": {
+    "emitter": {
+      "contract_id": "CBTBBB4HIGVUI7BP7VSYM3KG52Q3W6JS2GIVDZXGBXAP3CPAFJB3P52D",
+      "wasm_sha256": "4fa7d99dee6fe99cad5d07a46ee39e437dc287e53e3ab1f3ccc0aacf7e6cd6c5",
+      "stellar_expert_source": "verified",
+      "release_tag": "v3.0.2_emitter_emitter_pkg1.0.0_cli28.1.0",
+      "upload_transaction": "e85d943d56871e0cc8e5027f451d11b39c2d2add0bbc50af0f41487bff903fba",
+      "deploy_transaction": "ddac9842b309333548cc1f7628a91f8abee595fe1d358eaf57daa69d30a455b3",
+      "additional_instance": {
+        "contract_id": "CCYAXETLBN2AOIMHXXBKANO3BLMDJOLKQV2RSHIGLMQKU5FQLYJ2VMS2",
+        "deploy_transaction": "ecee80f56413e224c1b126874c70e483b8329fa54252d60b50a98a00a5866f87"
+      }
+    },
+    "pool": {
+      "contract_id": "CDYZDX4QBHID3LAJ2WLN7GMM7SOVD6LUX37HZVEMCINNC67KFU63SHCU",
+      "wasm_sha256": "0e4f8f45b94e6b0d017a496ac5620ad0e3f866533cf45acd2b070bedda1e7356",
+      "stellar_expert_source": "verified",
+      "release_tag": "v3.0.2_pool_pkg2.0.0_cli28.1.0",
+      "upload_transaction": "f3c39bd485f11e172e8aa3911f811e10118662ab54bba1445dea7fedf5ab14dd",
+      "deploy_transaction": "cbb516f13049df4eb4dad832ac6355bed375fdce94ed885c701ec6426f773f0a"
+    },
+    "pool_factory": {
+      "contract_id": "CBAILYRLIW6PCEVM6JHAOUCYQ5TJYIHOR3NKOU6VJVHQTSQYY2QUJJZQ",
+      "wasm_sha256": "985d7eda4b610f28103edcb28faa52408169f455ac9a880c4a39f58ecc0c2135",
+      "stellar_expert_source": "verified",
+      "release_tag": "v3.0.2_pool-factory_pkg2.0.0_cli28.1.0",
+      "upload_transaction": "6502ad1a9bfeaaf06baa9d823e8f5ca134f8c74f3e03b1e99149a9ef6d956c53",
+      "deploy_transaction": "48d9f7bc7272172ce4cab3acf42327acf581f98fb5a107626a862d544825a068"
+    },
+    "backstop": {
+      "contract_id": "CBDHFIGD22IM5ZGEK3454CRUC4GIERV6YW3ECLRYXIGPTK2SSLIGEITL",
+      "wasm_sha256": "0469cfb445bedd87478274f265c8776b32cde1e8840fca4684ffa1dc4d5a750f",
+      "stellar_expert_source": "verified",
+      "release_tag": "v3.0.2_backstop_pkg2.0.0_cli28.1.0",
+      "upload_transaction": "649a8584e494d546b7792623eb15aaf7608eb4707e662ea3612a61d46720b91f",
+      "deploy_transaction": "25a0092c7856f48e1cdd470547238a106476c3eb968c83c66ff687a8c718f554"
+    },
+    "backfill": {
+      "contract_id": "CDDQOCMWPEV23DHHQKQVLRGZKB4LEIO7B4OR6TTIDQCTOLVALD2EDDTP",
+      "wasm_sha256": "dcdc0b1860799629c7c88804955dd7373cb6febaf069e2ba863e98ebbaa95c27",
+      "stellar_expert_source": "verified",
+      "release_tag": "v1.0.0_blnt-backfill-contract_cli28.1.0",
+      "upload_transaction": "2ab6ed0d3f626e8327a0d917f072141cc2fc1a55903cffeccec5bf3c73f17ca4",
+      "deploy_transaction": "00cb3a5bed993b30bf1da98dbce5acc08a2e0a09e7bea763774e46d50ae39c3d"
+    }
+  }
+}

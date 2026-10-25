@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "network": {
+    "name": "Public Global Stellar Network",
+    "passphrase": "Public Global Stellar Network ; September 2015"
+  },
+  "generated_at": "2026-10-25T15:46:29Z",
+  "deployer": "GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL",
+  "source_commit": "7cea233359a8c7f2bda3aa1b3b1b72cac951c226",
+  "contracts": {
+    "emitter": "CAL2PDDBVHMONNTZ2B5KMRWJMXYJ7NWWRYEYZU2PCBWOZVKACEW7CSY3",
+    "backfill": "CDAEU5SHJZE3XHH62IMCVOR6PX2ZPJVWS6WQMPAPSWRFDF66XKIQZBCJ",
+    "pool_factory": "CCF73PABFG3DBKQW5QK2E5JZOQN4OJNA4PLFY7MZVQNHF676RI33QVTM",
+    "backstop": "CACD7TLQBWNR74MB3DDLZXXVM3MERNMKXCWAN3ONNADNDV7H4R54G7MU",
+    "pool_wasm_hash": "8df52229d11a1ede42ee8f77189e30ca54cb0b6d502db53809ba249ed6bc7782"
+  },
+  "assets": {
+    "blnt": "CBZAURTT3AEFWR6DFMDA5U6RD72HYRXSPHUM3C3JRDW4LNVDQRKTRQLQ",
+    "legacy_blnd": "CD25MNVTZDL4Y3XBCPCJXGXATV5WUHHOWMYFF4YBEGU5FCPGMYTVG5JY",
+    "usdc": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+    "xlm": "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA"
+  },
+  "comet_v1_1": {
+    "blnt_usdc": "CBGQHIZUV7SSZQ3MCMN7NETTDU3Z5MCQOGHJJTRD7UTQ7ZVXUGP7AKJJ",
+    "blnt_xlm": "CBFKHCZDHYOWGO6QQJ4MCDYGSNSVC7IZ5SSMLV5LWV5CJUJMT5AGLKI6"
+  },
+  "allocations": {
+    "private_grants": {
+      "sha256": "ef8707b6b20e9828c9086ee2b00188fff4025f84418d5bdfa2545d69c8f854a2",
+      "count": 3,
+      "total_raw": "250000000000000"
+    },
+    "backfill_claims": {
+      "sha256": "6786d7f2e8ecf11acf322d768f650aa860e7eaa15566bf047a9a34fbffd9bdd9",
+      "count": 434,
+      "total_raw": "740000000000000"
+    },
+    "conversion_reserve_raw": "510000000000000",
+    "initial_drop_raw": "1500000000000000"
+  },
+  "artifacts": {
+    "emitter": "bc2ba3c5b37b1daf32f9015d41b0f1c7a2e5bd79138029ef8be76de36bbb568a",
+    "backfill": "035fa1de88122a2bcd0707433557914dd17136fc65676aca1ce223ca0d9c945d",
+    "factory": "b956b222641fe8a419668157351311127b40afd80c7289af1cd19ac98e2e8cec",
+    "backstop": "bda2e1cb2de7ec0621a9408e0a2d7989bc84649bc401fa879aa48fa27b349d3f",
+    "pool": "8df52229d11a1ede42ee8f77189e30ca54cb0b6d502db53809ba249ed6bc7782"
+  },
+  "transactions": {
+    "deploy-v3-emitter": "b7f83101997214226fe36b97603fcdfc79a56c1d14ed111ba5b78f0d556b928d",
+    "upload-v3-pool": "9466a8e37f6545997abb3ebf5fb3718708867ac223bde846e48a87cac32b55f2",
+    "deploy-v3-factory": "eee88a31ae0ca523aad5d227476b5098c60cd62963c806b65f76f0b276179c69",
+    "deploy-blnt-backfill": "3feed0a91094656a9e81333acc2e11e59490c3749f313228f78a01a105c0bed1",
+    "handoff-blnt-admin": "09c575423d50d3c8f400c993a8f5a55a91d0c1c1103fd7b0a78935cd19e167c5",
+    "initialize-v3-emitter": "b1d8e4e689392eff90374d77af97ae4b0b32032c2f77a873cca6755dcccf08b1",
+    "deploy-v3-backstop": "1f11cb431470b53ac0a86c152a9bb4554b87ad641ebae85e0651f5ee8b75400c",
+    "activate-v3-backstop": "d1dffedb9f95ba25d6c00c08490060cef47e4f09e69f7be8a53daab6138794be",
+    "execute-v3-initial-drop": "ad0a648740500d6d808ba7e827d083ed9e840beeb11c6341d1dc3a2d49019e30"
+  },
+  "verified_at": "2026-10-25T15:46:29Z"
+}

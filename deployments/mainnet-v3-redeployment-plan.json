@@ -12,9 +12,11 @@
     "token_state": ".mainnet-v3-redeployment/token/state.json",
     "comet_state": ".mainnet-v3-redeployment/comet/state.json",
     "core_state": ".mainnet-v3-redeployment/core/state.json",
+    "fixed_state": ".mainnet-v3-redeployment/fixed-pool/state.json",
     "token_registry": "deployments/mainnet-v3-redeployment-token.json",
     "comet_registry": "deployments/mainnet-v3-redeployment-comet.json",
-    "core_registry": "deployments/mainnet-v3-redeployment-core.json"
+    "core_registry": "deployments/mainnet-v3-redeployment-core.json",
+    "fixed_registry": "deployments/mainnet-v3-redeployment-fixed-pool.json"
   },
   "asset": {
     "code": "BLNT",

@@ -64,6 +64,7 @@ The separately reviewed Fixed-pool runner deploys exactly one lending pool after
 Read-only preparation is:
 
 ```bash
+make mainnet-v3-redeployment-validate
 make mainnet-v3-fixed-plan
 make mainnet-v3-fixed-validate
 make mainnet-v3-fixed-preflight
@@ -79,6 +80,6 @@ BLEND_MAINNET_V3_SEQUENCE_LOCK_CONFIRMED=true \
 make mainnet-v3-fixed-deploy
 ```
 
-The runner deploys the pool and configures its three reserves while the pool remains in setup status `6`. It does not fund any backstop tier, add the pool to the reward zone, configure emissions, change pool status, activate borrowing, or start a keeper. An interrupted run must be reviewed and resumed with `mainnet-v3-fixed-resume`; completed state is verified with `mainnet-v3-fixed-status` and recorded in `deployments/mainnet-v3-fixed-pool.json`.
+The runner deploys the pool and configures its three reserves while the pool remains in setup status `6`. It does not fund any backstop tier, add the pool to the reward zone, configure emissions, change pool status, activate borrowing, or start a keeper. An interrupted run must be reviewed and resumed with `mainnet-v3-fixed-resume`; completed state is verified with `mainnet-v3-fixed-status` and recorded in `deployments/mainnet-v3-redeployment-fixed-pool.json`.
 
 Funding and activation remain a separate reviewed phase. Do not infer amounts, emissions, keeper behavior, or activation timing from this runbook.

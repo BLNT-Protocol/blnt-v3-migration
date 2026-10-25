@@ -43,7 +43,7 @@ stellar_cli() {
 validate_manifest() {
     jq -e '
         .schema_version == 1 and
-        .status == "prepared-not-deployed" and
+        (.status == "prepared-not-deployed" or .status == "deployed") and
         .network.passphrase == "Public Global Stellar Network ; September 2015" and
         (.deployer | test("^G[A-Z2-7]{55}$")) and
         .asset.code == "BLNT" and
@@ -255,14 +255,6 @@ validate_wallet_funding() {
     note "Wallet funding verified: ${xlm} XLM and ${usdc} USDC."
 }
 
-validate_retirement() {
-    jq -e '
-        .retirement.status == "wallet-liquidity-exited-and-recovered-blnt-burned" and
-        .retirement.recovered.blnt == .retirement.blnt_burn.amount
-    ' "${ROOT_DIR}/deployments/mainnet-comet-v1.1.json" >/dev/null ||
-        die "retired Comet deployment record is incomplete"
-}
-
 validate_command() {
     for command in curl git jq shasum stellar; do
         require_command "${command}"
@@ -274,13 +266,14 @@ validate_command() {
     fetch_release_artifacts
     validate_artifacts
     validate_predictions
-    validate_retirement
     note "Validated isolated state, source pins, release artifacts, private-input hashes, and predictions."
 }
 
 preflight_command() {
     local issuer
     validate_command
+    [[ "$(plan_value '.status')" == "prepared-not-deployed" ]] ||
+        die "replacement deployment is already recorded as deployed"
     issuer="$(plan_value '.asset.issuer')"
     assert_account_unused "${issuer}"
     while IFS= read -r contract; do

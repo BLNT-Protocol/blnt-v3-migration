@@ -55,7 +55,7 @@ After completion, run:
 make mainnet-v3-status
 ```
 
-Status re-fetches exact deployed WASM bytes and verifies the BLNT administrator, emitter recipient, empty emitter queue, BLNT:XLM migration token, backfill token bindings, allocation totals, vesting durations, conversion duration, 1:1 converted/burned accounting, and BLNT custody conservation. A successful deployment writes `deployments/mainnet-v3.json`; the registry contains contract IDs, asset IDs, artifact hashes, transaction hashes, and allocation digests, but no private contributor address.
+Status re-fetches exact deployed WASM bytes and verifies the BLNT administrator, emitter recipient, empty emitter queue, BLNT:XLM migration token, backfill token bindings, allocation totals, vesting durations, conversion duration, 1:1 converted/burned accounting, and BLNT custody conservation. A successful deployment writes `deployments/mainnet-v3-redeployment-core.json`; the registry contains contract IDs, asset IDs, artifact hashes, transaction hashes, and allocation digests, but no private contributor address.
 
 ## Fixed lending pool
 

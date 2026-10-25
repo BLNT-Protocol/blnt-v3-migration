@@ -92,7 +92,9 @@ require_registry_state_match() {
 }
 
 validate_oracle_refresh_configuration() {
-    [[ "${NETWORK_PASSPHRASE}" == "${TESTNET_PASSPHRASE}" ]] || return
+    if [[ "${NETWORK_PASSPHRASE}" != "${TESTNET_PASSPHRASE}" ]]; then
+        return 0
+    fi
     [[ -f "${STATE_FILE}" ]] || die "deployment state not found: ${STATE_FILE}"
 
     require_registry_state_match '.assets.XLM' xlm_token "XLM asset"

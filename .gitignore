@@ -18,4 +18,5 @@ local.*
 /.testnet-v3-only/
 /.mainnet-v3/
 /.mainnet-v3-redeployment/
+/.mainnet-v3-keeper/
 /.oracle-validation/

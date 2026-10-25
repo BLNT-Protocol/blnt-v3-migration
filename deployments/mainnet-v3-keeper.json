@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "network": {
+    "name": "Public Global Stellar Network",
+    "passphrase": "Public Global Stellar Network ; September 2015",
+    "rpc_url": "https://soroban-rpc.creit.tech"
+  },
+  "protocol": {
+    "v2": {
+      "enabled": false
+    },
+    "v3_emitter": "CDSO6FQSBJ3U3AJHBNNLHHKSMKTTDDN3GLGF3KZTMXBFV7SVB43ZJERT",
+    "v3": {
+      "backstop": "CAHCUKBPTW5DR5RNXOHCTJD5U76A6EEZXYZAQFRQEEQRXQ3CRUZ6Z3MO"
+    }
+  },
+  "modeled_pools": {
+    "fixed": {
+      "v3": {
+        "pool": "CACSQWCMKG45TUHCQ3LXHOB7YEEJH4W376ZHQPXH2IZ3TE4NJHFZMCY7",
+        "reward_zone_member": true
+      }
+    }
+  }
+}

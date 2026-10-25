@@ -192,6 +192,15 @@ mainnet-v3-fixed-resume:
 mainnet-v3-fixed-status:
 	bash scripts/mainnet-v3-fixed-pool.sh status
 
+mainnet-v3-keeper-plan:
+	bash scripts/mainnet-v3-emissions-keeper.sh plan
+
+mainnet-v3-keeper-once:
+	bash scripts/mainnet-v3-emissions-keeper.sh once
+
+mainnet-v3-keeper:
+	bash scripts/mainnet-v3-emissions-keeper.sh run
+
 testnet-v3-only-keeper-plan:
 	BLEND_KEEPER_REGISTRY=deployments/testnet-v3-only.json \
 	BLEND_KEEPER_WORK_DIR=.testnet-v3-only \

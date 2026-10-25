@@ -75,7 +75,7 @@
         "pool": "CCQBL3MLFNHXFMJ4YCRV7DEN4ST7UC7KV5PQ373LHJY6IL5V257V5UI4",
         "oracle": "CCJPXNWJNST5QAXUF4RUQJRW6UH3WHXBPTHBPBLDYXZFXVRZRTFSO54C",
         "reward_zone_member": true,
-        "pool_emission_position": "EURC borrow"
+        "pool_emission_position": "XLM supply 20%; USDC borrow 40%; EURC borrow 40%"
       }
     },
     "custom": {
@@ -112,6 +112,7 @@
       "backstop": {
         "reward_zone_member": true
       },
+      "pool_emission_position": "HLTY supply",
       "reserves": {
         "HLTY": {
           "contract_id": "CBEKEYUTPLUPAI4BP7YKS4ELTBLHF7C6NOT4PP43QUNIQODYL4TGR6PK"

@@ -82,6 +82,7 @@ FIXTURE_ORACLE_RESOLUTION=300
 FIXTURE_ORACLE_RECORDS=7
 QUEUE_ATTESTATION_WINDOW_SECONDS=$((7 * 24 * 60 * 60))
 EMISSION_START_DELAY_SECONDS=5
+MODELED_V3_FIXED_EMISSION_CONFIG='[{"res_index":0,"res_type":1,"share":2000000},{"res_index":1,"res_type":0,"share":4000000},{"res_index":2,"res_type":0,"share":4000000}]'
 # Explicitly renewed deployed-emitter and v2 entries get ten wall-clock days
 # of TTL, leaving a two-times safety margin for the documented five-day
 # keepalive cadence.
@@ -1677,7 +1678,10 @@ ensure_modeled_v3_emissions_config() {
 
     case "${model}" in
         fixed)
-            desired='[{"res_index":2,"res_type":0,"share":1}]'
+            desired="${MODELED_V3_FIXED_EMISSION_CONFIG}"
+            ;;
+        reserve_loss)
+            desired='[{"res_index":0,"res_type":1,"share":1}]'
             ;;
         *) die "unsupported modeled v3 emission profile: ${model}" ;;
     esac
@@ -1685,6 +1689,11 @@ ensure_modeled_v3_emissions_config() {
     invoke_transaction "configure-${model}-v3-emissions" \
         "${pool}" set_emissions_config \
         --res_emission_metadata "${desired}" >/dev/null
+}
+
+modeled_v3_fixed_emission_reserve_token_ids() {
+    printf '%s' "${MODELED_V3_FIXED_EMISSION_CONFIG}" |
+        jq -cer '[.[] | (.res_index * 2 + .res_type)]'
 }
 
 ensure_modeled_v3_supply() {
@@ -2299,7 +2308,6 @@ command_deploy() {
     pool_id="$(ensure_modeled_v3_pool fixed "${fixed_v3_oracle}")"
     state_set "v3_pool" "${pool_id}"
     state_set "primary_pool_supply_asset" "${usdc_token_id}"
-    state_set "primary_pool_emission_reserve_token_id" "4"
     state_set "modeled_v3_fixed_blnd_usdc_target" \
         "${AGGREGATE_CANDIDATE_BALANCE}"
 
@@ -2392,7 +2400,6 @@ command_deploy_modeled_pools() {
     fixed_v3_pool="$(ensure_modeled_v3_pool fixed "${fixed_v3_oracle}")"
     state_set "v3_pool" "${fixed_v3_pool}"
     state_set "primary_pool_supply_asset" "$(state_value usdc_token)"
-    state_set "primary_pool_emission_reserve_token_id" "4"
     state_set "modeled_v3_fixed_blnd_usdc_target" \
         "${AGGREGATE_CANDIDATE_BALANCE}"
 
@@ -2519,7 +2526,6 @@ command_deploy_modeled_pools() {
     ensure_modeled_v3_supply fixed "${fixed_v3_pool}"
     ensure_modeled_v3_supply custom "${custom_v3_pool}"
     ensure_fixed_v3_eurc_borrow "${fixed_v3_pool}"
-    state_set "primary_pool_emission_reserve_token_id" "4"
     state_set "modeled_v3_emissions_prepared_at" \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     if [[ -z "$(state_optional modeled_v2_emissions_configured_at)" ]]; then
@@ -2851,7 +2857,7 @@ command_verify_modeled_pools() {
 ${NETWORK_LABEL} modeled pools verified
   v2 Fixed:  $(state_value modeled_v2_fixed_pool) (Admin Active, emitting)
   v2 Custom: $(state_value modeled_v2_custom_pool) (Admin Active, emitting)
-  v3 Fixed:  $(state_value modeled_v3_fixed_pool) (active, EURC-borrow emissions prepared)
+  v3 Fixed:  $(state_value modeled_v3_fixed_pool) (active, XLM-supply and USDC/EURC-borrow emissions prepared)
   v3 Custom: $(state_value modeled_v3_custom_pool) (active, reward-zone member with zero BLND weight)
   incumbent BLND:USDC balance: ${incumbent_balance}
   candidate BLND:USDC balance: ${candidate_balance}
@@ -3365,6 +3371,7 @@ command_deploy_reserve_loss_pool() {
     ensure_reserve_loss_pool_active "${backstop}" "${pool}"
     ensure_reserve_loss_supply_positions "${pool}" "${issuer}" "${user}"
     exercise_reserve_loss_pool "${pool}" "${user}"
+    ensure_modeled_v3_emissions_config reserve_loss "${pool}"
     state_set "reserve_loss_deployed_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     command_verify_reserve_loss_pool
 }
@@ -3631,7 +3638,7 @@ command_keepalive() {
     local blnd_id xlm_id blnd_usdc_token_id blnd_xlm_token_id usdc_token_id unlock_time
     local stamp prefix last_distro_key blnd_admin queued_swap emitter_backstop
     local incumbent_balance candidate_balance primary_pool_supply_asset
-    local primary_pool_emission_reserve_token_id
+    local emission_reserve_token_ids emission_reserve_token_id
 
     validate_tools
     require_network
@@ -3648,8 +3655,8 @@ command_keepalive() {
     blnd_xlm_token_id="$(state_value blnd_xlm_token)"
     usdc_token_id="$(state_value usdc_token)"
     primary_pool_supply_asset="$(state_value primary_pool_supply_asset)"
-    primary_pool_emission_reserve_token_id="$(
-        state_value primary_pool_emission_reserve_token_id
+    emission_reserve_token_ids="$(
+        modeled_v3_fixed_emission_reserve_token_ids
     )"
     unlock_time="$(state_value unlock_time)"
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -3700,9 +3707,12 @@ command_keepalive() {
         "${pool_id}" get_reserve --asset "${primary_pool_supply_asset}" >/dev/null
     invoke_forced_transaction "${prefix}-pool-position" \
         "${pool_id}" get_positions --address "${depositor}" >/dev/null
-    invoke_forced_transaction "${prefix}-pool-emissions" \
-        "${pool_id}" get_reserve_emissions \
-        --reserve_token_index "${primary_pool_emission_reserve_token_id}" >/dev/null
+    while IFS= read -r emission_reserve_token_id; do
+        invoke_forced_transaction \
+            "${prefix}-pool-emissions-${emission_reserve_token_id}" \
+            "${pool_id}" get_reserve_emissions \
+            --reserve_token_index "${emission_reserve_token_id}" >/dev/null
+    done < <(printf '%s' "${emission_reserve_token_ids}" | jq -r '.[]')
     extend_contract_instance "${prefix}-blnd-usdc-lp-instance" \
         "${blnd_usdc_token_id}" >/dev/null
     invoke_forced_transaction "${prefix}-blnd-usdc-lp-supply" \
@@ -4086,8 +4096,9 @@ read_user_tier_shares() {
 
 command_emissions() {
     local phase candidate_id pool_id distribution received
-    local expected_backstop_tranche expected_pool_tranche pool_gulped stream expiration
-    local emission_reserve_token_id
+    local expected_backstop_tranche expected_pool_tranche pool_gulped stream
+    local expiration="" stream_expiration emission_reserve_token_ids
+    local emission_reserve_token_id now
 
     validate_tools
     require_network
@@ -4098,11 +4109,9 @@ command_emissions() {
         die "ongoing emissions require a verified migration; saved phase is ${phase}"
     candidate_id="$(state_value candidate_backstop)"
     pool_id="$(state_value v3_pool)"
-    emission_reserve_token_id="$(
-        state_value primary_pool_emission_reserve_token_id
+    emission_reserve_token_ids="$(
+        modeled_v3_fixed_emission_reserve_token_ids
     )"
-    [[ "${emission_reserve_token_id}" =~ ^[0-9]+$ ]] ||
-        die "invalid primary-pool emission reserve token ID"
 
     note "Waiting ${EMISSION_START_DELAY_SECONDS} seconds for a positive emitter interval..."
     sleep "${EMISSION_START_DELAY_SECONDS}"
@@ -4136,12 +4145,26 @@ command_emissions() {
     then
         die "pool did not gulp at least one BLND: ${pool_gulped}"
     fi
-    stream="$(invoke_view \
-        "query-pool-emission-stream" "${pool_id}" get_reserve_emissions \
-        --reserve_token_index "${emission_reserve_token_id}")"
-    expiration="$(printf '%s' "${stream}" | jq -er '.expiration | tostring')"
-    [[ "${expiration}" =~ ^[0-9]+$ ]] ||
-        die "pool emission stream has no expiration: ${stream}"
+    now="$(date +%s)"
+    while IFS= read -r emission_reserve_token_id; do
+        stream="$(invoke_view \
+            "query-pool-emission-stream-${emission_reserve_token_id}" \
+            "${pool_id}" get_reserve_emissions \
+            --reserve_token_index "${emission_reserve_token_id}")"
+        stream_expiration="$(printf '%s' "${stream}" | jq -er \
+            'select(. != null and ((.eps | tonumber) > 0)) | .expiration | tostring')" ||
+            die "pool emission stream ${emission_reserve_token_id} is missing or has zero rate: ${stream}"
+        [[ "${stream_expiration}" =~ ^[0-9]+$ ]] ||
+            die "pool emission stream ${emission_reserve_token_id} has no expiration: ${stream}"
+        (( stream_expiration > now )) ||
+            die "pool emission stream ${emission_reserve_token_id} is already expired: ${stream}"
+        if [[ -z "${expiration}" ]]; then
+            expiration="${stream_expiration}"
+        else
+            assert_equal "${expiration}" "${stream_expiration}" \
+                "Fixed pool emission stream expiration"
+        fi
+    done < <(printf '%s' "${emission_reserve_token_ids}" | jq -r '.[]')
 
     state_set "ongoing_received" "${received}"
     state_set "ongoing_expected_backstop_tranche" "${expected_backstop_tranche}"
@@ -4271,7 +4294,7 @@ claim_backstop_tier_resumable() {
 }
 
 claim_pool_emissions_resumable() {
-    local label="$1" pool_id="$2" reserve_token_id="$3" result_key="$4"
+    local label="$1" pool_id="$2" reserve_token_ids="$3" result_key="$4"
     local depositor blnd_id expected_key balance_key completed expected
     local balance_before balance_current balance_after balance_delta claimed
 
@@ -4294,7 +4317,7 @@ claim_pool_emissions_resumable() {
             "preview-${label}-pool-emission-claim" \
             "${DEPOSITOR_IDENTITY}" "${pool_id}" claim \
             --from "${depositor}" \
-            --reserve_token_ids "[${reserve_token_id}]" \
+            --reserve_token_ids "${reserve_token_ids}" \
             --to "${depositor}")")"
         if [[ ! "${expected}" =~ ^[0-9]+$ ]] || (( expected <= 0 )); then
             die "${label} pool has no positive completed BLND claim: ${expected}"
@@ -4334,7 +4357,7 @@ claim_pool_emissions_resumable() {
         "claim-${label}-pool-ongoing-blnd" \
         "${DEPOSITOR_IDENTITY}" "${pool_id}" claim \
         --from "${depositor}" \
-        --reserve_token_ids "[${reserve_token_id}]" \
+        --reserve_token_ids "${reserve_token_ids}" \
         --to "${depositor}")")"
     assert_equal "${expected}" "${claimed}" "${label} pool claim return"
     balance_after="$(normalize_scalar "$(invoke_view \
@@ -4350,7 +4373,7 @@ claim_pool_emissions_resumable() {
 
 command_claim_emissions() {
     local phase candidate_id depositor pool_id expiration now claimed
-    local emission_reserve_token_id
+    local emission_reserve_token_ids
     local fixed_blnd_usdc_lp fixed_blnd_xlm_lp
 
     validate_tools
@@ -4360,11 +4383,9 @@ command_claim_emissions() {
     [[ "${phase}" == "emissions_streaming" ]] ||
         die "pool emissions must be streaming before claim; saved phase is ${phase}"
     pool_id="$(state_value v3_pool)"
-    emission_reserve_token_id="$(
-        state_value primary_pool_emission_reserve_token_id
+    emission_reserve_token_ids="$(
+        modeled_v3_fixed_emission_reserve_token_ids
     )"
-    [[ "${emission_reserve_token_id}" =~ ^[0-9]+$ ]] ||
-        die "invalid primary-pool emission reserve token ID"
     expiration="$(state_value pool_emission_expiration)"
     now="$(date +%s)"
     (( now >= expiration )) ||
@@ -4389,7 +4410,7 @@ command_claim_emissions() {
         ongoing_fixed_blnd_xlm_lp_compounded)"
 
     claimed="$(claim_pool_emissions_resumable \
-        fixed "${pool_id}" "${emission_reserve_token_id}" \
+        fixed "${pool_id}" "${emission_reserve_token_ids}" \
         ongoing_fixed_pool_claimed)"
     state_set "ongoing_fixed_pool_claimed" "${claimed}"
     state_set "ongoing_pool_claimed" "${claimed}"

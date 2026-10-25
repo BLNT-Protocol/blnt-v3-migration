@@ -492,7 +492,7 @@ v3_only_write_registry() {
                 pool: .modeled_v3_fixed_pool,
                 oracle: .modeled_v3_fixed_oracle,
                 reward_zone_member: true,
-                pool_emission_position: "EURC borrow"
+                pool_emission_position: "XLM supply 20%; USDC borrow 40%; EURC borrow 40%"
               }
             },
             custom: {
@@ -524,6 +524,7 @@ v3_only_write_registry() {
                 pool_wasm_sha256: .reserve_loss_pool_wasm_hash
               },
               backstop: {reward_zone_member: true},
+              pool_emission_position: "HLTY supply",
               reserves: {
                 HLTY: {contract_id: .reserve_loss_asset_hlty},
                 IMPR: {contract_id: .reserve_loss_asset_impr},

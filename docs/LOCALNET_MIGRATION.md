@@ -43,8 +43,9 @@ The migration runner deploys matched Fixed and Custom models against the
 incumbent and candidate before opening the emitter queue. Fixed v3 uses
 BLND:XLM, BLND:USDC, and USDC with 4:3:2 weights, holds the candidate's full
 migration-qualifying BLND:USDC balance, enters the reward zone, and routes its
-pool tranche to EURC borrowing. Custom v3 has XLM first loss at weight 2 and
-USDC second loss at weight 1. It crosses the activation threshold, enters an
+pool tranche 20% to XLM supply, 40% to USDC borrowing, and 40% to EURC
+borrowing. Custom v3 has XLM first loss at weight 2 and USDC second loss at
+weight 1. It crosses the activation threshold, enters an
 open reward-zone slot, and supports XLM, USDC, and PYUSD lending. Because it has
 no BLND-bearing tier, it receives zero BLND allocation. Both incumbent pools
 receive BLND:USDC capital and enter the v2 reward zone.

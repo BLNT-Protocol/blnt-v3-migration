@@ -214,14 +214,16 @@ Rerunning the modeled-pool setup command renews a missing or expired stream;
 standalone verification rejects a null, zero-rate, or expired stream instead
 of reporting it as emitting.
 
-Fixed v3 directs its 30% pool tranche to EURC borrowers; its deterministic
+Fixed v3 directs its 30% pool tranche 20% to XLM suppliers, 40% to USDC
+borrowers, and 40% to EURC borrowers; its deterministic
 exercise supplies 500 EURC of liquidity, supplies 1,000 USDC as collateral,
 and borrows 100 EURC. It enters the candidate reward zone and receives the
 queue-independent backfill and ongoing 70/30 distributions. Custom v3 is
 seeded with 1,000 USDC of lending supply and also exposes XLM and PYUSD. It
 enters an open reward-zone slot but has no BLND-bearing backstop tier, so its
 emission weight and BLND allocation remain zero. The finalize and claim exercises therefore
-gulp and claim only Fixed's BLND:USDC, BLND:XLM, and EURC-borrow streams.
+gulp and claim only Fixed's BLND:USDC and BLND:XLM backstop streams and its
+XLM-supply, USDC-borrow, and EURC-borrow pool streams.
 
 The optional No Backstop scenario reuses Fixed v3's XLM, USDC, and EURC
 reserve configuration and controlled oracle. It has an immutable empty tier

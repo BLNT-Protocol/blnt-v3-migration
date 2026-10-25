@@ -484,12 +484,12 @@ write_registry() {
                 pool_wasm_hash: $pool_hash
             },
             fixture: {sha256: $fixture_hash},
-            configuration: $config + {
+            configuration: ($config + {
                 initial_status: 6,
                 funded: false,
                 activated: false,
                 reward_zone_member: false
-            },
+            }),
             reserves: $reserves,
             transactions: $transactions,
             verified_at: $generated_at

@@ -10,6 +10,13 @@ The private input must exist at `.mainnet-v3/blnt-grants.json`, be mode `0600`, 
 
 ## Read-only preparation
 
+Commands that validate or use the deployment wallet require an explicit local
+account-config path. Keep that file outside the repository:
+
+```bash
+export BLEND_MAINNET_ACCOUNT_CONFIG=/path/to/mainnet.conf
+```
+
 Run these commands before authorizing any mainnet transaction:
 
 ```bash

@@ -7,7 +7,7 @@ WORK_DIR="${BLEND_MAINNET_COMET_WORK_DIR:-${ROOT_DIR}/.mainnet-v3-redeployment/c
 CONFIG_DIR="${BLEND_MAINNET_COMET_CONFIG_DIR:-${ROOT_DIR}/.mainnet-v3-redeployment/stellar-config}"
 STATE_FILE="${BLEND_MAINNET_COMET_STATE_FILE:-${WORK_DIR}/state.json}"
 REGISTRY_FILE="${BLEND_MAINNET_COMET_REGISTRY_FILE:-${ROOT_DIR}/deployments/mainnet-v3-redeployment-comet.json}"
-ACCOUNT_CONFIG="${BLEND_MAINNET_ACCOUNT_CONFIG:-/Users/donovan/mainnet.conf}"
+ACCOUNT_CONFIG="${BLEND_MAINNET_ACCOUNT_CONFIG:-}"
 RPC_URL="${BLEND_MAINNET_RPC_URL:-https://soroban-rpc.creit.tech}"
 HORIZON_URL="${BLEND_MAINNET_HORIZON_URL:-https://horizon.stellar.org}"
 NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015"
@@ -92,6 +92,8 @@ wallet_stellar() {
 }
 
 load_wallet_config() {
+    [[ -n "${ACCOUNT_CONFIG}" ]] ||
+        die "BLEND_MAINNET_ACCOUNT_CONFIG must identify the mainnet account config"
     [[ -f "${ACCOUNT_CONFIG}" ]] || die "mainnet account config is missing: ${ACCOUNT_CONFIG}"
     # shellcheck disable=SC1090
     source "${ACCOUNT_CONFIG}"
@@ -849,6 +851,9 @@ Commands:
   preflight  Verify wallet funding and the BLNT discount without mutation.
   deploy     Deploy, initialize, join, lock, verify, and record both pools.
   status     Print and reverify the recorded deployment.
+
+Set BLEND_MAINNET_ACCOUNT_CONFIG to an account-config path before running a
+command that validates or uses the deployment wallet.
 EOF
 }
 

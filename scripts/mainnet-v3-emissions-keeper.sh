@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ACCOUNT_CONFIG="${BLEND_V3_KEEPER_ACCOUNT_CONFIG:-/Users/donovan/mainnet.conf}"
+ACCOUNT_CONFIG="${BLEND_V3_KEEPER_ACCOUNT_CONFIG:-}"
 EXPECTED_ACCOUNT="${BLEND_V3_KEEPER_ACCOUNT:-GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL}"
 RUNTIME_DIR="${BLEND_V3_KEEPER_RUNTIME_DIR:-${ROOT_DIR}/.mainnet-v3-keeper}"
 KEY_CONFIG_DIR=""
@@ -20,7 +20,8 @@ Commands:
 
 The configured account pays fees for permissionless V3 maintenance calls. Its
 secret is loaded from BLEND_V3_KEEPER_ACCOUNT_CONFIG into a temporary Stellar
-CLI config directory and is removed when the keeper exits.
+CLI config directory and is removed when the keeper exits. The account-config
+path must be supplied explicitly.
 EOF
 }
 
@@ -49,6 +50,8 @@ load_keeper_identity() {
     local derived_account import_output
 
     note "Loading the mainnet V3 keeper identity."
+    [[ -n "${ACCOUNT_CONFIG}" ]] ||
+        die "BLEND_V3_KEEPER_ACCOUNT_CONFIG must identify the keeper account file"
     [[ -f "${ACCOUNT_CONFIG}" ]] || die "keeper account file not found: ${ACCOUNT_CONFIG}"
     # shellcheck disable=SC1090
     source "${ACCOUNT_CONFIG}"

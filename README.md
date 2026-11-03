@@ -71,6 +71,9 @@ mainnet core and Fixed-pool deployment procedures are documented separately in
 [docs/MAINNET_V3_DEPLOYMENT.md](docs/MAINNET_V3_DEPLOYMENT.md). The older
 queued-migration localnet and testnet runbooks are retained only for regression
 coverage of the legacy replacement path.
+The response process for a critical finding in the immutable mainnet contracts
+is documented in
+[docs/IMMUTABLE_SECURITY_RESPONSE.md](docs/IMMUTABLE_SECURITY_RESPONSE.md).
 The integrated pool/SAC clawback and reserve-loss reconciliation fixture is
 documented in
 [docs/RESERVE_LOSS_TESTING.md](docs/RESERVE_LOSS_TESTING.md).

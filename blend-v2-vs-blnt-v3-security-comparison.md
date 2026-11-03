@@ -23,7 +23,7 @@ The concise conclusion is: **V3 improves accounting integrity, containment, and 
 
 ## Scope and method
 
-This is a source-and-specification comparison, not an independent security audit. It covers the checked-out lending pool, backstop, pool factory, emitter, and canonical Comet dependency. It does not prove that a particular deployment uses the reviewed WASM hashes or safe constructor arguments; deployed-WASM and deployment-record verification are separate tasks.
+This is a source-and-specification comparison, not an independent security audit. It covers the checked-out lending pool, backstop, pool factory, emitter, and canonical Comet dependency. The repository's deployment runners separately verified the mainnet deployment against pinned artifacts and constructor bindings and committed the resulting registries. This review relies on that evidence but did not independently repeat a fresh on-chain verification.
 
 The review used:
 
@@ -165,7 +165,7 @@ V3 binds exact BLNT, USDC, XLM, BLNT:USDC LP, and BLNT:XLM LP addresses. Its bac
 This is much stronger than accepting arbitrary backstop assets at runtime. Two qualifications matter:
 
 - the backstop constructor validates interfaces, pair composition, weights, and decimals; the exact Comet WASM hash, controller lock, and SAC clawback flags are deployment-verification responsibilities rather than all being provable through the constructor; and
-- exact deployment records and deployed WASM hashes must still be checked independently.
+- the committed deployment records and status runners verify the deployed WASM hashes and bindings, but independent reviewers should reproduce those read-only checks against the live deployment.
 
 ### 10. Safer Comet baseline than the deployed V2 dependency
 
@@ -250,7 +250,7 @@ Delayed calls generally do not grant a keeper custody, but they can delay emissi
 
 ### 10. Immutability increases the cost of mistakes
 
-V3 deliberately has no emergency override, protocol-wide governance, privileged WASM replacement, or alternate upgrade path. This reduces administrator-takeover risk. It also means a critical V3 defect cannot be patched in place. Recovery requires user workarounds, a future version, and the normal emitter/backstop migration mechanism.
+V3 deliberately has no emergency override, protocol-wide governance, privileged WASM replacement, or alternate upgrade path. This reduces administrator-takeover risk. It also means a critical V3 defect cannot be patched in place. Recovery requires user workarounds, a future version, and—when the emitter remains trustworthy—the normal emitter/backstop migration mechanism. The repository's [immutable deployment security response plan](docs/IMMUTABLE_SECURITY_RESPONSE.md) documents this constraint and the response sequence.
 
 That trade-off is acceptable only if the immutable code and exact deployment configuration receive a level of review commensurate with the larger feature set.
 
@@ -324,12 +324,12 @@ Before treating V3 as having a stronger overall security posture than V2, the fo
 1. **Commission an independent audit of the entire V3 delta**, not only new public entry points. The audit should cover cross-contract invariants among the pool, backstop, factory, emitter, Comet pools, SACs, and optional controller.
 2. **Prioritize the highest-complexity state machines:** tier bad-debt and interest auctions, protocol-fee auctions, custody reconciliation, zero-supply debt behavior, forced exits, emissions carries, and future emitter migration.
 3. **Add a regression test and explicit documentation for bounded repay-all.** Since deployed immutable code cannot be changed, SDK/UI integrations should never generate `i128::MAX` for V3 repayment.
-4. **Verify deployed artifacts and constructor bindings.** Check the pool, backstop, factory, and emitter WASM hashes; canonical Comet V1.1 hash; BLNT/USDC/XLM addresses; Comet pairs and 80:20 weights; locked controllers; issuer flags; non-clawbackable custody entries; and source metadata.
+4. **Maintain and independently reproduce deployment verification.** The committed [core registry](deployments/mainnet-v3-redeployment-core.json), [Fixed-pool registry](deployments/mainnet-v3-redeployment-fixed-pool.json), and deployment status runners already verify the pool, backstop, factory, emitter, and canonical Comet V1.1 artifacts; BLNT/USDC/XLM bindings; Comet pairs and 80:20 weights; locked controllers; issuer state; custody properties; and source-bearing WASM. Preserve that evidence and have independent reviewers rerun the read-only checks against the live deployment.
 5. **Audit every production access controller and material generic SEP-41 reserve separately.** The core protocol cannot compensate for a controller or token that lies or changes behavior maliciously.
 6. **Monitor economic manipulation and liveness.** Track canonical LP depth/composition, cross-pool price divergence, backstop value per tier, queue ratios, pending credits, active/stale auctions, reconciliation events, reserve authorization, oracle age, emitter checkpoints, TTL horizons, and keeper success.
 7. **Stress test spot manipulation around one transaction.** Simulate swaps/donations before reward-zone changes, bad-debt creation, interest-auction creation, and protocol-fee creation, including flash-liquidity assumptions.
 8. **Property-test conservation across partial fills and cancellation.** For each tier and reserve, verify that deposits, shares, queued shares, pending credit, auction lots, donations, draws, carries, and claims neither create nor strand value.
-9. **Treat immutability as a release constraint.** Maintain a documented V4/migration response plan for any critical finding rather than assuming an emergency patch is possible.
+9. **Exercise and maintain the immutable response plan.** The documented [critical-finding and V4/migration process](docs/IMMUTABLE_SECURITY_RESPONSE.md) explicitly avoids assuming an emergency patch. Rehearse its evidence capture, bounded mitigation, candidate verification, migration, and disclosure steps, and keep it aligned with the deployed emitter semantics and operational tooling.
 
 ## Final assessment
 

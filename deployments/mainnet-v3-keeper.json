@@ -20,6 +20,12 @@
         "pool": "CACSQWCMKG45TUHCQ3LXHOB7YEEJH4W376ZHQPXH2IZ3TE4NJHFZMCY7",
         "reward_zone_member": true
       }
+    },
+    "yieldblent": {
+      "v3": {
+        "pool": "CAUTPSQDAJEUV5XEU3EXFVYRGDJLEJGVTFJCFZCSPTDCREAMZ573VF4D",
+        "reward_zone_member": true
+      }
     }
   }
 }

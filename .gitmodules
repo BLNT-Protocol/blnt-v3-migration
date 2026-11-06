@@ -19,3 +19,6 @@
 [submodule "blnt-ui-testnet"]
 	path = blnt-ui-testnet
 	url = git@github.com:BLNT-Testnet/blnt-ui-testnet.git
+[submodule "pool-status-admin"]
+	path = pool-status-admin
+	url = git@github.com:BLNT-Protocol/pool-status-admin.git

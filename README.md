@@ -26,7 +26,9 @@ pinned at tag `v1.1.0` in `comet-contracts-v1/`; V3 uses the official
 `blnt-contracts-v3/comet.wasm`. V3's
 SEP-41 compatibility wrapper is maintained within
 `blnt-contracts-v3/compat/sep-41-token/`. The client-integration submodules
-are `blnt-sdk-js/` and `blnt-ui/`.
+are `blnt-sdk-js/` and `blnt-ui/`. The independently deployed, status-only
+pool administrator is pinned in `pool-status-admin/`; its mainnet deployment
+is recorded in `deployments/mainnet-v3-pool-status-admin.json`.
 
 Blend v1/v2 LPs use Comet v1. The fresh BLNT LPs deployed for Blend v3 use
 Comet V1.1.
@@ -80,7 +82,7 @@ documented in
 
 ## Toolchain lanes
 
-This repository deliberately maintains four independent source and test lanes,
+This repository deliberately maintains five independent source and test lanes,
 with supporting Protocol-27 dependency sources pinned separately:
 
 - `blend-contracts-v2/` is the deployed v2 source baseline, pinned to
@@ -89,6 +91,8 @@ with supporting Protocol-27 dependency sources pinned separately:
   1.91.1, Soroban SDK 27.0.3, Protocol 27 tooling, and `wasm32v1-none`.
 - `blnt-backfill-contract/` is the production transition-contract submodule,
   pinned to the same Protocol-27 toolchain.
+- `pool-status-admin/` is the status-only pool-administration controller source;
+  it remains a separate Soroban SDK 25 build lane.
 - `comet-contracts-v1/` is the upstream Comet V1.1 weighted-pool source at
   tag `v1.1.0` commit `b3a2d827ed6c158341f8e67ea91eb3b0395d3871`.
 - `blnt-contracts-v3/comet.wasm` is the official Comet V1.1 release artifact

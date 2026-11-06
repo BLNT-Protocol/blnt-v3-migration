@@ -4,7 +4,7 @@
     "name": "Public Global Stellar Network",
     "passphrase": "Public Global Stellar Network ; September 2015"
   },
-  "purpose": "Status-only administrator intended for Fixed Pool V3; this deployment record does not represent a completed pool-admin transfer",
+  "purpose": "Status-only administrator for Fixed Pool V3",
   "deployed_at": "2026-11-06T20:51:07Z",
   "deployer": "GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL",
   "source": {
@@ -32,8 +32,11 @@
   "intended_pool": {
     "name": "Fixed Pool V3",
     "contract_id": "CACSQWCMKG45TUHCQ3LXHOB7YEEJH4W376ZHQPXH2IZ3TE4NJHFZMCY7",
-    "admin_at_verification": "GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL",
-    "controller_is_admin": false
+    "admin_before_transfer": "GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL",
+    "admin_after_transfer": "CAEV4AKHVMUV3OKKVJBMDRF4JSQS4C5ZBIVWXPASQC3QVZJVIDEPMTEE",
+    "controller_is_admin": true,
+    "status_after_transfer": 0,
+    "admin_transfer_completed_at": "2026-11-06T21:02:47Z"
   },
   "transactions": {
     "upload_wasm": {
@@ -47,15 +50,28 @@
       "ledger": 65342445,
       "created_at": "2026-11-06T20:51:07Z",
       "fee_charged_stroops": 304959
+    },
+    "propose_pool_admin": {
+      "hash": "75d34829cfe75e7b2f73d8d489f927576b11fd124a04a8c10d32dadf691ca6da",
+      "ledger": 65342578,
+      "created_at": "2026-11-06T21:02:12Z",
+      "fee_charged_stroops": 12802
+    },
+    "accept_pool_admin": {
+      "hash": "d98dda76b40abd6ff9f221e00aaa9cf9c583d035a7d44622153d4cb46795fee6",
+      "ledger": 65342585,
+      "created_at": "2026-11-06T21:02:47Z",
+      "fee_charged_stroops": 4383
     }
   },
-  "total_fee_charged_stroops": 60110431,
+  "total_fee_charged_stroops": 60127616,
   "verification": {
-    "verified_at": "2026-11-06T20:55:55Z",
+    "verified_at": "2026-11-06T21:03:24Z",
     "owner_readback": "GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL",
     "fetched_wasm_sha256": "74d5899a70b7184ea9ed6b9f2de5d7483cb141c7c78977cdd3956594dd2570d1",
     "fetched_wasm_matches_local_artifact": true,
-    "pool_admin_readback": "GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL",
-    "pool_admin_transfer_executed": false
+    "pool_admin_readback": "CAEV4AKHVMUV3OKKVJBMDRF4JSQS4C5ZBIVWXPASQC3QVZJVIDEPMTEE",
+    "pool_admin_transfer_executed": true,
+    "pool_status_readback": 0
   }
 }

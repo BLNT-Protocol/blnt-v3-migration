@@ -19,4 +19,5 @@ local.*
 /.mainnet-v3/
 /.mainnet-v3-redeployment/
 /.mainnet-v3-keeper/
+/.mainnet-v3-backstop-manager/
 /.oracle-validation/

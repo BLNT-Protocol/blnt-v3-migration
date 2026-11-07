@@ -52,6 +52,9 @@ git submodule update --init --recursive
   `blnt-contracts-v3/comet.wasm`, not a locally rebuilt substitute.
 - `blnt-sdk-js` and `blnt-ui` are pinned client-integration source
   submodules.
+- `backstop-manager` is the pinned YieldBlent backstop-management source
+  submodule. Its production WASM MUST carry the canonical
+  `source_repo=github:BLNT-Protocol/backstop-manager` metadata.
 - `deployed-artifacts/mainnet` contains exact deployed mainnet WASM compatibility
   fixtures, verified by `make verify-deployed-artifacts`.
 - `migration-harness` contains cross-version tests and test-only support
@@ -72,6 +75,9 @@ a side effect of work in this repository.
   silently substituted for those files.
 - New v3 code belongs in the `blnt-contracts-v3/` submodule. It MUST target
   Protocol 27 with Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
+- YieldBlent backstop-management code belongs in the `backstop-manager/`
+  submodule and uses the Protocol-27 Rust 1.91.1 / Soroban SDK 27.0.3 build
+  lane.
 - Comet V1.1 source review belongs in the `comet-contracts-v1/` submodule.
   Do not modify the upstream source or replace the official
   `v1.1.0_contracts_pkg1.0.0_cli25.1.0` release artifact used by V3.

@@ -28,7 +28,10 @@ SEP-41 compatibility wrapper is maintained within
 `blnt-contracts-v3/compat/sep-41-token/`. The client-integration submodules
 are `blnt-sdk-js/` and `blnt-ui/`. The independently deployed, status-only
 pool administrator is pinned in `pool-status-admin/`; its mainnet deployment
-is recorded in `deployments/mainnet-v3-pool-status-admin.json`.
+is recorded in `deployments/mainnet-v3-pool-status-admin.json`. The
+YieldBlent backstop-management contract is pinned in `backstop-manager/`;
+its mainnet deployment workflow is documented in
+`docs/YIELDBLENT_BACKSTOP_MANAGER_DEPLOYMENT.md`.
 
 Blend v1/v2 LPs use Comet v1. The fresh BLNT LPs deployed for Blend v3 use
 Comet V1.1.
@@ -93,6 +96,8 @@ with supporting Protocol-27 dependency sources pinned separately:
   pinned to the same Protocol-27 toolchain.
 - `pool-status-admin/` is the status-only pool-administration controller source;
   it remains a separate Soroban SDK 25 build lane.
+- `backstop-manager/` is the YieldBlent backstop-management controller source,
+  pinned to Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
 - `comet-contracts-v1/` is the upstream Comet V1.1 weighted-pool source at
   tag `v1.1.0` commit `b3a2d827ed6c158341f8e67ea91eb3b0395d3871`.
 - `blnt-contracts-v3/comet.wasm` is the official Comet V1.1 release artifact

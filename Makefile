@@ -6,6 +6,7 @@ COMET_V1_COMMIT := b3a2d827ed6c158341f8e67ea91eb3b0395d3871
 COMET_V1_WASM := $(V3_DIR)/comet.wasm
 COMET_V1_WASM_SHA256 := d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687
 BLNT_BACKFILL_DIR := blnt-backfill-contract
+BACKSTOP_MANAGER_DIR := backstop-manager
 
 default: build
 
@@ -201,6 +202,15 @@ mainnet-v3-keeper-once:
 mainnet-v3-keeper:
 	bash scripts/mainnet-v3-emissions-keeper.sh run
 
+mainnet-backstop-manager-plan:
+	bash scripts/mainnet-backstop-manager.sh plan
+
+mainnet-backstop-manager-deploy:
+	bash scripts/mainnet-backstop-manager.sh deploy
+
+mainnet-backstop-manager-status:
+	bash scripts/mainnet-backstop-manager.sh status
+
 testnet-v3-only-keeper-plan:
 	BLEND_KEEPER_REGISTRY=deployments/testnet-v3-only.json \
 	BLEND_KEEPER_WORK_DIR=.testnet-v3-only \
@@ -340,6 +350,7 @@ verify-comet-v1.1:
 build-v3: verify-comet-v1.1
 	$(MAKE) -C $(V3_DIR) build
 	$(MAKE) -C $(BLNT_BACKFILL_DIR) build
+	$(MAKE) -C $(BACKSTOP_MANAGER_DIR) build
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-compat-probe --target wasm32v1-none --release --locked
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blnt-test-sep41-token --target wasm32v1-none --release --locked
 	cargo +1.91.1 build --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --package blend-v3-test-sep40-oracle --target wasm32v1-none --release --locked
@@ -361,6 +372,7 @@ check-v3: verify-deployed-artifacts build-v3
 	$(MAKE) -C $(V3_DIR) test
 	$(MAKE) -C $(COMET_V1_DIR) test
 	$(MAKE) -C $(BLNT_BACKFILL_DIR) test
+	$(MAKE) -C $(BACKSTOP_MANAGER_DIR) test
 	cargo +1.91.1 fmt --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --all -- --check
 	cargo +1.91.1 check --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --all-targets --locked
 	cargo +1.91.1 test --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --workspace --locked
@@ -389,6 +401,7 @@ fmt:
 	cargo +1.81 fmt --manifest-path $(V2_DIR)/Cargo.toml --all
 	$(MAKE) -C $(V3_DIR) fmt
 	cargo +1.91.1 fmt --manifest-path $(BLNT_BACKFILL_DIR)/Cargo.toml --all
+	cargo +1.91.1 fmt --manifest-path $(BACKSTOP_MANAGER_DIR)/Cargo.toml --all
 	cargo +1.91.1 fmt --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml --all
 
 clean:
@@ -396,6 +409,7 @@ clean:
 	$(MAKE) -C $(V3_DIR) clean
 	cargo +1.92.0 clean --manifest-path $(COMET_V1_DIR)/Cargo.toml
 	$(MAKE) -C $(BLNT_BACKFILL_DIR) clean
+	$(MAKE) -C $(BACKSTOP_MANAGER_DIR) clean
 	cargo +1.91.1 clean --manifest-path $(MIGRATION_HARNESS_DIR)/Cargo.toml
 
 generate-js:

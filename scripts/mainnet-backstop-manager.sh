@@ -545,8 +545,8 @@ write_registry() {
                 owner,
                 manager,
                 admin_scope,
-                backstops: [backstop],
-                pools: [pool]
+                backstops: [.backstop],
+                pools: [.pool]
             },
             initial_state: {harvest_bps: 0},
             transactions,
@@ -609,6 +609,16 @@ deploy_command() {
     note "Deployment record written to ${REGISTRY_FILE}."
 }
 
+record_command() {
+    load_status_inputs
+    validate_inputs
+    load_state
+    verify_live_contract >/dev/null
+    write_registry
+    note "Verified deployed backstop-manager $(state_value contract_id)."
+    note "Deployment record written to ${REGISTRY_FILE}."
+}
+
 status_command() {
     load_status_inputs
     validate_inputs
@@ -623,10 +633,13 @@ case "${1:-}" in
     deploy)
         deploy_command
         ;;
+    record)
+        record_command
+        ;;
     status)
         status_command
         ;;
     *)
-        die "usage: $0 {plan|deploy|status}"
+        die "usage: $0 {plan|deploy|record|status}"
         ;;
 esac

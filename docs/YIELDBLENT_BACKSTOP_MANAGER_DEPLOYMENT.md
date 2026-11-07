@@ -85,6 +85,17 @@ before local state is updated, a rerun recovers the signed transaction hash
 from those logs and verifies its successful result and timestamp through
 Horizon. The registry is not written without that deployment evidence.
 
+If the contract was deployed and verified but local registry generation was
+interrupted, recover the registry without submitting another transaction:
+
+```bash
+make mainnet-backstop-manager-record
+```
+
+The recovery command validates the reviewed artifact and saved deployment
+evidence, verifies the live contract and constructor state, and writes the
+registry. It performs no network mutation.
+
 ## Read-only verification
 
 With either the local state file or the committed deployment record present:

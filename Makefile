@@ -208,6 +208,9 @@ mainnet-backstop-manager-plan:
 mainnet-backstop-manager-deploy:
 	bash scripts/mainnet-backstop-manager.sh deploy
 
+mainnet-backstop-manager-record:
+	bash scripts/mainnet-backstop-manager.sh record
+
 mainnet-backstop-manager-status:
 	bash scripts/mainnet-backstop-manager.sh status
 

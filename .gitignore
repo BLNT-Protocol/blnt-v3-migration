@@ -20,4 +20,5 @@ local.*
 /.mainnet-v3-redeployment/
 /.mainnet-v3-keeper/
 /.mainnet-v3-backstop-manager/
+/.mainnet-v3-lockup-backfill/
 /.oracle-validation/

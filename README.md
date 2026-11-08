@@ -31,7 +31,11 @@ pool administrator is pinned in `pool-status-admin/`; its mainnet deployment
 is recorded in `deployments/mainnet-v3-pool-status-admin.json`. The
 YieldBlent backstop-management contract is pinned in `backstop-manager/`;
 its mainnet deployment workflow is documented in
-`docs/YIELDBLENT_BACKSTOP_MANAGER_DEPLOYMENT.md`.
+`docs/YIELDBLENT_BACKSTOP_MANAGER_DEPLOYMENT.md`. The separate contributor-
+funded remediation contract for pre-incident Blend lockup positions is pinned
+in `blnt-lockup-backfill-contract/`. The separate owner-authorized helper for
+atomic two-tier YieldBlent deposits and emissions claims is
+pinned in `blnt-backstop-manager-helper/`.
 
 Blend v1/v2 LPs use Comet v1. The fresh BLNT LPs deployed for Blend v3 use
 Comet V1.1.
@@ -44,7 +48,8 @@ verify both inputs.
 
 GitHub Actions requires a `SUBMODULES_TOKEN` repository secret with read
 access to the private `blnt-contracts-v3`, `blnt-sdk-js`, and `blnt-ui`
-repositories, plus `blnt-backfill-contract`.
+repositories, plus `blnt-backfill-contract` and
+`blnt-lockup-backfill-contract` and `blnt-backstop-manager-helper`.
 
 V3 no longer replaces or depends on the deployed BLND emitter. The legacy
 emitter remains with v1/v2, while v3 deploys a separate emitter that creates
@@ -76,6 +81,9 @@ mainnet core and Fixed-pool deployment procedures are documented separately in
 [docs/MAINNET_V3_DEPLOYMENT.md](docs/MAINNET_V3_DEPLOYMENT.md). The older
 queued-migration localnet and testnet runbooks are retained only for regression
 coverage of the legacy replacement path.
+Every production contract deployment is subject to the shared source,
+release-attestation, constructor-binding, and evidence gate in
+[docs/CONTRACT_DEPLOYMENT_READINESS.md](docs/CONTRACT_DEPLOYMENT_READINESS.md).
 The response process for a critical finding in the immutable mainnet contracts
 is documented in
 [docs/IMMUTABLE_SECURITY_RESPONSE.md](docs/IMMUTABLE_SECURITY_RESPONSE.md).
@@ -98,6 +106,11 @@ with supporting Protocol-27 dependency sources pinned separately:
   it remains a separate Soroban SDK 25 build lane.
 - `backstop-manager/` is the YieldBlent backstop-management controller source,
   pinned to Rust 1.91.1, Soroban SDK 27.0.3, and `wasm32v1-none`.
+- `blnt-lockup-backfill-contract/` is the separately deployed lockup-position
+  remediation contract, pinned to its reviewed production source commit.
+- `blnt-backstop-manager-helper/` is the separately deployed two-tier
+  backstop-manager orchestration helper, pinned to Rust 1.91.1, Soroban SDK
+  27.0.3, and `wasm32v1-none`.
 - `comet-contracts-v1/` is the upstream Comet V1.1 weighted-pool source at
   tag `v1.1.0` commit `b3a2d827ed6c158341f8e67ea91eb3b0395d3871`.
 - `blnt-contracts-v3/comet.wasm` is the official Comet V1.1 release artifact

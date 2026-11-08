@@ -4,7 +4,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DIR="${ROOT_DIR}/backstop-manager"
-WASM="${SOURCE_DIR}/target/wasm32v1-none/optimized/backstop_manager.wasm"
+DEFAULT_WASM="${SOURCE_DIR}/target/wasm32v1-none/optimized/backstop_manager.wasm"
+WASM="${BLNT_BACKSTOP_MANAGER_WASM:-${DEFAULT_WASM}}"
 WORK_DIR="${BLNT_BACKSTOP_MANAGER_WORK_DIR:-${ROOT_DIR}/.mainnet-v3-backstop-manager}"
 CONFIG_DIR="${BLNT_BACKSTOP_MANAGER_CONFIG_DIR:-${WORK_DIR}/stellar-config}"
 STATE_FILE="${BLNT_BACKSTOP_MANAGER_STATE_FILE:-${WORK_DIR}/state.json}"
@@ -228,7 +229,9 @@ invoke_view() {
 }
 
 build_artifact() {
-    make -C "${SOURCE_DIR}" build
+    if [[ -z "${BLNT_BACKSTOP_MANAGER_WASM:-}" ]]; then
+        make -C "${SOURCE_DIR}" build
+    fi
     [[ -s "${WASM}" ]] || die "backstop-manager WASM was not built"
 }
 

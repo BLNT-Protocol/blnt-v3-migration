@@ -11,6 +11,10 @@ This repository owns:
 - the pinned `blnt-contracts-v3` production-contract submodule;
 - the pinned `blnt-backfill-contract` production transition-contract
   submodule;
+- the pinned, separately deployed `blnt-lockup-backfill-contract` remediation
+  submodule;
+- the pinned, separately deployed `blnt-backstop-manager-helper` orchestration
+  submodule;
 - the pinned SDK and UI client-integration source submodules;
 - cross-version compatibility and migration-only test contracts;
 - localnet and public-testnet migration orchestration;
@@ -52,6 +56,19 @@ production source for initial BLNT address claims and legacy-token conversion.
 Migration tests and runners MUST build and invoke both artifacts directly.
 They MUST NOT maintain a second production implementation or copy either
 contract source into this repository.
+
+The pinned `blnt-lockup-backfill-contract` submodule is separate post-launch
+remediation for pre-incident Blend lockup positions funded from a contributor
+grant and direct shortfall funding. It MUST NOT alter, replace, or become a
+dependency of the immutable V3 protocol contracts or the canonical backfill
+contract.
+
+The pinned `blnt-backstop-manager-helper` submodule is a separate, immutable
+orchestration contract for owner-authorized two-tier operations through one
+backstop-manager. It MUST NOT custody protocol assets independently, grant new
+manager authority, alter V3 economic policy, or become a dependency of the
+immutable V3 protocol contracts. Its own system specification defines its
+two-tier deposit and claim behavior.
 
 The upstream `comet-contracts-v1` submodule MUST remain pinned to the
 `v1.1.0` tag at commit

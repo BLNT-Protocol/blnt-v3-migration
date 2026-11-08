@@ -25,3 +25,9 @@
 [submodule "backstop-manager"]
 	path = backstop-manager
 	url = git@github.com:BLNT-Protocol/backstop-manager.git
+[submodule "blnt-lockup-backfill-contract"]
+	path = blnt-lockup-backfill-contract
+	url = git@github.com:BLNT-Protocol/blnt-lockup-backfill-contract.git
+[submodule "blnt-backstop-manager-helper"]
+	path = blnt-backstop-manager-helper
+	url = git@github.com:BLNT-Protocol/blnt-backstop-manager-helper.git

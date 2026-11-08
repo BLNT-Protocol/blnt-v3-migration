@@ -214,6 +214,18 @@ mainnet-backstop-manager-record:
 mainnet-backstop-manager-status:
 	bash scripts/mainnet-backstop-manager.sh status
 
+mainnet-lockup-backfill-plan:
+	bash scripts/mainnet-lockup-backfill.sh plan
+
+mainnet-lockup-backfill-deploy:
+	bash scripts/mainnet-lockup-backfill.sh deploy
+
+mainnet-lockup-backfill-record:
+	bash scripts/mainnet-lockup-backfill.sh record
+
+mainnet-lockup-backfill-status:
+	bash scripts/mainnet-lockup-backfill.sh status
+
 testnet-v3-only-keeper-plan:
 	BLEND_KEEPER_REGISTRY=deployments/testnet-v3-only.json \
 	BLEND_KEEPER_WORK_DIR=.testnet-v3-only \

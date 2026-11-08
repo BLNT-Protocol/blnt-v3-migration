@@ -55,6 +55,13 @@ git submodule update --init --recursive
 - `backstop-manager` is the pinned YieldBlent backstop-management source
   submodule. Its production WASM MUST carry the canonical
   `source_repo=github:BLNT-Protocol/backstop-manager` metadata.
+- `blnt-lockup-backfill-contract` is the pinned, separately deployed
+  contributor-funded remediation source for pre-incident Blend lockup
+  positions. It MUST remain isolated from immutable V3 protocol behavior.
+- `blnt-backstop-manager-helper` is the pinned, separately deployed atomic
+  orchestration source for owner-authorized YieldBlent deposits and
+  two-tier emissions claims. It MUST remain isolated from immutable V3 protocol
+  behavior.
 - `deployed-artifacts/mainnet` contains exact deployed mainnet WASM compatibility
   fixtures, verified by `make verify-deployed-artifacts`.
 - `migration-harness` contains cross-version tests and test-only support
@@ -78,6 +85,12 @@ a side effect of work in this repository.
 - YieldBlent backstop-management code belongs in the `backstop-manager/`
   submodule and uses the Protocol-27 Rust 1.91.1 / Soroban SDK 27.0.3 build
   lane.
+- Lockup-position remediation code belongs in the
+  `blnt-lockup-backfill-contract/` submodule and MUST NOT become a dependency
+  of the immutable V3 protocol contracts.
+- Two-tier backstop-manager orchestration code belongs in the
+  `blnt-backstop-manager-helper/` submodule and MUST NOT become a dependency of
+  the immutable V3 protocol contracts or change the manager's authority model.
 - Comet V1.1 source review belongs in the `comet-contracts-v1/` submodule.
   Do not modify the upstream source or replace the official
   `v1.1.0_contracts_pkg1.0.0_cli25.1.0` release artifact used by V3.
@@ -240,6 +253,16 @@ For contract changes:
 3. Build optimized WASM and test the WASM path.
 4. Exercise boundary values, authorization failures, overflow, stale prices,
    queued withdrawals, and resource growth where applicable.
+
+Before planning or performing any production contract deployment, follow every
+applicable gate in
+[`docs/CONTRACT_DEPLOYMENT_READINESS.md`](docs/CONTRACT_DEPLOYMENT_READINESS.md).
+A project-built production WASM MUST carry canonical `source_repo` metadata,
+MUST be the exact artifact produced and attested by its tagged release workflow,
+and MUST be pinned by this repository before deployment. A local rebuild is not
+a substitute for the attested release artifact. Do not describe a contract as
+ready to deploy until the source, release, attestation, constructor-binding,
+and deployment-evidence gates pass.
 
 Useful commands:
 

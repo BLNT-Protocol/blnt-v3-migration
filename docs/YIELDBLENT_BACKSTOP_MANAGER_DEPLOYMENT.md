@@ -1,13 +1,27 @@
 # YieldBlent Backstop Manager Deployment
 
-This runbook prepares and verifies the dedicated `backstop-manager` instance
-for the YieldBlent pool on Stellar mainnet. It does not transfer tokens or
-deposit into the backstop. The instance delegates high-scope management to the
-YieldBlox DAO while retaining a separately supplied owner that can replace the
+This runbook prepares and verifies a dedicated `backstop-manager` instance for
+the YieldBlent pool on Stellar mainnet. It does not transfer tokens or deposit
+into the backstop. The separately supplied owner can replace the high-scope
 manager, change the allowlists, recover held tokens, or begin the contract's
-two-step ownership transfer.
+two-step ownership transfer. The original deployment delegated management to
+the YieldBlox DAO; the source-attested v1.0.1 deployment initially assigns both
+roles to the FTAL operations account.
 
-## Reviewed bindings
+## Recorded deployments
+
+- `deployments/mainnet-v3-yieldblent-backstop-manager.json` records the original
+  manager at `CAXUEVGOOFR6A5MEVUV6OX5G6D26NVCHIZ642AHQIMSO33ILAFFWBGCI`.
+- `deployments/mainnet-v3-yieldblent-backstop-manager-v1.0.1.json` records the
+  separately deployed, source-attested manager at
+  `CAJUD2IQOVKPDZFJZEX2MSG7PKIE2NF4CJQ2ERBU7VF52SEM5GQL7XEB`.
+
+The original instance remains deployed and retains its existing positions. The
+source-attested instance was deployed with no positions. Its exact WASM is the
+`backstop-manager_v2.1.100.wasm` asset from the GitHub release identified in
+its deployment record; do not substitute a local rebuild.
+
+## Default deployment bindings
 
 - Manager: YieldBlox DAO
   `CANSYFVMIP7JVYEZQ463Y2I2VLEVNLDJJ4QNZTDBGLOOGKURPTW4A6FQ`
@@ -33,6 +47,16 @@ git submodule update --init --recursive
 make -C backstop-manager test
 make -C backstop-manager build
 ```
+
+For a release-built deployment or read-only verification, download the exact
+release asset and supply its path instead of rebuilding it:
+
+```bash
+export BLNT_BACKSTOP_MANAGER_WASM="/absolute/path/to/backstop-manager_v2.1.100.wasm"
+```
+
+The deployment runner checks the supplied bytes, embedded source metadata, and
+live contract hash exactly as it does for a local build.
 
 Set the public deployment and owner addresses, then print the complete plan and
 predicted contract ID:

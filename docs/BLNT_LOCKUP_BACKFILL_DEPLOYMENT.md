@@ -32,7 +32,7 @@ in full.
 - Canonical source metadata:
   `source_repo=github:BLNT-Protocol/blnt-lockup-backfill-contract`
 - Deterministic deployment salt:
-  `caae0f9fd4a1525dd26f5330ab20ae4d35aeb04ef0702bfc1ffa989d4583ff3e`
+  `149fd4c49b974c03e82fd107d1e80e59ee39b32cfd62eb87739476b7fd62a3c3`
 
 The immutable owner is deliberately not hardcoded. Supply it through
 `BLNT_LOCKUP_BACKFILL_OWNER`. The runner requires the deployed manager's live
@@ -140,10 +140,10 @@ the deployed WASM, byte-compares it with the release asset, checks the embedded
 source metadata, and reads all constructor state back from mainnet.
 
 Local transaction evidence and cost logs are written beneath the ignored
-`.mainnet-v3-lockup-backfill/` directory. The runner captures signed transaction
-hashes before submission completion and verifies successful results through
-Horizon, allowing an interrupted or ambiguous submission to be reconciled
-without blindly retrying it.
+`.mainnet-v3-lockup-backfill-v1.0.1/` directory. The runner captures signed
+transaction hashes before submission completion and verifies successful
+results through Horizon, allowing an interrupted or ambiguous submission to be
+reconciled without blindly retrying it.
 
 Deployment does not transfer or fund BLNT. Initial totals must read back as the
 full outstanding allocation, zero claims, zero custody, and the full funding
@@ -154,7 +154,7 @@ gap, with claims open.
 After successful byte and constructor verification, deployment writes the
 secret-free public registry:
 
-`deployments/mainnet-v3-lockup-backfill.json`
+`deployments/mainnet-v3-lockup-backfill-v1.0.1.json`
 
 The record includes the network, contract ID, salt, WASM hash and size, source
 commit and tag, generated release tag and URL, release asset, workflow run,

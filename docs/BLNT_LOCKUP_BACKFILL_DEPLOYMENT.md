@@ -32,7 +32,7 @@ in full.
 - Canonical source metadata:
   `source_repo=github:BLNT-Protocol/blnt-lockup-backfill-contract`
 - Deterministic deployment salt:
-  `149fd4c49b974c03e82fd107d1e80e59ee39b32cfd62eb87739476b7fd62a3c3`
+  `bf02a2d64c0f4184629d42693e3e99ab9e321615730de47567bb0437be165c6d`
 
 The immutable owner is deliberately not hardcoded. Supply it through
 `BLNT_LOCKUP_BACKFILL_OWNER`. The runner requires the deployed manager's live
@@ -140,21 +140,23 @@ the deployed WASM, byte-compares it with the release asset, checks the embedded
 source metadata, and reads all constructor state back from mainnet.
 
 Local transaction evidence and cost logs are written beneath the ignored
-`.mainnet-v3-lockup-backfill-v1.0.1/` directory. The runner captures signed
+`.mainnet-v3-lockup-backfill-v1.0.2/` directory. The runner captures signed
 transaction hashes before submission completion and verifies successful
 results through Horizon, allowing an interrupted or ambiguous submission to be
 reconciled without blindly retrying it.
 
 Deployment does not transfer or fund BLNT. Initial totals must read back as the
-full outstanding allocation, zero claims, zero custody, and the full funding
-gap, with claims open.
+full outstanding allocation, zero claims, zero custody, and a positive funding
+gap bounded by the full allocation, with claims open. The gap covers only the
+aggregate entitlement vested at the current ledger time; future vesting opens
+the remaining gap progressively.
 
 ## 5. Record or recover an interrupted deployment
 
 After successful byte and constructor verification, deployment writes the
 secret-free public registry:
 
-`deployments/mainnet-v3-lockup-backfill-v1.0.1.json`
+`deployments/mainnet-v3-lockup-backfill-v1.0.2.json`
 
 The record includes the network, contract ID, salt, WASM hash and size, source
 commit and tag, generated release tag and URL, release asset, workflow run,
@@ -191,9 +193,9 @@ The status command verifies:
 - source vesting timestamps;
 - the exact four allocations and aggregate;
 - claims-closure state; and
-- internally consistent live claimed, custody, outstanding, and funding-gap
-  accounting. Initial zero claims and custody are enforced when the deployment
-  registry is first created.
+- internally consistent live claimed, custody, outstanding, and vested
+  funding-gap accounting. Initial zero claims and custody are enforced when the
+  deployment registry is first created.
 
 Because `claim_and_fund()` requires the immutable owner to continue owning the
 bound manager, the plan, deploy, recovery, and status paths fail if manager

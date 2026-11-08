@@ -9,10 +9,10 @@ MANAGER_REGISTRY="${ROOT_DIR}/deployments/mainnet-v3-yieldblent-backstop-manager
 WASM="${BLNT_LOCKUP_BACKFILL_WASM:-}"
 SOURCE_TAG="${BLNT_LOCKUP_BACKFILL_SOURCE_TAG:-}"
 RELEASE_TAG="${BLNT_LOCKUP_BACKFILL_RELEASE_TAG:-}"
-WORK_DIR="${BLNT_LOCKUP_BACKFILL_WORK_DIR:-${ROOT_DIR}/.mainnet-v3-lockup-backfill-v1.0.1}"
+WORK_DIR="${BLNT_LOCKUP_BACKFILL_WORK_DIR:-${ROOT_DIR}/.mainnet-v3-lockup-backfill-v1.0.2}"
 CONFIG_DIR="${BLNT_LOCKUP_BACKFILL_CONFIG_DIR:-${WORK_DIR}/stellar-config}"
 STATE_FILE="${BLNT_LOCKUP_BACKFILL_STATE_FILE:-${WORK_DIR}/state.json}"
-REGISTRY_FILE="${BLNT_LOCKUP_BACKFILL_REGISTRY_FILE:-${ROOT_DIR}/deployments/mainnet-v3-lockup-backfill-v1.0.1.json}"
+REGISTRY_FILE="${BLNT_LOCKUP_BACKFILL_REGISTRY_FILE:-${ROOT_DIR}/deployments/mainnet-v3-lockup-backfill-v1.0.2.json}"
 ACCOUNT_CONFIG="${BLNT_LOCKUP_BACKFILL_ACCOUNT_CONFIG:-}"
 RPC_URL="${BLNT_LOCKUP_BACKFILL_RPC_URL:-https://soroban-rpc.mainnet.stellar.gateway.fm}"
 HORIZON_URL="${BLNT_LOCKUP_BACKFILL_HORIZON_URL:-https://horizon.stellar.org}"
@@ -24,7 +24,7 @@ OWNER="${BLNT_LOCKUP_BACKFILL_OWNER:-}"
 BLNT="${BLNT_LOCKUP_BACKFILL_BLNT:-CCBNWP5L7ZSXA3DBWCMFAVKFVRW3ZHWO7B5J557W42O64DDZNPJP7VDS}"
 SOURCE_BACKFILL="${BLNT_LOCKUP_BACKFILL_SOURCE:-CANIE64BDFKLHROLOIY2KTQVBWUZNUKZP75DLXC272QM7TIN5N3M4LVA}"
 MANAGER="${BLNT_LOCKUP_BACKFILL_MANAGER:-CAJUD2IQOVKPDZFJZEX2MSG7PKIE2NF4CJQ2ERBU7VF52SEM5GQL7XEB}"
-SALT="${BLNT_LOCKUP_BACKFILL_SALT:-149fd4c49b974c03e82fd107d1e80e59ee39b32cfd62eb87739476b7fd62a3c3}"
+SALT="${BLNT_LOCKUP_BACKFILL_SALT:-bf02a2d64c0f4184629d42693e3e99ab9e321615730de47567bb0437be165c6d}"
 CONFIRM_MAINNET="${BLNT_LOCKUP_BACKFILL_CONFIRM_MAINNET:-false}"
 
 EXPECTED_REPOSITORY="BLNT-Protocol/blnt-lockup-backfill-contract"
@@ -819,7 +819,8 @@ verify_live_contract() {
             (.allocated | tostring) == $total and
             (.claimed | tostring) == "0" and
             (.custody | tostring) == "0" and
-            (.funding_gap | tostring) == $total and
+            (.funding_gap | tonumber) > 0 and
+            (.funding_gap | tonumber) <= ($total | tonumber) and
             (.outstanding | tostring) == $total' >/dev/null ||
             die "initial totals readback mismatch"
         [[ "${claims_closed}" == false ]] || die "claims unexpectedly initialized closed"
@@ -833,7 +834,8 @@ verify_live_contract() {
             (.outstanding | tonumber) == ($total - (.claimed | tonumber)) and
             (.custody | tonumber) >= 0 and
             (.custody | tonumber) <= (.outstanding | tonumber) and
-            (.funding_gap | tonumber) ==
+            (.funding_gap | tonumber) >= 0 and
+            (.funding_gap | tonumber) <=
                 ((.outstanding | tonumber) - (.custody | tonumber)) and
             (($closed == false) or ($closed == true))' >/dev/null ||
             die "live totals accounting mismatch"

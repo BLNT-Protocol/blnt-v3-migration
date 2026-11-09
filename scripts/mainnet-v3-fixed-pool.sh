@@ -17,8 +17,8 @@ unset BLEND_MAINNET_COMET_LIBRARY_ONLY
 WORK_DIR="${BLEND_MAINNET_V3_FIXED_WORK_DIR:-${REDEPLOYMENT_DIR}/fixed-pool}"
 CONFIG_DIR="${BLEND_MAINNET_V3_CONFIG_DIR:-${REDEPLOYMENT_DIR}/stellar-config}"
 STATE_FILE="${BLEND_MAINNET_V3_FIXED_STATE_FILE:-${WORK_DIR}/state.json}"
-REGISTRY_FILE="${BLEND_MAINNET_V3_FIXED_REGISTRY_FILE:-${ROOT_DIR}/deployments/mainnet-v3-redeployment-fixed-pool.json}"
-CORE_REGISTRY="${BLEND_MAINNET_V3_REGISTRY_FILE:-${ROOT_DIR}/deployments/mainnet-v3-redeployment-core.json}"
+REGISTRY_FILE="${BLEND_MAINNET_V3_FIXED_REGISTRY_FILE:-${ROOT_DIR}/blnt-contracts-v3/deployments/mainnet-v3-fixed-pool.json}"
+CORE_REGISTRY="${BLEND_MAINNET_V3_REGISTRY_FILE:-${ROOT_DIR}/blnt-contracts-v3/deployments/mainnet-v3-core.json}"
 FIXTURE="${ROOT_DIR}/fixtures/mainnet-fixed-pool.json"
 
 FACTORY_WASM="${BLEND_MAINNET_V3_FACTORY_WASM:-${RELEASE_ARTIFACT_DIR}/pool_factory.wasm}"
@@ -454,11 +454,12 @@ verify_live_pool() {
 }
 
 write_registry() {
-    local temporary
+    local temporary pool_creation
     temporary="${REGISTRY_FILE}.tmp"
+    pool_creation="$(transaction_evidence deploy-fixed-pool)"
     jq -n \
         --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --arg source_commit "$(state_value source_commit)" \
+        --arg source_commit "$(jq -er '.source_commit' "${CORE_REGISTRY}")" \
         --arg operator "${WALLET}" \
         --arg source_pool "${V2_FIXED_POOL}" \
         --arg factory "${POOL_FACTORY}" \
@@ -467,6 +468,7 @@ write_registry() {
         --arg pool "${EXPECTED_POOL}" \
         --arg fixture_hash "${FIXTURE_SHA256}" \
         --arg pool_hash "${POOL_SHA256}" \
+        --argjson pool_creation "${pool_creation}" \
         --argjson config "$(jq -c '.deployment' "${FIXTURE}")" \
         --argjson reserves "$(jq -c '.reserves' "${FIXTURE}")" \
         --argjson transactions "$(jq -c '.transactions' "${STATE_FILE}")" '
@@ -487,6 +489,7 @@ write_registry() {
                 pool: $pool,
                 pool_wasm_hash: $pool_hash
             },
+            contract_creation: {pool: $pool_creation},
             fixture: {sha256: $fixture_hash},
             configuration: ($config + {
                 initial_status: 6,

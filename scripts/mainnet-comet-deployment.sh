@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK_DIR="${BLEND_MAINNET_COMET_WORK_DIR:-${ROOT_DIR}/.mainnet-v3-redeployment/comet}"
 CONFIG_DIR="${BLEND_MAINNET_COMET_CONFIG_DIR:-${ROOT_DIR}/.mainnet-v3-redeployment/stellar-config}"
 STATE_FILE="${BLEND_MAINNET_COMET_STATE_FILE:-${WORK_DIR}/state.json}"
-REGISTRY_FILE="${BLEND_MAINNET_COMET_REGISTRY_FILE:-${ROOT_DIR}/deployments/mainnet-v3-redeployment-comet.json}"
+REGISTRY_FILE="${BLEND_MAINNET_COMET_REGISTRY_FILE:-${ROOT_DIR}/blnt-contracts-v3/deployments/mainnet-v3-comet.json}"
 ACCOUNT_CONFIG="${BLEND_MAINNET_ACCOUNT_CONFIG:-}"
 RPC_URL="${BLEND_MAINNET_RPC_URL:-https://soroban-rpc.creit.tech}"
 HORIZON_URL="${BLEND_MAINNET_HORIZON_URL:-https://horizon.stellar.org}"
@@ -147,6 +147,27 @@ record_transaction() {
     jq --arg label "${label}" --arg hash "${LAST_TX_HASH}" \
         '.transactions[$label] = $hash' "${STATE_FILE}" >"${temporary}"
     mv "${temporary}" "${STATE_FILE}"
+}
+
+transaction_evidence() {
+    local label="$1" hash transaction
+    hash="$(jq -er --arg label "${label}" '.transactions[$label]' "${STATE_FILE}")"
+    transaction="$(curl --fail --silent --show-error --max-time 15 \
+        "${HORIZON_URL}/transactions/${hash}")" ||
+        die "unable to load ${label} transaction evidence from Horizon"
+    printf '%s' "${transaction}" | jq -ce --arg hash "${hash}" '
+        select(
+            .successful == true and
+            .hash == $hash and
+            (.ledger | type == "number") and
+            (.created_at | type == "string" and length > 0)
+        ) |
+        {
+            transaction_hash: .hash,
+            ledger,
+            created_at
+        }
+    ' || die "invalid ${label} transaction evidence from Horizon"
 }
 
 initialize_state() {
@@ -707,8 +728,12 @@ verify_deployment() {
 
 write_registry() {
     local temporary="${REGISTRY_FILE}.tmp" controller_xlm
+    local controller_creation blnt_usdc_creation blnt_xlm_creation
     controller_xlm="$(horizon_account "$(state_value comet_controller)" | jq -er \
         '[.balances[] | select(.asset_type == "native")][0].balance')"
+    controller_creation="$(transaction_evidence create-comet-controller)"
+    blnt_usdc_creation="$(transaction_evidence deploy-blnt-usdc)"
+    blnt_xlm_creation="$(transaction_evidence deploy-blnt-xlm)"
     jq \
         --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --arg blnt "${BLNT}" --arg usdc "${USDC}" --arg xlm "${XLM}" \
@@ -717,7 +742,10 @@ write_registry() {
         --arg join_blnt "${JOIN_BLNT}" --arg join_usdc "${JOIN_USDC}" --arg join_xlm "${JOIN_XLM}" \
         --arg join_lp "${JOIN_LP}" --arg final_blnt "${FINAL_BLNT}" \
         --arg final_usdc "${FINAL_USDC}" --arg final_xlm "${FINAL_XLM}" \
-        --arg final_lp "${FINAL_LP}" --arg controller_xlm "${controller_xlm}" '
+        --arg final_lp "${FINAL_LP}" --arg controller_xlm "${controller_xlm}" \
+        --argjson controller_creation "${controller_creation}" \
+        --argjson blnt_usdc_creation "${blnt_usdc_creation}" \
+        --argjson blnt_xlm_creation "${blnt_xlm_creation}" '
         {
             schema_version,
             network: {name: "Public Global Stellar Network", passphrase: .network_passphrase},
@@ -728,7 +756,8 @@ write_registry() {
                 locked: true,
                 thresholds: [100, 100, 100],
                 master_weight: 0,
-                residual_xlm: $controller_xlm
+                residual_xlm: $controller_xlm,
+                creation: $controller_creation
             },
             artifact: {
                 release: "v1.1.0_contracts_pkg1.0.0_cli25.1.0",
@@ -747,7 +776,8 @@ write_registry() {
                     join_balances: [$join_blnt, $join_usdc],
                     wallet_lp_join: $join_lp,
                     final_reserves: [$final_blnt, $final_usdc],
-                    final_lp_supply: $final_lp
+                    final_lp_supply: $final_lp,
+                    creation: $blnt_usdc_creation
                 },
                 blnt_xlm: {
                     contract_id: .blnt_xlm_token,
@@ -758,7 +788,8 @@ write_registry() {
                     join_balances: [$join_blnt, $join_xlm],
                     wallet_lp_join: $join_lp,
                     final_reserves: [$final_blnt, $final_xlm],
-                    final_lp_supply: $final_lp
+                    final_lp_supply: $final_lp,
+                    creation: $blnt_xlm_creation
                 }
             },
             transactions: .transactions,

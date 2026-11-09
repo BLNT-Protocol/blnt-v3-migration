@@ -1,8 +1,8 @@
 # Immutable Deployment Security Response Plan
 
 This plan applies to the immutable BLNT V3 mainnet contracts recorded in the
-[core deployment registry](../deployments/mainnet-v3-redeployment-core.json)
-and the [Fixed-pool registry](../deployments/mainnet-v3-redeployment-fixed-pool.json).
+[core deployment registry](../blnt-contracts-v3/deployments/mainnet-v3-core.json)
+and the [Fixed-pool registry](../blnt-contracts-v3/deployments/mainnet-v3-fixed-pool.json).
 It defines how contributors should respond to a critical finding without
 assuming an emergency administrator, proxy upgrade, privileged WASM
 replacement, or undisclosed recovery authority.

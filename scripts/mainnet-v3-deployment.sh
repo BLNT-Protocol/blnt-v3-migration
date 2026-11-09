@@ -15,7 +15,7 @@ unset BLEND_MAINNET_COMET_LIBRARY_ONLY
 WORK_DIR="${BLEND_MAINNET_V3_WORK_DIR:-${ROOT_DIR}/.mainnet-v3-redeployment/core}"
 CONFIG_DIR="${BLEND_MAINNET_V3_CONFIG_DIR:-${ROOT_DIR}/.mainnet-v3-redeployment/stellar-config}"
 STATE_FILE="${BLEND_MAINNET_V3_STATE_FILE:-${WORK_DIR}/state.json}"
-REGISTRY_FILE="${BLEND_MAINNET_V3_REGISTRY_FILE:-${ROOT_DIR}/deployments/mainnet-v3-redeployment-core.json}"
+REGISTRY_FILE="${BLEND_MAINNET_V3_REGISTRY_FILE:-${ROOT_DIR}/blnt-contracts-v3/deployments/mainnet-v3-core.json}"
 COMET_STATE_FILE="${BLEND_MAINNET_COMET_STATE_FILE:-${ROOT_DIR}/.mainnet-v3-redeployment/comet/state.json}"
 GRANT_FILE="${BLEND_MAINNET_V3_GRANT_FILE:-${ROOT_DIR}/.mainnet-v3/blnt-grants.json}"
 ISSUER_IDENTITY="${BLEND_MAINNET_V3_ISSUER_IDENTITY:-blnt-v3-mainnet-redeployment-issuer}"
@@ -675,23 +675,40 @@ verify_live_deployment() {
 }
 
 write_registry() {
-    local temporary
+    local temporary emitter_creation factory_creation backfill_creation backstop_creation
     temporary="${REGISTRY_FILE}.tmp"
+    emitter_creation="$(transaction_evidence deploy-v3-emitter)"
+    factory_creation="$(transaction_evidence deploy-v3-factory)"
+    backfill_creation="$(transaction_evidence deploy-blnt-backfill)"
+    backstop_creation="$(transaction_evidence deploy-v3-backstop)"
     jq \
         --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --arg pool_hash "${POOL_SHA256}" '
+        --arg source_commit "${V3_SOURCE_COMMIT}" \
+        --arg backfill_source_commit "${BACKFILL_SOURCE_COMMIT}" \
+        --arg pool_hash "${POOL_SHA256}" \
+        --argjson emitter_creation "${emitter_creation}" \
+        --argjson factory_creation "${factory_creation}" \
+        --argjson backfill_creation "${backfill_creation}" \
+        --argjson backstop_creation "${backstop_creation}" '
         {
             schema_version,
             network: {name: "Public Global Stellar Network", passphrase: .network_passphrase},
             generated_at: $generated_at,
             deployer: .wallet,
-            source_commit,
+            source_commit: $source_commit,
+            backfill_source_commit: $backfill_source_commit,
             contracts: {
                 emitter: .v3_emitter,
                 backfill: .blnt_backfill,
                 pool_factory: .v3_factory,
                 backstop: .v3_backstop,
                 pool_wasm_hash: $pool_hash
+            },
+            contract_creation: {
+                emitter: $emitter_creation,
+                backfill: $backfill_creation,
+                pool_factory: $factory_creation,
+                backstop: $backstop_creation
             },
             assets,
             comet_v1_1,

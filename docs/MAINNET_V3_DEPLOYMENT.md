@@ -62,7 +62,7 @@ After completion, run:
 make mainnet-v3-status
 ```
 
-Status re-fetches exact deployed WASM bytes and verifies the BLNT administrator, emitter recipient, empty emitter queue, BLNT:XLM migration token, backfill token bindings, allocation totals, vesting durations, conversion duration, 1:1 converted/burned accounting, and BLNT custody conservation. A successful deployment writes `deployments/mainnet-v3-redeployment-core.json`; the registry contains contract IDs, asset IDs, artifact hashes, transaction hashes, and allocation digests, but no private contributor address.
+Status re-fetches exact deployed WASM bytes and verifies the BLNT administrator, emitter recipient, empty emitter queue, BLNT:XLM migration token, backfill token bindings, allocation totals, vesting durations, conversion duration, 1:1 converted/burned accounting, and BLNT custody conservation. A successful deployment writes `blnt-contracts-v3/deployments/mainnet-v3-core.json`; the registry contains contract IDs, asset IDs, artifact hashes, transaction hashes, and allocation digests, but no private contributor address.
 
 ## Fixed lending pool
 
@@ -87,6 +87,6 @@ BLEND_MAINNET_V3_SEQUENCE_LOCK_CONFIRMED=true \
 make mainnet-v3-fixed-deploy
 ```
 
-The runner deploys the pool and configures its three reserves while the pool remains in setup status `6`. It does not fund any backstop tier, add the pool to the reward zone, configure emissions, change pool status, activate borrowing, or start a keeper. An interrupted run must be reviewed and resumed with `mainnet-v3-fixed-resume`; completed state is verified with `mainnet-v3-fixed-status` and recorded in `deployments/mainnet-v3-redeployment-fixed-pool.json`.
+The runner deploys the pool and configures its three reserves while the pool remains in setup status `6`. It does not fund any backstop tier, add the pool to the reward zone, configure emissions, change pool status, activate borrowing, or start a keeper. An interrupted run must be reviewed and resumed with `mainnet-v3-fixed-resume`; completed state is verified with `mainnet-v3-fixed-status` and recorded in `blnt-contracts-v3/deployments/mainnet-v3-fixed-pool.json`.
 
 Funding and activation remain a separate reviewed phase. Do not infer amounts, emissions, keeper behavior, or activation timing from this runbook.

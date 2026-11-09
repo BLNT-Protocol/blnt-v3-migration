@@ -8,7 +8,7 @@
   "deployed_at": "2026-11-06T20:51:07Z",
   "deployer": "GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL",
   "source": {
-    "repository": "git@github.com:BLNT-Protocol/pool-status-admin.git",
+    "repository": "git@github.com:zenith-protocols/pool-status-admin.git",
     "commit": "5b325d57a3fadefed2299684e6f765be17a51ab4",
     "rustc_version": "1.98.1",
     "stellar_cli_version": "27.0.0",

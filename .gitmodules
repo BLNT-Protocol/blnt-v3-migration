@@ -21,7 +21,7 @@
 	url = git@github.com:BLNT-Testnet/blnt-ui-testnet.git
 [submodule "pool-status-admin"]
 	path = pool-status-admin
-	url = git@github.com:BLNT-Protocol/pool-status-admin.git
+	url = git@github.com:zenith-protocols/pool-status-admin.git
 [submodule "backstop-manager"]
 	path = backstop-manager
 	url = git@github.com:BLNT-Protocol/backstop-manager.git

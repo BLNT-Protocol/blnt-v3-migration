@@ -31,3 +31,6 @@
 [submodule "blnt-backstop-manager-helper"]
 	path = blnt-backstop-manager-helper
 	url = git@github.com:BLNT-Protocol/blnt-backstop-manager-helper.git
+[submodule "auctioneer-bot"]
+	path = auctioneer-bot
+	url = git@github.com:BLNT-Protocol/auctioneer-bot.git

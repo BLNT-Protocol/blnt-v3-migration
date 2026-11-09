@@ -35,7 +35,9 @@ its mainnet deployment workflow is documented in
 funded remediation contract for pre-incident Blend lockup positions is pinned
 in `blnt-lockup-backfill-contract/`. The separate owner-authorized helper for
 atomic two-tier YieldBlent deposits and emissions claims is
-pinned in `blnt-backstop-manager-helper/`.
+pinned in `blnt-backstop-manager-helper/`. The independently versioned
+off-chain auction automation is pinned in `auctioneer-bot/`; its example
+mainnet configuration monitors Fixed Pool V3 and YieldBlent Pool by default.
 
 Blend v1/v2 LPs use Comet v1. The canonical BLNT LPs deployed for BLNT V3 use
 Comet V1.1.
@@ -111,6 +113,8 @@ with supporting Protocol-27 dependency sources pinned separately:
 - `blnt-backstop-manager-helper/` is the separately deployed two-tier
   backstop-manager orchestration helper, pinned to Rust 1.91.1, Soroban SDK
   27.0.3, and `wasm32v1-none`.
+- `auctioneer-bot/` is the Node 22 off-chain auction automation for BLNT V3. It
+  is isolated from the immutable contract build lanes.
 - `comet-contracts-v1/` is the upstream Comet V1.1 weighted-pool source at
   tag `v1.1.0` commit `b3a2d827ed6c158341f8e67ea91eb3b0395d3871`.
 - `blnt-contracts-v3/comet.wasm` is the official Comet V1.1 release artifact

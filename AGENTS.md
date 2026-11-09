@@ -62,6 +62,10 @@ git submodule update --init --recursive
   orchestration source for owner-authorized YieldBlent deposits and
   two-tier emissions claims. It MUST remain isolated from immutable V3 protocol
   behavior.
+- `auctioneer-bot` is the pinned off-chain auction automation submodule. Its
+  mainnet example configuration SHOULD monitor the reviewed Fixed Pool V3 and
+  YieldBlent Pool deployments by default, and it MUST remain outside every
+  contract build lane.
 - `deployed-artifacts/mainnet` contains exact deployed mainnet WASM compatibility
   fixtures, verified by `make verify-deployed-artifacts`.
 - `migration-harness` contains cross-version tests and test-only support
@@ -91,6 +95,8 @@ a side effect of work in this repository.
 - Two-tier backstop-manager orchestration code belongs in the
   `blnt-backstop-manager-helper/` submodule and MUST NOT become a dependency of
   the immutable V3 protocol contracts or change the manager's authority model.
+- Auction automation belongs in the `auctioneer-bot/` submodule and MUST NOT
+  become a production contract dependency or alter any deployed WASM hash.
 - Comet V1.1 source review belongs in the `comet-contracts-v1/` submodule.
   Do not modify the upstream source or replace the official
   `v1.1.0_contracts_pkg1.0.0_cli25.1.0` release artifact used by V3.

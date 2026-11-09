@@ -214,6 +214,18 @@ mainnet-backstop-manager-record:
 mainnet-backstop-manager-status:
 	bash scripts/mainnet-backstop-manager.sh status
 
+mainnet-backstop-manager-helper-plan:
+	bash scripts/mainnet-backstop-manager-helper.sh plan
+
+mainnet-backstop-manager-helper-deploy:
+	bash scripts/mainnet-backstop-manager-helper.sh deploy
+
+mainnet-backstop-manager-helper-record:
+	bash scripts/mainnet-backstop-manager-helper.sh record
+
+mainnet-backstop-manager-helper-status:
+	bash scripts/mainnet-backstop-manager-helper.sh status
+
 mainnet-lockup-backfill-plan:
 	bash scripts/mainnet-lockup-backfill.sh plan
 

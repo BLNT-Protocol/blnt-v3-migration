@@ -30,7 +30,7 @@ hashes; they MUST NOT silently replace the exact deployed fixtures.
 
 ## Baseline policy
 
-The frozen executable behavior and candidate-only changes are documented by
+The frozen executable behavior and BLNT V3-only changes are documented by
 the contract submodule's
 [composed specification](../blnt-contracts-v3/docs/SYSTEM_SPEC.md).
 Migration requirements compose separately under

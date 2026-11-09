@@ -1,7 +1,8 @@
-# Blend V3 Migration System Specification
+# BLNT V3 Migration and Deployment System Specification
 
-This document defines the scope and authority of the Blend v2-to-v3 migration,
-compatibility, deployment, and evidence repository.
+This document defines the scope and authority of the BLNT V3 migration,
+compatibility, deployment, and evidence repository. BLNT V3 is an immutable
+lending protocol derived from Blend and designed to support real-world assets.
 
 ## Repository boundary
 
@@ -105,9 +106,9 @@ production approval.
 
 ## Backstop custody deployment gate
 
-The deployment runner MUST establish Fixed Pool v3 before any other v3 pool
-and use its first plain-USDC backstop deposit to create the candidate's shared
-USDC SAC balance. It MUST then read the Protocol-27 persistent balance entries
+The deployment runner MUST establish Fixed Pool V3 before any other V3 pool
+and use its first plain-USDC backstop deposit to create the BLNT V3 backstop's
+shared USDC SAC balance. It MUST then read the Protocol-27 persistent balance entries
 for that custody and for both canonical Comet V1.1 pools' issuer-controlled underlying
 assets. Every entry MUST exist, be positive and authorized, and record
 `clawback = false`. A local issued-XLM fixture MUST satisfy the same check for

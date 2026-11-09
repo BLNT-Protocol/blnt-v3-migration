@@ -92,6 +92,7 @@ V3-only ${NETWORK_LABEL} deployment:
   external Blend V1/V2 backstop: ${EXTERNAL_BLEND_BACKSTOP}
   external legacy BLND token:    ${EXTERNAL_BLND_TOKEN}
   expected legacy BLND:USDC LP:  ${EXPECTED_EXTERNAL_BLND_USDC}
+  BLNT issuer home domain:        ${BLNT_HOME_DOMAIN:-<unset>}
 
   1. Read and verify the existing Blend backstop, reward zone, canonical LP,
      and BLND token. No transaction is submitted to the legacy lane.

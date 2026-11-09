@@ -1,7 +1,7 @@
-# Blend V2-to-V3 Token and Emitter Transition Specification
+# BLNT V3 Token and Emitter Transition Specification
 
 This document defines the approved transition from legacy BLND emissions in
-Blend v1/v2 to independent BLNT emissions in Blend v3. It composes with
+Blend v1/v2 to independent BLNT emissions in BLNT V3. It composes with
 [SYSTEM_SPEC.md](SYSTEM_SPEC.md) and the production-contract requirements in
 the pinned `blnt-contracts-v3` and `blnt-backfill-contract` submodules.
 

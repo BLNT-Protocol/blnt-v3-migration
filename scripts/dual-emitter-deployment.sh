@@ -36,8 +36,11 @@ BLNT_BACKFILL_CLAIM_TOTAL=""
 BLNT_GRANT_LIST="${BLEND_BLNT_GRANT_LIST:-[]}"
 BLNT_GRANT_TOTAL=""
 BLNT_CLAIM_TOTAL=""
-BLNT_TOKEN_NAME="Blent Token"
+BLNT_TOKEN_NAME="BLNT Protocol"
 BLNT_HOME_DOMAIN="${BLEND_BLNT_HOME_DOMAIN:-}"
+if [[ -z "${BLNT_HOME_DOMAIN}" && "${NETWORK_MODE}" == "testnet" ]]; then
+    BLNT_HOME_DOMAIN="blent.trade"
+fi
 DUAL_MODELED_V2_LP_TOTAL=$((2 * MODELED_BACKSTOP_LP_BALANCE))
 DUAL_MODELED_V3_LP_BALANCE=$((10 * SCALAR_7))
 DUAL_MODELED_BLND_MINT=$((440000 * SCALAR_7))
@@ -191,6 +194,7 @@ Dual-emitter ${NETWORK_LABEL} deployment:
      liquidation, bad-debt, interest, and protocol-fee auctions.
 
 BLNT Stellar TOML metadata name: ${BLNT_TOKEN_NAME}
+BLNT issuer home domain: ${BLNT_HOME_DOMAIN:-<unset>}
 
 No legacy-emitter queue or migration backfill is used.
 EOF

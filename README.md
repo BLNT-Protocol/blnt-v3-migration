@@ -1,13 +1,13 @@
-# Blend V3 Migration
+# BLNT V3 Migration and Deployment
 
-Experimental migration, compatibility, and deployment harness for the
-transition from Blend Protocol v2 to the v3 candidate on Stellar.
+Migration, compatibility, and deployment harness for BLNT V3, an immutable
+lending protocol derived from Blend and designed to support real-world assets.
 
-This repository pins the frozen v2 baseline and the v3 candidate contracts to
-test independent legacy/v3 emitters, cross-version behavior, and network deployments.
+This repository pins the frozen Blend v2 baseline and the BLNT V3 contracts to
+test independent legacy/V3 emitters, cross-version behavior, and network deployments.
 Production v3 protocol behavior belongs to `blnt-contracts-v3`; initial
 allocation and conversion behavior belongs to `blnt-backfill-contract`.
-This is not an official or production-ready Blend release.
+BLNT V3 is independently developed and is not an official Blend release.
 
 ## Baseline
 
@@ -37,7 +37,7 @@ in `blnt-lockup-backfill-contract/`. The separate owner-authorized helper for
 atomic two-tier YieldBlent deposits and emissions claims is
 pinned in `blnt-backstop-manager-helper/`.
 
-Blend v1/v2 LPs use Comet v1. The fresh BLNT LPs deployed for Blend v3 use
+Blend v1/v2 LPs use Comet v1. The canonical BLNT LPs deployed for BLNT V3 use
 Comet V1.1.
 
 Exact mainnet emitter, v2 backstop, pool-factory, and pool WASMs are checked in
@@ -98,7 +98,7 @@ with supporting Protocol-27 dependency sources pinned separately:
 
 - `blend-contracts-v2/` is the deployed v2 source baseline, pinned to
   Rust 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
-- `blnt-contracts-v3/` is the production candidate submodule, pinned to Rust
+- `blnt-contracts-v3/` is the production BLNT V3 submodule, pinned to Rust
   1.91.1, Soroban SDK 27.0.3, Protocol 27 tooling, and `wasm32v1-none`.
 - `blnt-backfill-contract/` is the production transition-contract submodule,
   pinned to the same Protocol-27 toolchain.
@@ -119,7 +119,7 @@ with supporting Protocol-27 dependency sources pinned separately:
   test-only support contracts.
 
 There is no SDK 26 compatibility lane. Compatibility tests span the historical
-SDK-22 implementation and the current v3 candidate.
+SDK-22 implementation and BLNT V3.
 
 ## Build and test
 
@@ -155,7 +155,7 @@ make check-v3
 ```
 
 This verifies the exact deployed fixtures and builds the SDK-27 compatibility
-probe, candidate contracts, and test-only lending oracle. It then runs the
+probe, BLNT V3 contracts, and test-only lending oracle. It then runs the
 contract suites and the deployed-WASM cross-version migration harness. Exact behavioral
 requirements remain in the contract and migration specifications rather than
 being restated here.
@@ -181,7 +181,7 @@ npm run dev:testnet
 ```
 
 Open <http://localhost:3000>. The testnet UI separates Blend's team deployment,
-this repository's v2 deployment, and the v3 candidate into V1, V2, and V3
+this repository's v2 deployment, and BLNT V3 into V1, V2, and V3
 market lanes. The configured Fixed and Custom v2/v3 pools are also seeded in
 the dashboard and backstop pool menus. Blend's current team testnet pools use
 v2 pool bytecode; the V1 lane name identifies the requested team-deployment
@@ -189,11 +189,10 @@ lane rather than claiming those contracts are historical v1 bytecode.
 
 ## Releases
 
-Automated tag-triggered releases are intentionally disabled while the v3
-candidate remains experimental and incomplete. Add a v3-specific release
-workflow only after deployable v3 contract packages and their artifact checks
-exist. The repository must not publish the historical SDK-22 contracts as v3
-artifacts.
+Automated tag-triggered releases are intentionally disabled. Release evidence
+for the deployed immutable BLNT V3 contracts is recorded by the repository's
+deployment manifests and artifact checks. The repository must not publish the
+historical SDK-22 contracts as V3 artifacts.
 
 ## Development principles
 

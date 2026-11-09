@@ -2,7 +2,7 @@
 
 - **Review date:** 2026-11-03
 - **Blend V2 baseline:** `ba22b487b2c5057a4ecc28b05b5193c28e4bd117`
-- **BLNT V3 candidate:** `5d055ca89afc9ed443d36b7ad34e3de59b487764` (`v3.0.2`)
+- **BLNT V3 deployed source:** `5d055ca89afc9ed443d36b7ad34e3de59b487764` (`v3.0.2`)
 - **Canonical Comet V1.1 source:** `b3a2d827ed6c158341f8e67ea91eb3b0395d3871` (`v1.1.0`)
 
 ## Executive summary

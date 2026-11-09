@@ -99,8 +99,10 @@ directory. The runner never reads a mainnet wallet or submits to mainnet.
 
 The on-chain classic asset and SAC expose the asset code `BLNT`; the
 human-readable name and icon are issuer metadata hosted by the issuer's home
-domain. Set `BLEND_BLNT_HOME_DOMAIN=blnt.trade` during deployment, then publish
-the following currency entry at `https://blnt.trade/.well-known/stellar.toml`,
+domain. Public-testnet deployment defaults `BLEND_BLNT_HOME_DOMAIN` to
+`blent.trade`; override it only when intentionally using another testnet
+domain. Publish the following currency entry at
+`https://blent.trade/.well-known/stellar.toml`,
 replacing the issuer placeholder with the deployment operator account:
 
 ```toml
@@ -110,9 +112,9 @@ NETWORK_PASSPHRASE = "Test SDF Network ; September 2015"
 code = "BLNT"
 issuer = "<deployment operator account>"
 display_decimals = 7
-name = "Blent Token"
-desc = "Testnet BLNT used by Blend V3"
-image = "https://blnt.trade/icons/tokens/blnd-yellow.svg"
+name = "BLNT Protocol"
+desc = "Testnet utility token for BLNT V3, an immutable lending protocol derived from Blend and designed to support real-world assets."
+image = "https://blent.trade/icons/tokens/blnt.png"
 ```
 
 ## Recorded evidence
@@ -123,7 +125,7 @@ record:
 - exact legacy and v3 emitter WASM hashes;
 - the pinned Comet V1.1 source commit and official release WASM hash;
 - BLND, BLNT, USDC, and XLM contract IDs;
-- the BLNT metadata name `Blent Token` and configured issuer home domain;
+- the BLNT metadata name `BLNT Protocol` and configured issuer home domain;
 - BLND:USDC, BLNT:USDC, and BLNT:XLM Comet V1.1 IDs;
 - separate emitter and backstop IDs;
 - the backfill-contract artifact hash, address, and immutable token bindings;

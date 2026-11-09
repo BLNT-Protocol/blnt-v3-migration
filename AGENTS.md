@@ -4,9 +4,9 @@ These instructions apply to the entire repository.
 
 ## Mission
 
-Build and evaluate migration from the incumbent Blend v2 protocol and deployed
-emitter to the experimental v3 candidate while preserving demonstrable
-cross-version compatibility.
+Maintain migration, compatibility, deployment, and evidence tooling for BLNT
+V3, an immutable lending protocol derived from Blend and designed to support
+real-world assets, while preserving demonstrable cross-version compatibility.
 
 Treat deployed v2 behavior as the default specification. V3 behavioral changes
 require an explicit justification tied to the configurable backstop waterfall, emitter
@@ -288,7 +288,8 @@ emissions.
   fresh clone with initialized submodules.
 - Preserve AGPL-3.0 notices and document the provenance of imported code and
   frozen bytecode.
-- Do not describe candidate code as audited, production-ready, or official.
+- Do not describe BLNT V3 as independently audited, production-ready, or an
+  official Blend release.
 - Do not commit, push, deploy, tag, publish, or alter external protocol state
   unless the user explicitly requests it.
 

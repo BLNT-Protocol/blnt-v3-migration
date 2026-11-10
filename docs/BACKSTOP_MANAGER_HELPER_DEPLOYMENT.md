@@ -1,13 +1,15 @@
 # YieldBlent Backstop Manager Helper Deployment
 
 This runbook deploys the immutable `blnt-backstop-manager-helper` on Stellar
-mainnet. The helper lets one configured owner atomically join both canonical
-Comet V1.1 pools, deposit the resulting LP shares into the YieldBlent
-FirstLoss and SecondLoss tiers, and claim both tiers through the existing
-backstop-manager.
+mainnet. The helper lets one configured owner atomically make BLNT-only
+deposits into both canonical Comet V1.1 pools, deposit the resulting LP shares
+into the YieldBlent FirstLoss and SecondLoss tiers, and claim both tiers
+through the existing backstop-manager.
 
-The helper never holds funds or positions. The existing backstop-manager
-remains the custodian and final authorization boundary.
+The helper holds exact BLNT inputs and newly minted LP shares only during an
+active atomic call and must restore its balances before success. The existing
+backstop-manager remains the long-lived custodian and final authorization
+boundary. Deposits consume no XLM or USDC.
 
 ## Production bindings
 
@@ -38,13 +40,13 @@ address.
 ## Release artifact
 
 Production deployment MUST use the exact optimized WASM published and
-attested by the helper repository's `v1.0.0` release workflow. Download the
+attested by the helper repository's `v1.1.0` release workflow. Download the
 release asset and set:
 
 ```bash
-export BLNT_BACKSTOP_MANAGER_HELPER_WASM="/absolute/path/to/blnt-backstop-manager-helper_v1.0.0.wasm"
-export BLNT_BACKSTOP_MANAGER_HELPER_SOURCE_TAG="v1.0.0"
-export BLNT_BACKSTOP_MANAGER_HELPER_RELEASE_TAG="v1.0.0_blnt-backstop-manager-helper_cli27.0.0"
+export BLNT_BACKSTOP_MANAGER_HELPER_WASM="/absolute/path/to/blnt-backstop-manager-helper_v1.1.0.wasm"
+export BLNT_BACKSTOP_MANAGER_HELPER_SOURCE_TAG="v1.1.0"
+export BLNT_BACKSTOP_MANAGER_HELPER_RELEASE_TAG="v1.1.0_blnt-backstop-manager-helper_cli27.0.0"
 ```
 
 The runner verifies the public repository, source tag, successful tagged

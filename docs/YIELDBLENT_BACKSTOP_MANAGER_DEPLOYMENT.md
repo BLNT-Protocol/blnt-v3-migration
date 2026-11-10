@@ -4,22 +4,18 @@ This runbook prepares and verifies a dedicated `backstop-manager` instance for
 the YieldBlent pool on Stellar mainnet. It does not transfer tokens or deposit
 into the backstop. The separately supplied owner can replace the high-scope
 manager, change the allowlists, recover held tokens, or begin the contract's
-two-step ownership transfer. The original deployment delegated management to
-the YieldBlox DAO; the source-attested v1.0.1 deployment initially assigns both
-roles to the FTAL operations account.
+two-step ownership transfer. The canonical source-attested v1.0.1 deployment
+initially assigned both roles to the FTAL operations account.
 
-## Recorded deployments
+## Recorded deployment
 
-- `deployments/mainnet-v3-yieldblent-backstop-manager.json` records the original
-  manager at `CAXUEVGOOFR6A5MEVUV6OX5G6D26NVCHIZ642AHQIMSO33ILAFFWBGCI`.
 - `deployments/mainnet-v3-yieldblent-backstop-manager-v1.0.1.json` records the
-  separately deployed, source-attested manager at
+  canonical source-attested manager at
   `CAJUD2IQOVKPDZFJZEX2MSG7PKIE2NF4CJQ2ERBU7VF52SEM5GQL7XEB`.
 
-The original instance remains deployed and retains its existing positions. The
-source-attested instance was deployed with no positions. Its exact WASM is the
-`backstop-manager_v2.1.100.wasm` asset from the GitHub release identified in
-its deployment record; do not substitute a local rebuild.
+Its exact WASM is the `backstop-manager_v2.1.100.wasm` asset from the GitHub
+release identified in its deployment record; do not substitute a local
+rebuild.
 
 ## Default deployment bindings
 
@@ -103,10 +99,10 @@ mainnet, and byte-compares the deployed WASM with the local artifact.
 Local transaction evidence and cost logs are written under the ignored
 `.mainnet-v3-backstop-manager/` directory. After successful verification, the
 script writes the public, secret-free deployment record to
-`deployments/mainnet-v3-yieldblent-backstop-manager.json`. That record is not
-created before a real deployment. If submission succeeds but the CLI exits
-before local state is updated, a rerun recovers the signed transaction hash
-from those logs and verifies its successful result and timestamp through
+`deployments/mainnet-v3-yieldblent-backstop-manager-v1.0.1.json`. That record
+is not created before a real deployment. If submission succeeds but the CLI
+exits before local state is updated, a rerun recovers the signed transaction
+hash from those logs and verifies its successful result and timestamp through
 Horizon. The registry is not written without that deployment evidence.
 
 If the contract was deployed and verified but local registry generation was

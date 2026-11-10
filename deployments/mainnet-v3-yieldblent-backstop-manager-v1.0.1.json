@@ -34,11 +34,6 @@
   "initial_state": {
     "harvest_bps": 0
   },
-  "relationship": {
-    "existing_contract_id": "CAXUEVGOOFR6A5MEVUV6OX5G6D26NVCHIZ642AHQIMSO33ILAFFWBGCI",
-    "existing_contract_remains_deployed": true,
-    "positions_migrated": false
-  },
   "transactions": {
     "upload_wasm": "c8a8b2258fa95b209f1c1a619094c1f56bca8c293def8ef9e39403611845f78f",
     "deploy_contract": "15259e3491d150d507f8150c6a7bfd1ff9911c0e0ffcebfd3bfc4ac6f06fa296"

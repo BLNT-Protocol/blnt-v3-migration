@@ -23,6 +23,5 @@ local.*
 /.mainnet-v3-lockup-backfill/
 /.mainnet-v3-lockup-backfill-v1.0.1/
 /.mainnet-v3-lockup-backfill-v1.0.2/
-/.mainnet-v3-backstop-manager-helper/
 /.mainnet-v3-backstop-manager-helper-v1.1.0/
 /.oracle-validation/

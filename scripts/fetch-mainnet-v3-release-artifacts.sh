@@ -3,8 +3,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MANIFEST="${BLEND_MAINNET_V3_ARTIFACT_MANIFEST:-${ROOT_DIR}/deployments/mainnet-v3-next-artifacts.json}"
-OUTPUT_DIR="${BLEND_MAINNET_V3_ARTIFACT_DIR:-${ROOT_DIR}/.mainnet-v3/redeployment-artifacts}"
+MANIFEST="${BLEND_MAINNET_V3_ARTIFACT_MANIFEST:-${ROOT_DIR}/deployments/mainnet-v3-release-artifacts.json}"
+OUTPUT_DIR="${BLEND_MAINNET_V3_ARTIFACT_DIR:-${ROOT_DIR}/.mainnet-v3/release-artifacts}"
 
 for command in curl grep jq shasum stellar; do
     command -v "${command}" >/dev/null 2>&1 || {
@@ -15,7 +15,7 @@ done
 
 jq -e '
     .schema_version == 1 and
-    .status == "prepared-not-deployed" and
+    .status == "deployed" and
     (.artifacts | type == "array" and length == 5) and
     ([.artifacts[].name] | unique | length) == 5 and
     ([.artifacts[].path] | unique | length) == 5 and

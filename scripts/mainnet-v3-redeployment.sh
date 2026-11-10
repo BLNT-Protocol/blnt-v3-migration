@@ -115,7 +115,7 @@ validate_manifest() {
         ) == (.allocations.initial_drop_raw | tonumber))
     ' "${PLAN_FILE}" >/dev/null || die "invalid redeployment plan: ${PLAN_FILE}"
 
-    jq -e --slurpfile releases "${ROOT_DIR}/deployments/mainnet-v3-next-artifacts.json" '
+    jq -e --slurpfile releases "${ROOT_DIR}/deployments/mainnet-v3-release-artifacts.json" '
         .contracts.source.v3_commit == $releases[0].source.v3_commit and
         .contracts.source.backfill_commit == $releases[0].source.backfill_commit and
         .contracts.emitter.sha256 == ($releases[0].artifacts[] | select(.name == "emitter").sha256) and

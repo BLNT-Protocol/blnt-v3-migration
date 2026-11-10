@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "purpose": "Source-verified release artifacts pinned for the next BLNT V3 mainnet deployment",
-  "status": "prepared-not-deployed",
+  "purpose": "Canonical source-verified release artifacts used by the BLNT V3 mainnet deployment",
+  "status": "deployed",
   "source": {
     "v3_repository": "https://github.com/BLNT-Protocol/blnt-contracts-v3",
     "v3_commit": "5d055ca89afc9ed443d36b7ad34e3de59b487764",

@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "network": {
+    "name": "Public Global Stellar Network",
+    "passphrase": "Public Global Stellar Network ; September 2015"
+  },
+  "purpose": "Atomic YieldBlent backstop-manager deposit and claim helper",
+  "deployed_at": "2026-11-10T01:26:17Z",
+  "deployment_ledger": 65397587,
+  "deployer": "GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL",
+  "contract": {
+    "contract_id": "CANSTTPOGIB5S2YYUSTVORV7QO5L5KTLQAYZYUQEAIEYAPAUT6RFDP4M",
+    "salt": "4b68125ccec168009425bd353a0a1babdb7d7fda05e49388d61d7e2062e43f7d",
+    "wasm_sha256": "cd92789d86a578432d2a2a15380e6979a2a0c27f7904ac5cf41fca5aa85b8443",
+    "wasm_size_bytes": 13495,
+    "source_repo": "github:BLNT-Protocol/blnt-backstop-manager-helper",
+    "source_commit": "fb7d61bae082a3de8273f1550a7cb61a04b2fb75",
+    "source_tag": "v1.1.0",
+    "release_tag": "v1.1.0_blnt-backstop-manager-helper_cli27.0.0",
+    "release_url": "https://github.com/BLNT-Protocol/blnt-backstop-manager-helper/releases/tag/v1.1.0_blnt-backstop-manager-helper_cli27.0.0",
+    "artifact_name": "blnt-backstop-manager-helper_v1.1.0.wasm",
+    "artifact_url": "https://github.com/BLNT-Protocol/blnt-backstop-manager-helper/releases/download/v1.1.0_blnt-backstop-manager-helper_cli27.0.0/blnt-backstop-manager-helper_v1.1.0.wasm",
+    "workflow_run_url": "https://github.com/BLNT-Protocol/blnt-backstop-manager-helper/actions/runs/42733835637",
+    "rust_version": "1.91.1 (Rust version)",
+    "soroban_sdk_version": "27.0.3#f8f32f0d0771f252377a21753a95ae0bde941ce6 (Soroban SDK version and its commit hash)",
+    "build_stellar_cli_version": "27.0.0#5a7c5fe76530bf4248477ac812fc757146b98cc4",
+    "target": "wasm32v1-none",
+    "optimization": "Cargo release opt-level=z, LTO, codegen-units=1; release-workflow output",
+    "stellar_cli_version": "stellar 27.0.0 (5a7c5fe76530bf4248477ac812fc757146b98cc4)",
+    "parent_commit": "99724ad5045480e6a856db3cc8bcba6152d4b419"
+  },
+  "constructor": {
+    "owner": "GDMCUWYGHGOM2AIWVFJVW6PW3Y77CL5BSIF67BKHOMDEZMCXHFQW7VTK",
+    "manager": "CAJUD2IQOVKPDZFJZEX2MSG7PKIE2NF4CJQ2ERBU7VF52SEM5GQL7XEB",
+    "backstop": "CAHCUKBPTW5DR5RNXOHCTJD5U76A6EEZXYZAQFRQEEQRXQ3CRUZ6Z3MO",
+    "pool": "CAUTPSQDAJEUV5XEU3EXFVYRGDJLEJGVTFJCFZCSPTDCREAMZ573VF4D",
+    "first_lp": "CA5HX3D47PQZWC2E7VWXCKH4534P2NOJEOIXAWU47MI4QV2FQUYY3FLC",
+    "second_lp": "CDQMIKIHKA5UY3FQJ2UDTLNX3GOPD3GPNZWSPTOBVOHEUMQJQXOPC7Y3",
+    "blnt": "CCBNWP5L7ZSXA3DBWCMFAVKFVRW3ZHWO7B5J557W42O64DDZNPJP7VDS",
+    "xlm": "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA",
+    "usdc": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75"
+  },
+  "expected_derived_state": {
+    "first_blnt_first": true,
+    "second_blnt_first": true
+  },
+  "transactions": {
+    "upload_wasm": {
+      "hash": "a97c917e45d1294e39ac541204334e82aad90beba0d99e26fe40080b4f2599ab",
+      "created_at": "2026-11-10T01:26:07Z",
+      "ledger": 65397585
+    },
+    "deploy_contract": {
+      "hash": "c7ce3a7a9f34c270947c324a2528b751540a3d8e615fb9a62c78268806dd722d",
+      "created_at": "2026-11-10T01:26:17Z",
+      "ledger": 65397587
+    }
+  },
+  "verification": {
+    "verified_at": "2026-11-10T01:26:22Z",
+    "artifact_matches": true,
+    "github_attestation_count": 1,
+    "attestation_predicate_type": "https://slsa.dev/provenance/v1",
+    "attestation_source_ref": "refs/tags/v1.1.0",
+    "attestation_signer_repository": "stellar-expert/soroban-build-workflow",
+    "attestation_signer_digest": "88068ec50cba931a96436869727ed08edeb76ade",
+    "source_repo_metadata": "github:BLNT-Protocol/blnt-backstop-manager-helper",
+    "constructor_readback_matches": true,
+    "manager_authorization_relationship_matches": true
+  },
+  "status_command": "make mainnet-backstop-manager-helper-status"
+}

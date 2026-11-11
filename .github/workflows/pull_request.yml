@@ -23,7 +23,6 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
-        token: ${{ secrets.SUBMODULES_TOKEN }}
         submodules: recursive
         persist-credentials: false
     - run: rustup toolchain install 1.81 --profile minimal --component rustfmt
@@ -34,7 +33,6 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
-        token: ${{ secrets.SUBMODULES_TOKEN }}
         submodules: recursive
         persist-credentials: false
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -62,7 +60,6 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
-        token: ${{ secrets.SUBMODULES_TOKEN }}
         submodules: recursive
         persist-credentials: false
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

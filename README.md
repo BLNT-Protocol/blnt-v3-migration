@@ -72,7 +72,7 @@ entirely governed by the legacy contracts.
 See [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md) for the migration repository
 boundary and [docs/MIGRATION_PROTOCOL_SPEC.md](docs/MIGRATION_PROTOCOL_SPEC.md)
 for the migration protocol. Contract behavior is composed by
-[blnt-contracts-v3/docs/SYSTEM_SPEC.md](blnt-contracts-v3/docs/SYSTEM_SPEC.md).
+[blnt-contracts-v3/docs/SYSTEM_SPEC.md](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/docs/SYSTEM_SPEC.md).
 [docs/BASELINE.md](docs/BASELINE.md) defines source and artifact policy, and
 [docs/MIGRATION_ACCEPTANCE.md](docs/MIGRATION_ACCEPTANCE.md) defines
 cross-version migration acceptance. The contract submodule's v3 specification

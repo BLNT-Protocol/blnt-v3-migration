@@ -18,7 +18,7 @@ produces a separately identified BLNT V4 release candidate on public testnet.
 This document describes that work at the system level. It is intentionally a
 companion to, rather than a replacement for, the normative specifications:
 
-- [BLNT V3 Contract Specification](../blnt-contracts-v3/docs/V3_SYSTEM_SPEC.md)
+- [BLNT V3 Contract Specification](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/docs/V3_SYSTEM_SPEC.md)
   defines the exact deployed V3 behavior.
 - [Migration and Deployment System Specification](SYSTEM_SPEC.md) defines
   source, artifact, compatibility, and deployment authority.

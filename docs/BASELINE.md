@@ -32,7 +32,7 @@ hashes; they MUST NOT silently replace the exact deployed fixtures.
 
 The frozen executable behavior and BLNT V3-only changes are documented by
 the contract submodule's
-[composed specification](../blnt-contracts-v3/docs/SYSTEM_SPEC.md).
+[composed specification](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/docs/SYSTEM_SPEC.md).
 Migration requirements compose separately under
 [SYSTEM_SPEC.md](SYSTEM_SPEC.md). Migration fixtures MUST NOT silently restate
 or redefine contract behavior.

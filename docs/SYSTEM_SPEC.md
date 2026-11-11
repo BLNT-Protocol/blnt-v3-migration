@@ -24,7 +24,7 @@ This repository owns:
 
 Contract behavior and economic policy are owned by the contract specification
 set composed by
-[`blnt-contracts-v3/docs/SYSTEM_SPEC.md`](../blnt-contracts-v3/docs/SYSTEM_SPEC.md).
+[`blnt-contracts-v3/docs/SYSTEM_SPEC.md`](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/docs/SYSTEM_SPEC.md).
 This repository MUST NOT redefine that behavior through a script, fixture,
 deployment default, or test expectation.
 

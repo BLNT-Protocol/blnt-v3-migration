@@ -27,11 +27,11 @@ This is a source-and-specification comparison, not an independent security audit
 
 The review used:
 
-- the [V2 frozen behavioral specification](blnt-contracts-v3/docs/V2_SYSTEM_SPEC.md);
-- the [V3 delta specification](blnt-contracts-v3/docs/V3_SYSTEM_SPEC.md);
-- the [public API comparison](blnt-contracts-v3/docs/V2_V3_PUBLIC_API.md);
+- the [V2 frozen behavioral specification](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/docs/V2_SYSTEM_SPEC.md);
+- the [V3 delta specification](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/docs/V3_SYSTEM_SPEC.md);
+- the [public API comparison](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/docs/V2_V3_PUBLIC_API.md);
 - the V2 and V3 Rust implementations and tests;
-- the exact deployed-V2 artifact sizes recorded in [the V2 WASM baseline](blnt-contracts-v3/wasm-size-v2-baseline.json); and
+- the exact deployed-V2 artifact sizes recorded in [the V2 WASM baseline](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/wasm-size-v2-baseline.json); and
 - the pinned Comet V1.1 source and official release artifact.
 
 At the reviewed V3 commit, `make test` completed successfully. It rebuilt the four optimized contracts, verified source metadata and the pinned Comet artifact hash, passed all reported unit and integration test binaries (586 tests in total), and successfully checked the fuzz-target crate. Passing tests are evidence of intended behavior, not a substitute for an adversarial audit.
@@ -324,7 +324,7 @@ Before treating V3 as having a stronger overall security posture than V2, the fo
 1. **Commission an independent audit of the entire V3 delta**, not only new public entry points. The audit should cover cross-contract invariants among the pool, backstop, factory, emitter, Comet pools, SACs, and optional controller.
 2. **Prioritize the highest-complexity state machines:** tier bad-debt and interest auctions, protocol-fee auctions, custody reconciliation, zero-supply debt behavior, forced exits, emissions carries, and future emitter migration.
 3. **Enforce bounded repay-all in integrations.** The V3 specification documents the unsupported `i128::MAX` sentinel, and the contract suite covers finite bounded repayment through allowance and flash-loan paths. Maintained SDK and UI integrations should preserve that rule.
-4. **Independently reproduce deployment verification.** The committed [core registry](blnt-contracts-v3/deployments/mainnet-v3-core.json), [Fixed-pool registry](blnt-contracts-v3/deployments/mainnet-v3-fixed-pool.json), and status runners provide project verification evidence; independent reviewers should rerun the read-only checks against the live contracts and compare their artifacts and bindings with the pinned deployment inputs.
+4. **Independently reproduce deployment verification.** The committed [core registry](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/deployments/mainnet-v3-core.json), [Fixed-pool registry](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/deployments/mainnet-v3-fixed-pool.json), and status runners provide project verification evidence; independent reviewers should rerun the read-only checks against the live contracts and compare their artifacts and bindings with the pinned deployment inputs.
 5. **Audit every production access controller and material generic SEP-41 reserve separately.** The core protocol cannot compensate for a controller or token that lies or changes behavior maliciously.
 6. **Monitor economic manipulation and liveness.** Track canonical LP depth/composition, cross-pool price divergence, backstop value per tier, queue ratios, pending credits, active/stale auctions, reconciliation events, reserve authorization, oracle age, emitter checkpoints, TTL horizons, and keeper success.
 7. **Stress test spot manipulation around one transaction.** Simulate swaps/donations before reward-zone changes, bad-debt creation, interest-auction creation, and protocol-fee creation, including flash-liquidity assumptions.
@@ -343,17 +343,17 @@ Accordingly, the fair characterization is not “V3 is safer than V2” without 
 
 ## Source references
 
-- [BLNT V3 specification index](blnt-contracts-v3/docs/SYSTEM_SPEC.md)
-- [Frozen Blend V2 behavior](blnt-contracts-v3/docs/V2_SYSTEM_SPEC.md)
-- [BLNT V3 changes](blnt-contracts-v3/docs/V3_SYSTEM_SPEC.md)
-- [V2/V3 public API comparison](blnt-contracts-v3/docs/V2_V3_PUBLIC_API.md)
-- [V3 exact custody snapshots](blnt-contracts-v3/pool/src/pool/submit.rs)
-- [V3 reserve custody and reconciliation](blnt-contracts-v3/pool/src/pool/gulp.rs)
-- [V3 reserve clawback](blnt-contracts-v3/pool/src/pool/clawback.rs)
-- [V3 permission checks](blnt-contracts-v3/pool/src/access.rs)
-- [V3 forced exits](blnt-contracts-v3/pool/src/pool/permissioned.rs)
-- [V3 emitter migration checks](blnt-contracts-v3/emitter/src/backstop_manager.rs)
-- [V3 build profile](blnt-contracts-v3/Cargo.toml)
+- [BLNT V3 specification index](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/docs/SYSTEM_SPEC.md)
+- [Frozen Blend V2 behavior](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/docs/V2_SYSTEM_SPEC.md)
+- [BLNT V3 changes](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/docs/V3_SYSTEM_SPEC.md)
+- [V2/V3 public API comparison](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/docs/V2_V3_PUBLIC_API.md)
+- [V3 exact custody snapshots](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/pool/src/pool/submit.rs)
+- [V3 reserve custody and reconciliation](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/pool/src/pool/gulp.rs)
+- [V3 reserve clawback](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/pool/src/pool/clawback.rs)
+- [V3 permission checks](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/pool/src/access.rs)
+- [V3 forced exits](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/pool/src/pool/permissioned.rs)
+- [V3 emitter migration checks](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/emitter/src/backstop_manager.rs)
+- [V3 build profile](https://github.com/BLNT-Protocol/blnt-contracts-v3/blob/main/Cargo.toml)
 - [Blend V2 audit directory](blend-contracts-v2/audits)
 - [Official pinned Comet V1.1 source](comet-contracts-v1)
 - [Comet V1.1 release](https://github.com/CometDEX/comet-contracts-v1/releases/tag/v1.1.0)

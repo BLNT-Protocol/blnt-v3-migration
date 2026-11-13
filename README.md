@@ -48,10 +48,8 @@ deployed bytes, rather than a local rebuild, are the authoritative
 compatibility and isolated-migration fixtures. Run `make verify-deployed-artifacts` to
 verify both inputs.
 
-GitHub Actions requires a `SUBMODULES_TOKEN` repository secret with read
-access to the private `blnt-contracts-v3`, `blnt-sdk-js`, and `blnt-ui`
-repositories, plus `blnt-backfill-contract` and
-`blnt-lockup-backfill-contract` and `blnt-backstop-manager-helper`.
+All source and tooling submodules required by GitHub Actions are public. CI
+initializes them recursively without a private-repository access token.
 
 V3 no longer replaces or depends on the deployed BLND emitter. The legacy
 emitter remains with v1/v2, while v3 deploys a separate emitter that creates

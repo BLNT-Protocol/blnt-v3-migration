@@ -47,7 +47,10 @@ test-v2-positions-survive-migration: verify-deployed-artifacts build-v3
 		--test v2_positions_survive_migration \
 		--locked
 
-test-all: test check-v3
+test-all: test check-v3 test-emissions-keeper-recovery
+
+test-emissions-keeper-recovery:
+	bash scripts/test-emissions-keeper-recovery.sh
 
 dual-emitter-plan:
 	bash scripts/dual-emitter-deployment.sh plan

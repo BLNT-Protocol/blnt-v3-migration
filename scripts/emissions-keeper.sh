@@ -8,6 +8,7 @@ WORK_DIR="${BLEND_KEEPER_WORK_DIR:-${ROOT_DIR}/.testnet-production/dual-emitter-
 CONFIG_DIR="${BLEND_KEEPER_CONFIG_DIR:-${ROOT_DIR}/.testnet-production/stellar-config}"
 STATE_FILE="${BLEND_KEEPER_STATE_FILE:-${WORK_DIR}/dual-emitter-state.json}"
 SOURCE_ACCOUNT="${BLEND_KEEPER_SOURCE_ACCOUNT:-blend-v3-dual-20260830-operator}"
+EXPECTED_SOURCE_PUBLIC_KEY="${BLEND_KEEPER_EXPECTED_SOURCE_PUBLIC_KEY:-}"
 INCLUSION_FEE="${BLEND_KEEPER_INCLUSION_FEE:-10000}"
 INTERVAL_SECONDS="${BLEND_KEEPER_INTERVAL_SECONDS:-3600}"
 ORACLE_REFRESH_INTERVAL_SECONDS="${BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS:-3600}"
@@ -35,8 +36,8 @@ refreshes the controlled fixture-oracle histories when they are at least one
 hour old. The default keeper interval is one hour. Configuration may be overridden with
 BLEND_KEEPER_REGISTRY, BLEND_KEEPER_WORK_DIR, BLEND_KEEPER_CONFIG_DIR,
 BLEND_KEEPER_STATE_FILE, BLEND_KEEPER_SOURCE_ACCOUNT, BLEND_KEEPER_RPC_URL,
-BLEND_KEEPER_INCLUSION_FEE, BLEND_KEEPER_INTERVAL_SECONDS, and
-BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS.
+BLEND_KEEPER_EXPECTED_SOURCE_PUBLIC_KEY, BLEND_KEEPER_INCLUSION_FEE,
+BLEND_KEEPER_INTERVAL_SECONDS, and BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS.
 EOF
 }
 
@@ -56,6 +57,11 @@ require_command() {
 require_contract_id() {
     local value="$1" label="$2"
     [[ "${value}" =~ ^C[A-Z2-7]{55}$ ]] || die "invalid ${label}: ${value}"
+}
+
+require_public_key() {
+    local value="$1" label="$2"
+    [[ "${value}" =~ ^G[A-Z2-7]{55}$ ]] || die "invalid ${label}: ${value}"
 }
 
 require_positive_integer() {
@@ -203,6 +209,21 @@ refresh_oracles_if_due() {
 
 stellar_cli() {
     stellar --config-dir "${CONFIG_DIR}" "$@"
+}
+
+validate_source_identity() {
+    local derived_public_key
+
+    if ! derived_public_key="$(stellar_cli keys public-key "${SOURCE_ACCOUNT}" 2>&1)"; then
+        note "Keeper source identity ${SOURCE_ACCOUNT} is unavailable: ${derived_public_key}"
+        return 1
+    fi
+    if [[ -n "${EXPECTED_SOURCE_PUBLIC_KEY}" &&
+        "${derived_public_key}" != "${EXPECTED_SOURCE_PUBLIC_KEY}" ]]
+    then
+        note "Keeper source identity ${SOURCE_ACCOUNT} resolved to unexpected public key ${derived_public_key}."
+        return 1
+    fi
 }
 
 invoke() {
@@ -657,6 +678,10 @@ run_forever() {
     while (( STOP_REQUESTED == 0 )); do
         pass_number=$((pass_number + 1))
         note "Beginning scheduled pass ${pass_number}."
+        if ! validate_source_identity; then
+            note "Fatal keeper source-identity preflight failure; exiting for supervisor recovery."
+            return 1
+        fi
         if ! run_pass; then
             note "Scheduled pass ${pass_number} failed; the keeper will retry on the next interval."
         fi
@@ -689,14 +714,27 @@ main() {
     require_positive_integer \
         "${ORACLE_REFRESH_INTERVAL_SECONDS}" \
         "BLEND_KEEPER_ORACLE_REFRESH_INTERVAL_SECONDS"
+    if [[ -n "${EXPECTED_SOURCE_PUBLIC_KEY}" ]]; then
+        require_public_key \
+            "${EXPECTED_SOURCE_PUBLIC_KEY}" \
+            "BLEND_KEEPER_EXPECTED_SOURCE_PUBLIC_KEY"
+    fi
     load_configuration
     export STELLAR_INCLUSION_FEE="${INCLUSION_FEE}"
 
     case "${command}" in
-        plan) plan_pass ;;
-        once) run_pass ;;
+        plan)
+            validate_source_identity || die "keeper source-identity preflight failed"
+            plan_pass
+            ;;
+        once)
+            validate_source_identity || die "keeper source-identity preflight failed"
+            run_pass
+            ;;
         run) run_forever ;;
     esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

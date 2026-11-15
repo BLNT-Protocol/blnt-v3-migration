@@ -90,3 +90,23 @@ make mainnet-v3-fixed-deploy
 The runner deploys the pool and configures its three reserves while the pool remains in setup status `6`. It does not fund any backstop tier, add the pool to the reward zone, configure emissions, change pool status, activate borrowing, or start a keeper. An interrupted run must be reviewed and resumed with `mainnet-v3-fixed-resume`; completed state is verified with `mainnet-v3-fixed-status` and recorded in `blnt-contracts-v3/deployments/mainnet-v3-fixed-pool.json`.
 
 Funding and activation remain a separate reviewed phase. Do not infer amounts, emissions, keeper behavior, or activation timing from this runbook.
+
+## Mainnet emissions keeper recovery
+
+The mainnet keeper imports its protected account file into a mode-`0700`
+temporary Stellar CLI configuration and verifies the derived public key before
+starting. Temporary directories are disposable, so every scheduled pass also
+resolves the configured identity and compares it with the pinned keeper public
+key before performing any contract calls.
+
+A missing or mismatched identity is a fatal local configuration error. The
+keeper exits without attempting the pass so its `launchd` supervisor can
+restart the wrapper, reload the protected account file, and create a fresh
+temporary identity. RPC failures and other pass-level network errors remain
+transient: they are logged and retried at the next configured interval rather
+than causing a signer reload.
+
+The recovery behavior requires a supervisor such as the installed `launchd`
+job with `KeepAlive` enabled. A keeper started directly with
+`make mainnet-v3-keeper` exits on identity loss and must be restarted by its
+caller.
